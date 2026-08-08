@@ -1,0 +1,845 @@
+<title>글로벌 슈퍼마켓 분석 대시보드</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --gridline: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --blue: #2a78d6;
+    --blue-soft: rgba(42,120,214,0.10);
+    --red: #e34948;
+    --red-soft: rgba(227,73,72,0.10);
+    --green: #008300;
+    --success-text: #006300;
+    --cat-1: #2a78d6;
+    --cat-2: #008300;
+    --cat-3: #e87ba4;
+    --cat-4: #eda100;
+    --critical: #d03b3b;
+    --card-shadow: 0 1px 2px rgba(11,11,11,0.06), 0 1px 1px rgba(11,11,11,0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --gridline: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --blue: #3987e5;
+      --blue-soft: rgba(57,135,229,0.14);
+      --red: #e66767;
+      --red-soft: rgba(230,103,103,0.14);
+      --green: #008300;
+      --success-text: #0ca30c;
+      --cat-1: #3987e5;
+      --cat-2: #008300;
+      --cat-3: #d55181;
+      --cat-4: #c98500;
+      --critical: #e66767;
+      --card-shadow: 0 1px 2px rgba(0,0,0,0.3), 0 1px 1px rgba(0,0,0,0.2);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --page: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --gridline: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255,255,255,0.10);
+    --blue: #3987e5;
+    --blue-soft: rgba(57,135,229,0.14);
+    --red: #e66767;
+    --red-soft: rgba(230,103,103,0.14);
+    --green: #008300;
+    --success-text: #0ca30c;
+    --cat-1: #3987e5;
+    --cat-2: #008300;
+    --cat-3: #d55181;
+    --cat-4: #c98500;
+    --critical: #e66767;
+    --card-shadow: 0 1px 2px rgba(0,0,0,0.3), 0 1px 1px rgba(0,0,0,0.2);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 64px; }
+
+  header.top { margin-bottom: 24px; }
+  header.top h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
+  header.top p { font-size: 13px; color: var(--text-secondary); margin: 0; }
+
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+  .stat-tile {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    box-shadow: var(--card-shadow);
+  }
+  .stat-tile .label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+  .stat-tile .value { font-size: 22px; font-weight: 600; line-height: 1.1; }
+  .stat-tile .value.critical { color: var(--critical); }
+  .stat-tile .delta { font-size: 12px; margin-top: 6px; }
+  .stat-tile .delta.good { color: var(--success-text); }
+  .stat-tile .note { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+  .stat-tile svg.spark { display: block; margin-top: 6px; }
+
+  section.block { margin-bottom: 30px; }
+  section.block > h2 { font-size: 16px; font-weight: 700; margin: 0 0 4px; }
+  section.block > p.desc { font-size: 13px; color: var(--text-secondary); margin: 0 0 14px; max-width: 760px; }
+
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+  .card-grid.single { grid-template-columns: 1fr; }
+
+  figure.chart-card {
+    margin: 0;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 16px 12px;
+    box-shadow: var(--card-shadow);
+  }
+  figure.chart-card .card-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 4px;
+  }
+  figure.chart-card h3 { font-size: 13px; font-weight: 600; margin: 0; }
+  figure.chart-card .legend { display: flex; gap: 12px; font-size: 11px; color: var(--text-secondary); margin: 4px 0 6px; }
+  figure.chart-card .legend .item { display: flex; align-items: center; gap: 5px; }
+  figure.chart-card .legend .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .chart-scroll { overflow-x: auto; }
+  figure.chart-card svg { display: block; width: 100%; height: auto; }
+  figure.chart-card svg text { fill: var(--text-secondary); font-size: 11px; font-family: inherit; }
+  figure.chart-card svg text.value-label { fill: var(--text-primary); font-variant-numeric: tabular-nums; font-size: 11px; }
+  figure.chart-card svg .gridline { stroke: var(--gridline); stroke-width: 1; }
+  figure.chart-card svg .baseline { stroke: var(--baseline); stroke-width: 1; }
+  figure.chart-card svg .hit { fill: transparent; cursor: pointer; }
+  figure.chart-card svg .mark { transition: opacity .1s ease; }
+  figure.chart-card svg .mark.dim { opacity: .55; }
+
+  .table-toggle {
+    font-size: 11px; color: var(--text-secondary); background: none; border: 1px solid var(--border);
+    border-radius: 6px; padding: 3px 8px; cursor: pointer; font-family: inherit;
+  }
+  .table-toggle:hover { color: var(--text-primary); }
+  .data-table { display: none; margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+  .data-table.open { display: block; }
+  .data-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .data-table th, .data-table td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--gridline); font-variant-numeric: tabular-nums; }
+  .data-table th:first-child, .data-table td:first-child { text-align: left; font-variant-numeric: normal; }
+  .data-table th { color: var(--text-muted); font-weight: 500; }
+
+  .callout {
+    display: flex; align-items: center; gap: 18px; background: var(--red-soft);
+    border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin-bottom: 14px;
+  }
+  .callout .big { font-size: 30px; font-weight: 700; color: var(--critical); white-space: nowrap; }
+  .callout .txt { font-size: 13px; color: var(--text-secondary); }
+  .callout .txt strong { color: var(--text-primary); }
+
+  .reco-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .reco-card {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; box-shadow: var(--card-shadow);
+  }
+  .reco-card .n { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+  .reco-card h4 { font-size: 13px; margin: 0 0 6px; }
+  .reco-card p { font-size: 12.5px; color: var(--text-secondary); margin: 0; line-height: 1.5; }
+
+  footer.foot { font-size: 11px; color: var(--text-muted); margin-top: 36px; border-top: 1px solid var(--border); padding-top: 12px; }
+
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 50; background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px;
+    box-shadow: var(--card-shadow); opacity: 0; transition: opacity .08s ease; max-width: 220px;
+  }
+  #tooltip .tt-title { color: var(--text-secondary); margin-bottom: 3px; }
+  #tooltip .tt-row { display: flex; justify-content: space-between; gap: 10px; }
+  #tooltip .tt-row .k { display: flex; align-items: center; gap: 5px; color: var(--text-secondary); }
+  #tooltip .tt-row .k .key-line { width: 9px; height: 2px; display: inline-block; }
+  #tooltip .tt-row .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <h1>글로벌 슈퍼마켓 분석 대시보드</h1>
+    <p>Global Supermarket Analysis · 2019–2022 · 51,290건의 거래 데이터 기반 EDA &amp; 손실 분석 결과</p>
+  </header>
+
+  <div class="kpi-row" id="kpiRow"></div>
+
+  <section class="block">
+    <h2>매출 · 이익 추이</h2>
+    <p class="desc">월별 거래 건수와 이익 추이입니다. 2022년 거래량이 전년 대비 27% 늘며 하반기(9–12월)에 뚜렷한 성수기 피크가 나타납니다.</p>
+    <div class="card-grid" id="trendCharts"></div>
+  </section>
+
+  <section class="block">
+    <h2>지역별 손익</h2>
+    <p class="desc">시장(Market Area) 및 주문 지역(Order Region) 기준 순이익입니다. APAC·EU·US·LATAM은 매출 규모가 크지만 그만큼 손실 규모도 커, 이익과 손실이 함께 늘어나는 구조입니다.</p>
+    <div class="card-grid" id="regionCharts"></div>
+  </section>
+
+  <section class="block">
+    <h2>카테고리 · 서브카테고리별 손익</h2>
+    <p class="desc">서브카테고리별 순이익입니다. <strong style="color:var(--critical)">Tables</strong>는 전 서브카테고리 중 유일하게 순손실을 기록해 마진 압박의 핵심 요인으로 나타납니다.</p>
+    <div class="card-grid single" id="categoryCharts"></div>
+  </section>
+
+  <section class="block">
+    <h2>할인 · 손실 심층 분석</h2>
+    <p class="desc">할인율 구간별 거래 비중과 손실 비중, 그리고 Tables 서브카테고리의 제조사별 손익입니다.</p>
+    <div class="callout" id="headlineCallout"></div>
+    <div class="card-grid" id="discountCharts"></div>
+    <div class="card-grid single" id="tablesMfrChart" style="margin-top:14px;"></div>
+  </section>
+
+  <section class="block">
+    <h2>배송 분석</h2>
+    <p class="desc">배송 방식(Ship Mode) 분포와 주문일→배송일 소요 기간(ETA, 일 단위) 분포입니다.</p>
+    <div class="card-grid" id="shipCharts"></div>
+  </section>
+
+  <section class="block">
+    <h2>전략적 제언</h2>
+    <p class="desc">위 분석 결과를 바탕으로 한 4가지 실행 제언입니다.</p>
+    <div class="reco-grid" id="recoGrid"></div>
+  </section>
+
+  <footer class="foot">
+    데이터: Global Supermarket (51,290 rows, 2019–2022) · 원본 분석: global_supermarket.ipynb · 이 대시보드는 원본 노트북/README의 집계 로직을 재현하여 생성한 정적 요약입니다.
+  </footer>
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+const DATA = {
+  "meta": { "n_transactions": 51290 },
+  "kpi": {
+    "total_sales": 12642905.0,
+    "total_profit": 1467457.29,
+    "margin_pct": 11.61,
+    "avg_discount_pct": 14.29,
+    "n_transactions": 51290,
+    "yoy_transaction_growth_pct": { "2020": 21.8, "2021": 25.9, "2022": 27.0 },
+    "discount_profit_correlation": -0.316
+  },
+  "yearly_counts": [
+    {"year": 2019, "count": 8998},
+    {"year": 2020, "count": 10962},
+    {"year": 2021, "count": 13799},
+    {"year": 2022, "count": 17531}
+  ],
+  "monthly_series": [
+    {"month":"2019-01","sales":98902.0,"profit":8321.8,"count":433},
+    {"month":"2019-02","sales":91152.0,"profit":12417.91,"count":378},
+    {"month":"2019-03","sales":145726.0,"profit":15303.57,"count":539},
+    {"month":"2019-04","sales":116927.0,"profit":12902.32,"count":564},
+    {"month":"2019-05","sales":146762.0,"profit":12183.83,"count":566},
+    {"month":"2019-06","sales":215214.0,"profit":23415.25,"count":917},
+    {"month":"2019-07","sales":115518.0,"profit":5585.0,"count":495},
+    {"month":"2019-08","sales":207570.0,"profit":23713.67,"count":878},
+    {"month":"2019-09","sales":290230.0,"profit":35776.88,"count":1052},
+    {"month":"2019-10","sales":199070.0,"profit":25963.42,"count":774},
+    {"month":"2019-11","sales":298499.0,"profit":32709.18,"count":1139},
+    {"month":"2019-12","sales":333941.0,"profit":40647.98,"count":1263},
+    {"month":"2020-01","sales":135775.0,"profit":10401.64,"count":539},
+    {"month":"2020-02","sales":100521.0,"profit":15000.1,"count":429},
+    {"month":"2020-03","sales":163092.0,"profit":17992.92,"count":662},
+    {"month":"2020-04","sales":161060.0,"profit":17366.97,"count":657},
+    {"month":"2020-05","sales":208370.0,"profit":29876.7,"count":840},
+    {"month":"2020-06","sales":256181.0,"profit":34407.15,"count":1136},
+    {"month":"2020-07","sales":145247.0,"profit":15585.39,"count":659},
+    {"month":"2020-08","sales":303158.0,"profit":43573.88,"count":1083},
+    {"month":"2020-09","sales":289390.0,"profit":27776.18,"count":1223},
+    {"month":"2020-10","sales":252942.0,"profit":30662.88,"count":990},
+    {"month":"2020-11","sales":323512.0,"profit":31820.72,"count":1460},
+    {"month":"2020-12","sales":338245.0,"profit":32950.75,"count":1284},
+    {"month":"2021-01","sales":199197.0,"profit":26810.56,"count":709},
+    {"month":"2021-02","sales":167247.0,"profit":23762.5,"count":605},
+    {"month":"2021-03","sales":198591.0,"profit":23433.77,"count":766},
+    {"month":"2021-04","sales":177835.0,"profit":19462.04,"count":785},
+    {"month":"2021-05","sales":260525.0,"profit":28495.69,"count":1057},
+    {"month":"2021-06","sales":396513.0,"profit":45478.41,"count":1530},
+    {"month":"2021-07","sales":229940.0,"profit":28863.83,"count":925},
+    {"month":"2021-08","sales":326491.0,"profit":31023.67,"count":1442},
+    {"month":"2021-09","sales":376626.0,"profit":38905.67,"count":1682},
+    {"month":"2021-10","sales":293423.0,"profit":42433.22,"count":1100},
+    {"month":"2021-11","sales":373996.0,"profit":48063.0,"count":1596},
+    {"month":"2021-12","sales":405476.0,"profit":50202.87,"count":1602},
+    {"month":"2022-01","sales":241267.0,"profit":28001.39,"count":918},
+    {"month":"2022-02","sales":184848.0,"profit":19751.7,"count":756},
+    {"month":"2022-03","sales":263110.0,"profit":37357.26,"count":1068},
+    {"month":"2022-04","sales":242781.0,"profit":23782.3,"count":1051},
+    {"month":"2022-05","sales":288404.0,"profit":33953.56,"count":1284},
+    {"month":"2022-06","sales":401843.0,"profit":43778.6,"count":1748},
+    {"month":"2022-07","sales":258718.0,"profit":28035.87,"count":1087},
+    {"month":"2022-08","sales":456633.0,"profit":53542.89,"count":1675},
+    {"month":"2022-09","sales":481186.0,"profit":67979.45,"count":2018},
+    {"month":"2022-10","sales":422785.0,"profit":58209.83,"count":1626},
+    {"month":"2022-11","sales":555312.0,"profit":62856.59,"count":2147},
+    {"month":"2022-12","sales":503154.0,"profit":46916.52,"count":2153}
+  ],
+  "by_sub_category": [
+    {"key":"Tables","total":-64083.39,"loss":-144123.15,"gain":80039.76},
+    {"key":"Fasteners","total":11525.42,"loss":-6273.3,"gain":17798.72},
+    {"key":"Labels","total":15010.51,"loss":-3760.77,"gain":18771.28},
+    {"key":"Supplies","total":22583.26,"loss":-18184.43,"gain":40767.69},
+    {"key":"Envelopes","total":29601.12,"loss":-10863.57,"gain":40464.68},
+    {"key":"Furnishings","total":46967.43,"loss":-28514.5,"gain":75481.92},
+    {"key":"Art","total":57953.91,"loss":-21660.63,"gain":79614.54},
+    {"key":"Machines","total":58867.87,"loss":-78672.74,"gain":137540.61},
+    {"key":"Paper","total":59207.68,"loss":-10299.49,"gain":69507.18},
+    {"key":"Binders","total":72449.85,"loss":-52884.06,"gain":125333.91},
+    {"key":"Storage","total":108461.49,"loss":-76063.98,"gain":184525.47},
+    {"key":"Accessories","total":129626.31,"loss":-39857.5,"gain":169483.8},
+    {"key":"Chairs","total":140396.27,"loss":-96084.9,"gain":236481.16},
+    {"key":"Appliances","total":141680.59,"loss":-63991.69,"gain":205672.28},
+    {"key":"Bookcases","total":161924.42,"loss":-101446.3,"gain":263370.72},
+    {"key":"Phones","total":216717.01,"loss":-96417.66,"gain":313134.67},
+    {"key":"Copiers","total":258567.55,"loss":-71547.5,"gain":330115.05}
+  ],
+  "by_market_area": [
+    {"key":"Canada","total":17817.39,"loss":0.0,"gain":17817.39},
+    {"key":"EMEA","total":43897.97,"loss":-123065.91,"gain":166963.88},
+    {"key":"Africa","total":88871.63,"loss":-88875.03,"gain":177746.66},
+    {"key":"LATAM","total":221643.49,"loss":-165817.16,"gain":387460.65},
+    {"key":"US","total":286397.02,"loss":-156131.29,"gain":442528.31},
+    {"key":"EU","total":372829.74,"loss":-186189.0,"gain":559018.74},
+    {"key":"APAC","total":436000.05,"loss":-200567.76,"gain":636567.81}
+  ],
+  "by_order_region": [
+    {"key":"Canada","total":17817.39,"loss":0.0,"gain":17817.39},
+    {"key":"Southeast Asia","total":17852.33,"loss":-89471.73,"gain":107324.06},
+    {"key":"Caribbean","total":34571.32,"loss":-24259.92,"gain":58831.25},
+    {"key":"EMEA","total":43897.97,"loss":-123065.91,"gain":166963.88},
+    {"key":"Africa","total":88871.63,"loss":-88875.03,"gain":177746.66},
+    {"key":"East","total":91522.78,"loss":-49590.61,"gain":141113.39},
+    {"key":"West","total":108418.45,"loss":-22720.96,"gain":131139.41},
+    {"key":"Oceania","total":120089.11,"loss":-55973.18,"gain":176062.3},
+    {"key":"Central Asia","total":132480.19,"loss":-29568.05,"gain":162048.24},
+    {"key":"South","total":140355.77,"loss":-157234.75,"gain":297590.51},
+    {"key":"North Asia","total":165578.42,"loss":-25554.8,"gain":191133.22},
+    {"key":"North","total":194597.95,"loss":-52134.84,"gain":246732.79},
+    {"key":"Central","total":311403.98,"loss":-202196.37,"gain":513600.35}
+  ],
+  "discount_buckets": [
+    {"bucket":"0-10%","count":29620,"loss":-1135.51,"gain":1850955.86},
+    {"bucket":"10-20%","count":5344,"loss":-33076.75,"gain":347679.91},
+    {"bucket":"20-30%","count":5625,"loss":-54569.67,"gain":170815.77},
+    {"bucket":"30-40%","count":563,"loss":-51069.12,"gain":9016.28},
+    {"bucket":"40-50%","count":4333,"loss":-209583.57,"gain":9635.63},
+    {"bucket":"50-60%","count":1655,"loss":-168094.1,"gain":0.0},
+    {"bucket":"60-70%","count":2046,"loss":-175082.07,"gain":0.0},
+    {"bucket":"70-80%","count":1786,"loss":-186350.48,"gain":0.0},
+    {"bucket":"80-90%","count":318,"loss":-41684.88,"gain":0.0},
+    {"bucket":"90-100%","count":0,"loss":0.0,"gain":0.0}
+  ],
+  "headline": { "hi_discount_txn_share_pct": 13.6, "hi_discount_loss_share_pct": 68.2 },
+  "tables_by_manufacturer": [
+    {"manufacturer":"Bevis","profit":-14918.74},
+    {"manufacturer":"Barricks","profit":-13233.17},
+    {"manufacturer":"Lesro","profit":-13097.77},
+    {"manufacturer":"Chromcraft","profit":-9930.55},
+    {"manufacturer":"Hon","profit":-4341.09},
+    {"manufacturer":"Balt","profit":-1775.29},
+    {"manufacturer":"Riverside","profit":-1563.33},
+    {"manufacturer":"Bush","profit":-1555.72},
+    {"manufacturer":"Bretford","profit":-1363.06},
+    {"manufacturer":"BoxOffice","profit":-1148.44},
+    {"manufacturer":"BPI","profit":-795.97},
+    {"manufacturer":"KI","profit":-727.7},
+    {"manufacturer":"Iceberg","profit":-392.55},
+    {"manufacturer":"Laminate","profit":-206.53},
+    {"manufacturer":"Office","profit":-66.83},
+    {"manufacturer":"Anderson","profit":-17.51},
+    {"manufacturer":"Safco","profit":34.07},
+    {"manufacturer":"Global","profit":354.03},
+    {"manufacturer":"SAFCO","profit":662.76}
+  ],
+  "ship_mode_dist": [
+    {"mode":"Standard Class","count":30775},
+    {"mode":"Second Class","count":10309},
+    {"mode":"First Class","count":7505},
+    {"mode":"Same Day","count":2701}
+  ],
+  "eta_dist": [
+    {"eta":0,"count":2600},{"eta":1,"count":1662},{"eta":2,"count":7026},{"eta":3,"count":5035},
+    {"eta":4,"count":14434},{"eta":5,"count":11221},{"eta":6,"count":6255},{"eta":7,"count":3057}
+  ]
+};
+
+/* ---------- helpers ---------- */
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  if (attrs) for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function text(str, attrs, parent, cls) {
+  const t = el('text', attrs, parent);
+  if (cls) t.setAttribute('class', cls);
+  t.textContent = str;
+  return t;
+}
+function css(varName) {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+function fmtMoney(v) {
+  const sign = v < 0 ? '-' : '';
+  const a = Math.abs(v);
+  if (a >= 1e6) return sign + '$' + (a / 1e6).toFixed(2) + 'M';
+  if (a >= 1e3) return sign + '$' + (a / 1e3).toFixed(1) + 'K';
+  return sign + '$' + a.toFixed(0);
+}
+function fmtNum(v) { return Math.round(v).toLocaleString('en-US'); }
+function fmtPct(v, d) { return v.toFixed(d === undefined ? 1 : d) + '%'; }
+
+function niceNum(range, round) {
+  const exp = Math.floor(Math.log10(range || 1));
+  const f = range / Math.pow(10, exp);
+  let nf;
+  if (round) { nf = f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10; }
+  else { nf = f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10; }
+  return nf * Math.pow(10, exp);
+}
+function niceTicks(min, max, count) {
+  count = count || 4;
+  if (min === max) { max = min + 1; }
+  const range = niceNum(max - min, false);
+  const step = niceNum(range / (count - 1), true);
+  const niceMin = Math.floor(min / step) * step;
+  const niceMax = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let v = niceMin; v <= niceMax + step * 1e-6; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
+  return ticks;
+}
+
+function hBarPath(x0, x1, y, h, r) {
+  const dir = x1 >= x0 ? 1 : -1;
+  const w = Math.abs(x1 - x0);
+  const rr = Math.max(0, Math.min(r, w, h / 2));
+  if (w < 0.5) return `M${x0},${y} H${x1} V${y + h} H${x0} Z`;
+  if (dir > 0) {
+    return `M${x0},${y} H${x1 - rr} Q${x1},${y} ${x1},${y + rr} V${y + h - rr} Q${x1},${y + h} ${x1 - rr},${y + h} H${x0} Z`;
+  }
+  return `M${x0},${y} H${x1 + rr} Q${x1},${y} ${x1},${y + rr} V${y + h - rr} Q${x1},${y + h} ${x1 + rr},${y + h} H${x0} Z`;
+}
+function vBarPath(x, y0, y1, w, r) {
+  const dir = y1 <= y0 ? 1 : -1;
+  const h = Math.abs(y1 - y0);
+  const rr = Math.max(0, Math.min(r, w / 2, h));
+  if (h < 0.5) return `M${x},${y0} H${x + w} V${y1} H${x} Z`;
+  if (dir > 0) {
+    return `M${x},${y0} V${y1 + rr} Q${x},${y1} ${x + rr},${y1} H${x + w - rr} Q${x + w},${y1} ${x + w},${y1 + rr} V${y0} Z`;
+  }
+  return `M${x},${y0} V${y1 - rr} Q${x},${y1} ${x + rr},${y1} H${x + w - rr} Q${x + w},${y1} ${x + w},${y1 - rr} V${y0} Z`;
+}
+
+/* ---------- tooltip ---------- */
+const tooltipEl = document.getElementById('tooltip');
+function showTooltip(clientX, clientY, title, rows) {
+  tooltipEl.textContent = '';
+  const t = document.createElement('div');
+  t.className = 'tt-title';
+  t.textContent = title;
+  tooltipEl.appendChild(t);
+  rows.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'tt-row';
+    const k = document.createElement('div');
+    k.className = 'k';
+    if (r.color) {
+      const line = document.createElement('span');
+      line.className = 'key-line';
+      line.style.background = r.color;
+      k.appendChild(line);
+    }
+    const kt = document.createElement('span');
+    kt.textContent = r.label;
+    k.appendChild(kt);
+    const v = document.createElement('div');
+    v.className = 'v';
+    v.textContent = r.value;
+    row.appendChild(k);
+    row.appendChild(v);
+    tooltipEl.appendChild(row);
+  });
+  const pad = 14;
+  let left = clientX + pad;
+  let top = clientY + pad;
+  tooltipEl.style.left = left + 'px';
+  tooltipEl.style.top = top + 'px';
+  tooltipEl.style.opacity = '1';
+  requestAnimationFrame(() => {
+    const rect = tooltipEl.getBoundingClientRect();
+    if (rect.right > window.innerWidth - 8) tooltipEl.style.left = (clientX - rect.width - pad) + 'px';
+    if (rect.bottom > window.innerHeight - 8) tooltipEl.style.top = (clientY - rect.height - pad) + 'px';
+  });
+}
+function hideTooltip() { tooltipEl.style.opacity = '0'; }
+
+/* ---------- chart card scaffold ---------- */
+function makeCard(parent, title) {
+  const fig = el2('figure', 'chart-card', parent);
+  const head = el2('div', 'card-head', fig);
+  const h3 = el2('h3', null, head); h3.textContent = title;
+  const btn = el2('button', 'table-toggle', head);
+  btn.type = 'button'; btn.textContent = '표로 보기';
+  const legend = el2('div', 'legend', fig);
+  const scroll = el2('div', 'chart-scroll', fig);
+  const svg = el('svg', {}, scroll);
+  const tableWrap = el2('div', 'data-table', fig);
+  btn.addEventListener('click', () => {
+    tableWrap.classList.toggle('open');
+    btn.textContent = tableWrap.classList.contains('open') ? '차트로 보기' : '표로 보기';
+  });
+  return { fig, svg, legend, tableWrap };
+}
+function el2(tag, cls, parent) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function buildTable(container, headers, rows) {
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  const htr = document.createElement('tr');
+  headers.forEach(h => { const th = document.createElement('th'); th.textContent = h; htr.appendChild(th); });
+  thead.appendChild(htr); table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    r.forEach(c => { const td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  container.appendChild(table);
+}
+function addLegendItem(legendEl, color, label) {
+  const item = el2('div', 'item', legendEl);
+  const sw = el2('span', 'swatch', item);
+  sw.style.background = color;
+  const lbl = document.createElement('span');
+  lbl.textContent = label;
+  item.appendChild(lbl);
+}
+
+/* =========================================================
+   KPI row
+   ========================================================= */
+function renderKPIs() {
+  const row = document.getElementById('kpiRow');
+  const k = DATA.kpi;
+  const tiles = [
+    { label: '총 매출', value: fmtMoney(k.total_sales) },
+    { label: '총 이익', value: fmtMoney(k.total_profit), note: `이익률 ${fmtPct(k.margin_pct)}` },
+    { label: '총 거래 건수', value: fmtNum(k.n_transactions), spark: true },
+    { label: '평균 할인율', value: fmtPct(k.avg_discount_pct) },
+    { label: '할인–이익 상관계수', value: k.discount_profit_correlation.toFixed(2), critical: true, note: '음의 상관관계' },
+    { label: '고할인(40%+) 거래의 손실 기여도', value: fmtPct(DATA.headline.hi_discount_loss_share_pct), critical: true }
+  ];
+  tiles.forEach(t => {
+    const tile = el2('div', 'stat-tile', row);
+    const l = el2('div', 'label', tile); l.textContent = t.label;
+    const v = el2('div', 'value' + (t.critical ? ' critical' : ''), tile); v.textContent = t.value;
+    if (t.spark) {
+      const d = el2('div', 'delta good', tile);
+      d.textContent = `2022년 전년 대비 +${fmtPct(k.yoy_transaction_growth_pct['2022'])}`;
+      renderSparkline(tile, DATA.yearly_counts.map(y => y.count));
+    }
+    if (t.note) { const n = el2('div', 'note', tile); n.textContent = t.note; }
+  });
+}
+function renderSparkline(parent, values) {
+  const w = 140, h = 28, pad = 2;
+  const svg = el('svg', { class: 'spark', viewBox: `0 0 ${w} ${h}`, width: w, height: h }, parent);
+  const min = Math.min(...values), max = Math.max(...values);
+  const x = i => pad + (i / (values.length - 1)) * (w - pad * 2);
+  const y = v => h - pad - ((v - min) / (max - min || 1)) * (h - pad * 2);
+  let d = '';
+  values.forEach((v, i) => { d += (i === 0 ? 'M' : 'L') + x(i) + ',' + y(v) + ' '; });
+  el('path', { d, fill: 'none', stroke: css('--blue'), 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, svg);
+  el('circle', { cx: x(values.length - 1), cy: y(values[values.length - 1]), r: 3, fill: css('--blue') }, svg);
+}
+
+/* =========================================================
+   Line / area chart (single series, monthly)
+   ========================================================= */
+function renderLine(container, title, points, valueKey, formatVal) {
+  const { svg, tableWrap } = makeCard(container, title);
+  const W = 600, H = 200, padL = 54, padR = 12, padT = 16, padB = 26;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('width', W); svg.setAttribute('height', H);
+
+  const values = points.map(p => p[valueKey]);
+  const maxV = Math.max(...values), minV = Math.min(0, Math.min(...values));
+  const ticks = niceTicks(minV, maxV, 4);
+  const yMin = ticks[0], yMax = ticks[ticks.length - 1];
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const x = i => padL + (i / (points.length - 1)) * plotW;
+  const y = v => padT + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
+
+  ticks.forEach(t => {
+    el('line', { x1: padL, x2: W - padR, y1: y(t), y2: y(t), class: 'gridline' }, svg);
+    text(t >= 1000 ? (t / 1000) + 'K' : String(t), { x: padL - 8, y: y(t) + 3, 'text-anchor': 'end' }, svg);
+  });
+  el('line', { x1: padL, x2: padL, y1: padT, y2: padT + plotH, class: 'baseline' }, svg);
+
+  points.forEach((p, i) => {
+    if (i === 0 || i === points.length - 1 || p.month.endsWith('-01')) {
+      const yy = p.month.slice(2, 4);
+      text("'" + yy, { x: x(i), y: H - 6, 'text-anchor': 'middle' }, svg);
+    }
+  });
+
+  const color = css('--blue');
+  let areaD = `M${x(0)},${y(yMin)} `;
+  points.forEach((p, i) => { areaD += `L${x(i)},${y(p[valueKey])} `; });
+  areaD += `L${x(points.length - 1)},${y(yMin)} Z`;
+  el('path', { d: areaD, fill: color, opacity: 0.10, stroke: 'none' }, svg);
+
+  let lineD = '';
+  points.forEach((p, i) => { lineD += (i === 0 ? 'M' : 'L') + x(i) + ',' + y(p[valueKey]) + ' '; });
+  el('path', { d: lineD, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, svg);
+
+  const crosshair = el('line', { x1: 0, x2: 0, y1: padT, y2: padT + plotH, stroke: css('--baseline'), 'stroke-width': 1, opacity: 0 }, svg);
+  const hoverDot = el('circle', { r: 4, fill: color, stroke: css('--surface-1'), 'stroke-width': 2, opacity: 0 }, svg);
+  const hitOverlay = el('rect', { x: padL, y: padT, width: plotW, height: plotH, class: 'hit' }, svg);
+
+  hitOverlay.addEventListener('pointermove', (e) => {
+    const rect = svg.getBoundingClientRect();
+    const relX = (e.clientX - rect.left) * (W / rect.width);
+    let idx = Math.round(((relX - padL) / plotW) * (points.length - 1));
+    idx = Math.max(0, Math.min(points.length - 1, idx));
+    const p = points[idx];
+    crosshair.setAttribute('x1', x(idx)); crosshair.setAttribute('x2', x(idx)); crosshair.setAttribute('opacity', 1);
+    hoverDot.setAttribute('cx', x(idx)); hoverDot.setAttribute('cy', y(p[valueKey])); hoverDot.setAttribute('opacity', 1);
+    showTooltip(e.clientX, e.clientY, p.month, [{ label: title, value: formatVal(p[valueKey]), color }]);
+  });
+  hitOverlay.addEventListener('pointerleave', () => {
+    crosshair.setAttribute('opacity', 0); hoverDot.setAttribute('opacity', 0); hideTooltip();
+  });
+
+  buildTable(tableWrap, ['월', title], points.map(p => [p.month, formatVal(p[valueKey])]));
+}
+
+/* =========================================================
+   Diverging horizontal bar chart (sign-colored)
+   ========================================================= */
+function renderDivergingBar(container, title, items, opts) {
+  opts = opts || {};
+  const { svg, legend, tableWrap } = makeCard(container, title);
+  addLegendItem(legend, css('--blue'), '이익 (양수)');
+  addLegendItem(legend, css('--red'), '손실 (음수)');
+
+  const rowH = opts.rowH || 26, barH = Math.min(18, rowH - 8);
+  const padL = opts.padL || 140, padR = 56, padT = 10, padB = 10;
+  const W = 640, plotW = W - padL - padR;
+  const H = padT + items.length * rowH + padB;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('width', W); svg.setAttribute('height', H);
+
+  const values = items.map(d => d.value);
+  let minV = Math.min(0, ...values), maxV = Math.max(0, ...values);
+  const ticks = niceTicks(minV, maxV, 4);
+  minV = ticks[0]; maxV = ticks[ticks.length - 1];
+  const xScale = v => padL + ((v - minV) / (maxV - minV)) * plotW;
+  const xZero = xScale(0);
+
+  ticks.forEach(t => {
+    el('line', { x1: xScale(t), x2: xScale(t), y1: padT, y2: H - padB, class: 'gridline' }, svg);
+  });
+  el('line', { x1: xZero, x2: xZero, y1: padT, y2: H - padB, class: 'baseline' }, svg);
+
+  items.forEach((d, i) => {
+    const y = padT + i * rowH + (rowH - barH) / 2;
+    const color = d.value >= 0 ? css('--blue') : css('--red');
+    const xEnd = xScale(d.value);
+    const path = el('path', { d: hBarPath(xZero, xEnd, y, barH, 4), fill: color, class: 'mark' }, svg);
+
+    text(d.label, { x: padL - 8, y: y + barH / 2 + 4, 'text-anchor': 'end' }, svg);
+
+    const labelStr = (opts.formatValue || fmtMoney)(d.value);
+    const outsideRight = d.value >= 0;
+    const lx = outsideRight ? xEnd + 6 : xEnd - 6;
+    text(labelStr, { x: lx, y: y + barH / 2 + 4, 'text-anchor': outsideRight ? 'start' : 'end' }, svg, 'value-label');
+
+    const hit = el('rect', { x: padL, y: padT + i * rowH, width: plotW, height: rowH, class: 'hit' }, svg);
+    hit.addEventListener('pointermove', (e) => {
+      const rows = [{ label: '순이익', value: (opts.formatValue || fmtMoney)(d.value), color }];
+      if (opts.showBreakdown && d.gain !== undefined) {
+        rows.push({ label: '이익 합계', value: fmtMoney(d.gain), color: css('--blue') });
+        rows.push({ label: '손실 합계', value: fmtMoney(d.loss), color: css('--red') });
+      }
+      showTooltip(e.clientX, e.clientY, d.label, rows);
+      path.classList.add('mark');
+    });
+    hit.addEventListener('pointerleave', hideTooltip);
+  });
+
+  const headers = opts.showBreakdown ? ['항목', '순이익', '이익 합계', '손실 합계'] : ['항목', '값'];
+  const rows = items.map(d => opts.showBreakdown
+    ? [d.label, fmtMoney(d.value), fmtMoney(d.gain), fmtMoney(d.loss)]
+    : [d.label, (opts.formatValue || fmtMoney)(d.value)]);
+  buildTable(tableWrap, headers, rows);
+}
+
+/* =========================================================
+   Single-hue magnitude bar chart (vertical columns)
+   ========================================================= */
+function renderColumnBar(container, title, items, opts) {
+  opts = opts || {};
+  const { svg, tableWrap } = makeCard(container, title);
+  const W = opts.width || 400, H = 200;
+  const padL = 44, padR = 10, padT = 16, padB = 34;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('width', W); svg.setAttribute('height', H);
+
+  const values = items.map(d => d.value);
+  const ticks = niceTicks(0, Math.max(...values), 4);
+  const maxV = ticks[ticks.length - 1];
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const n = items.length;
+  const slot = plotW / n;
+  const barW = Math.min(24, slot * 0.6);
+  const y0 = padT + plotH;
+  const yScale = v => padT + plotH - (v / maxV) * plotH;
+  const color = opts.color || css('--blue');
+
+  const tickFmt = opts.tickFormat || (t => t >= 1000 ? (t / 1000) + 'K' : String(t));
+  ticks.forEach(t => {
+    el('line', { x1: padL, x2: W - padR, y1: yScale(t), y2: yScale(t), class: 'gridline' }, svg);
+    text(tickFmt(t), { x: padL - 8, y: yScale(t) + 3, 'text-anchor': 'end' }, svg);
+  });
+  el('line', { x1: padL, x2: W - padR, y1: y0, y2: y0, class: 'baseline' }, svg);
+
+  const directLabel = n <= 5;
+  items.forEach((d, i) => {
+    const cx = padL + slot * i + slot / 2;
+    const yTop = yScale(d.value);
+    const path = el('path', { d: vBarPath(cx - barW / 2, y0, yTop, barW, 4), fill: color, class: 'mark' }, svg);
+    if (directLabel) text((opts.formatValue || fmtNum)(d.value), { x: cx, y: yTop - 6, 'text-anchor': 'middle' }, svg, 'value-label');
+    text(d.label, { x: cx, y: H - 10, 'text-anchor': 'middle', transform: opts.rotateLabels ? `rotate(-30 ${cx} ${H - 10})` : '' }, svg);
+    const hit = el('rect', { x: padL + slot * i, y: padT, width: slot, height: plotH, class: 'hit' }, svg);
+    hit.addEventListener('pointermove', (e) => {
+      showTooltip(e.clientX, e.clientY, d.label, [{ label: opts.valueLabel || '값', value: (opts.formatValue || fmtNum)(d.value), color }]);
+    });
+    hit.addEventListener('pointerleave', hideTooltip);
+  });
+
+  buildTable(tableWrap, ['항목', opts.valueLabel || '값'], items.map(d => [d.label, (opts.formatValue || fmtNum)(d.value)]));
+}
+
+/* =========================================================
+   Sections
+   ========================================================= */
+function renderTrendCharts() {
+  const c = document.getElementById('trendCharts');
+  renderLine(c, '월별 거래 건수', DATA.monthly_series, 'count', fmtNum);
+  renderLine(c, '월별 이익', DATA.monthly_series, 'profit', fmtMoney);
+}
+
+function renderRegionCharts() {
+  const c = document.getElementById('regionCharts');
+  renderDivergingBar(c, '시장(Market Area)별 순이익', DATA.by_market_area.map(d => ({ label: d.key, value: d.total, gain: d.gain, loss: d.loss })), { rowH: 30, padL: 90, showBreakdown: true });
+  renderDivergingBar(c, '주문 지역(Order Region)별 순이익', DATA.by_order_region.map(d => ({ label: d.key, value: d.total, gain: d.gain, loss: d.loss })), { rowH: 26, padL: 130, showBreakdown: true });
+}
+
+function renderCategoryCharts() {
+  const c = document.getElementById('categoryCharts');
+  const items = DATA.by_sub_category.map(d => ({ label: d.key, value: d.total, gain: d.gain, loss: d.loss }));
+  renderDivergingBar(c, '서브카테고리별 순이익 (낮은 순)', items, { rowH: 26, padL: 130, showBreakdown: true });
+}
+
+function renderHeadlineCallout() {
+  const el = document.getElementById('headlineCallout');
+  const big = el2('div', 'big', el);
+  big.textContent = fmtPct(DATA.headline.hi_discount_loss_share_pct);
+  const txt = el2('div', 'txt', el);
+  txt.innerHTML = '';
+  const p = document.createElement('div');
+  p.append('할인율 ');
+  const strong1 = document.createElement('strong'); strong1.textContent = '40% 초과'; p.append(strong1);
+  p.append(' 거래는 전체 거래의 ');
+  const strong2 = document.createElement('strong'); strong2.textContent = fmtPct(DATA.headline.hi_discount_txn_share_pct) + '뿐'; p.append(strong2);
+  p.append('이지만, 전사 총 손실의 ');
+  const strong3 = document.createElement('strong'); strong3.textContent = fmtPct(DATA.headline.hi_discount_loss_share_pct); p.append(strong3);
+  p.append('를 차지합니다.');
+  txt.appendChild(p);
+}
+
+function renderDiscountCharts() {
+  const c = document.getElementById('discountCharts');
+  renderColumnBar(c, '할인 구간별 거래 건수', DATA.discount_buckets.map(d => ({ label: d.bucket, value: d.count })),
+    { width: 460, color: css('--blue'), valueLabel: '거래 건수', formatValue: fmtNum, rotateLabels: true });
+  renderColumnBar(c, '할인 구간별 손실액', DATA.discount_buckets.map(d => ({ label: d.bucket, value: Math.abs(d.loss) })),
+    { width: 460, color: css('--red'), valueLabel: '손실액', formatValue: fmtMoney, rotateLabels: true });
+}
+
+function renderTablesMfrChart() {
+  const c = document.getElementById('tablesMfrChart');
+  const items = DATA.tables_by_manufacturer.map(d => ({ label: d.manufacturer, value: d.profit }));
+  renderDivergingBar(c, 'Tables 서브카테고리 — 제조사별 손익', items, { rowH: 26, padL: 110 });
+}
+
+function renderShipCharts() {
+  const c = document.getElementById('shipCharts');
+  renderColumnBar(c, '배송 방식별 거래 건수', DATA.ship_mode_dist.map(d => ({ label: d.mode, value: d.count })),
+    { width: 400, color: css('--blue'), valueLabel: '거래 건수', formatValue: fmtNum });
+  renderColumnBar(c, '주문→배송 소요일(ETA) 분포', DATA.eta_dist.map(d => ({ label: d.eta + '일', value: d.count })),
+    { width: 500, color: css('--blue'), valueLabel: '거래 건수', formatValue: fmtNum });
+}
+
+function renderRecommendations() {
+  const grid = document.getElementById('recoGrid');
+  const recos = [
+    { n: '01', h: '고할인 카테고리 할인 상한 도입', p: 'Phones, Bookcases 등 고거래량 카테고리에 40% 할인 상한을 적용해 마진 침식을 방지합니다.' },
+    { n: '02', h: 'EU 평균 할인율 하향 조정', p: 'EU 시장의 평균 할인율을 20%p 낮춰 지역 수익성을 개선합니다.' },
+    { n: '03', h: 'Tables 포트폴리오 축소', p: '지속적으로 손실을 내는 Bevis, Barricks, Lesro 등 제조사의 테이블 상품군을 축소하거나 단종합니다.' },
+    { n: '04', h: '고손실 도시 가격 정책 재설계', p: 'Istanbul, Lagos 등 손실이 큰 도시에서 40% 이하로 할인 구간을 재구성합니다.' }
+  ];
+  recos.forEach(r => {
+    const card = el2('div', 'reco-card', grid);
+    const n = el2('div', 'n', card); n.textContent = r.n;
+    const h = el2('h4', null, card); h.textContent = r.h;
+    const p = el2('p', null, card); p.textContent = r.p;
+  });
+}
+
+/* ---------- boot ---------- */
+renderKPIs();
+renderTrendCharts();
+renderRegionCharts();
+renderCategoryCharts();
+renderHeadlineCallout();
+renderDiscountCharts();
+renderTablesMfrChart();
+renderShipCharts();
+renderRecommendations();
+</script>
