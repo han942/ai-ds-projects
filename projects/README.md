@@ -8,7 +8,7 @@ This folder contains my main data science/AI projects, organized by topic.
 
 - Link: https://github.com/han942/ai-ds-projects/tree/main/projects/rating_recsys
 - Goal: Construction of recommnedation model using crawled user review data from restaurant recommendation website
-- Tech stack: Python, SQL, pymysql, PyTorch, Pandas, Selenium, Scikit-learn
+- Tech stack: Python, mySQL, PyTorch, Pandas, Selenium, Scikit-learn
 - Main notebook/script: `diningcode_analysis.ipynb`
 - Highlights:
   - Constructing real-time datasets using web-crawling techniques with Selenium
@@ -26,8 +26,8 @@ This folder contains my main data science/AI projects, organized by topic.
 - Main notebook/script: `Final_NLP_Newspaper.ipynb`
 - Highlights:
   - Constructing parallel corpus using LLM(GPT-4o) based data augmentation
-  - Adapting and fine-tuning [`Gemma 3-1B model`](https://huggingface.co/google/gemma-3-1b-it) for the given TST(Text-Style-Transfer) task 
-  - Validating model's ability to maintain 100% of its factual accuracy in over 75% of the original data, also improving readability for younger audiences.
+  - Adapting and fine-tuning **[`Gemma 3-1B model`]**(https://huggingface.co/google/gemma-3-1b-it) for the given TST(Text-Style-Transfer) task 
+  - Validating model's ability to maintain 100% of its factual accuracy in **75%+** of the original data, also improving readability for younger audiences.
 
 ---
 
