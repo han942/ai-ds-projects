@@ -1,6 +1,6 @@
 # CUAI NLP 프로젝트 (2025.03.01 ~ 2025.07.03)
 
-[English](readme.en.md)
+[English](./README.md)
 
 CUAI(대학생 AI 연합 동아리) NLP 1팀 최종 프로젝트입니다. 2025년 7월 1일 발표되었습니다.
 
@@ -107,4 +107,4 @@ flowchart TB
 | `Final_NLP_Newspaper.ipynb` | 데이터 로드, QLoRA/LoRA 파인튜닝, 추론, 평가(BLEU/ROUGE/SARI/FKGL)를 포함한 전체 파이프라인 노트북 |
 | `result.csv` | 테스트셋 2,340개 샘플의 원문/사람 참조문/모델 생성문 |
 | `NLP 1팀 최종.pptx` | 최종 발표 자료 (2025.07.01) |
-| `readme.md` / `readme.en.md` | 프로젝트 설명 (국문 / 영문) |
+| `README.md` / `README_KOR.md` | 프로젝트 설명 (영문 / 국문) |

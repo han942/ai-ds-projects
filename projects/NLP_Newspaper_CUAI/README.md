@@ -1,6 +1,6 @@
 # CUAI NLP Project (2025.03.01 ~ 2025.07.03)
 
-[Korean](readme_KOR.md)
+[Korean](./README_KOR.md)
 
 Final project by CUAI (a university AI club) NLP Team 1. Presented on 2025.07.01.
 
@@ -107,4 +107,4 @@ Against the team's own benchmark thresholds from the presentation (SARI ≥ 40 =
 | `Final_NLP_Newspaper.ipynb` | Full pipeline notebook: data loading, QLoRA/LoRA fine-tuning, inference, and evaluation (BLEU/ROUGE/SARI/FKGL) |
 | `result.csv` | Test set (2,340 samples) with original text, human reference simplification, and model-generated simplification |
 | `NLP 1팀 최종.pptx` | Final presentation slides (2025.07.01) |
-| `readme.md` / `readme.en.md` | Project description (Korean / English) |
+| `README.md` / `README_KOR.md` | Project description (English / Korean) |
