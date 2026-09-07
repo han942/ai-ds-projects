@@ -1,0 +1,21 @@
+# Tested with Python 3.12 (notebook was executed on 3.12.3)
+pandas
+numpy
+torch
+transformers
+datasets
+trl
+peft
+bitsandbytes
+accelerate
+huggingface_hub
+sentencepiece
+python-dotenv
+tqdm
+nltk
+evaluate
+rouge_score
+rouge
+sacrebleu
+textstat
+jupyter

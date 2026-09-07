@@ -1,0 +1,10 @@
+# Tested with Python 3.10 / 3.11 (notebooks were executed on 3.10.18 and 3.11.6)
+pandas
+numpy
+scipy
+scikit-learn
+matplotlib
+seaborn
+pymysql
+python-dotenv
+jupyter
