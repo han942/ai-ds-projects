@@ -4,6 +4,10 @@
 
 Final project by CUAI (a university AI club) NLP Team 1. Presented on 2025.07.01.
 
+> **New:** A follow-up **Langfuse-based AI agent** re-implements this task with
+> Claude + observability/prompt-management/evaluation instead of fine-tuning.
+> See [README_AGENT.md](./README_AGENT.md).
+
 ## Architecture
 
 ```mermaid

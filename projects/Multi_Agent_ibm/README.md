@@ -1,163 +1,193 @@
-﻿# [Multi-Agent] AskIntern: IBM Intern Workspace Assistant
+# AskIntern: Multi-Agent Workspace Assistant for IBM Interns
 
-AskIntern is a multi-agent workspace assistant built with **IBM watsonx Orchestrate**. It is designed to answer the recurring questions IBM interns ask during the workday, such as where to have lunch, how IBM products work, and what was discussed in a meeting or seminar.
+> One workplace chat for lunch recommendations, IBM product questions, and
+> meeting-note retrieval
 
-- [Korean](./README_KOR.md)
-- Demo: [`demo_askintern.mp4`](./demo_askintern.mp4)
-- Presentation: [`AskIntern_presentation.pdf`](./AskIntern_presentation.pdf)
+Prototype project · IBM watsonx Orchestrate · [Korean](./README_KOR.md)
 
----
+[Watch the demo](./demo_askintern_zoom.mp4) ·
+[View the presentation](./AskIntern_presentation.pdf)
 
-## 1. Project Overview
+AskIntern is a multi-agent assistant designed around the recurring questions
+IBM interns encounter during the workday. A supervisor agent classifies each
+request, sends it to the appropriate specialist, and returns a single response
+through a web chat interface.
 
-- Goal: Build an end-to-end, trustworthy multi-agent assistant for IBM interns.
-- Platform: IBM watsonx Orchestrate on IBM Code Engine
-- Interface: Web chat
-- Main orchestrator: `askintern_supervisor`
-- Sub-agents: `lunch_agent`, `ibm_specs_agent`, `notes_qa_agent`
-- Status: Prototype/demo implementation documented through the presentation and demo artifacts in this folder
+## 1. Goal
 
-AskIntern routes each user request to the appropriate specialist agent and combines the result into a single response. The system uses retrieval, external tools, workflow execution, access control, and response guardrails to make the assistant useful in an enterprise setting.
+Interns often need information from different systems: nearby restaurant data,
+IBM product documentation, developer references, and internal meeting notes.
+Searching each source separately creates repeated work, while exposing every
+tool to one general-purpose agent makes routing, access control, and failure
+handling harder to manage.
 
----
+AskIntern aims to provide one trustworthy entry point that can:
 
-## 2. System Architecture
+- route each question to an agent with a clearly defined responsibility;
+- combine internal knowledge with real-time external information;
+- retrieve answers with traceable sources and abstain when evidence is absent;
+- enforce role-based access and mask personal information; and
+- expose failures, tool calls, and evaluation results for review.
 
-```text
-Web Chat
-   |
-   v
-askintern_supervisor  (watsonx Orchestrate)
-   |------------------------|-------------------------|
-   v                        v                         v
-lunch_agent            ibm_specs_agent          notes_qa_agent
-   |                        |                         |
-Google API              MCP Server                 RAG
-   |                        |                         |
-   +------------------------+-------------------------+
-                            v
-                         Astra DB
+The project treats routing, retrieval, security, reliability, and observability
+as parts of the assistant's core behavior.
+
+## 2. Architecture
+
+```mermaid
+flowchart TB
+    U["IBM intern<br/>Web chat"] --> S["askintern_supervisor<br/>intent routing · guardrails"]
+
+    S --> L["lunch_agent<br/>restaurant recommendations"]
+    S --> I["ibm_specs_agent<br/>IBM product & developer Q&A"]
+    S --> N["notes_qa_agent<br/>meeting-note Q&A"]
+
+    L --> G["Google API<br/>real-time restaurant search"]
+    L --> A["Astra DB<br/>internal reviews"]
+
+    I --> H["Astra DB hybrid search<br/>IBM product knowledge"]
+    I --> M["wxo-docs MCP<br/>ADK / CLI documentation"]
+
+    N --> R["Astra DB RAG<br/>meeting & seminar notes"]
+    N --> P["RBAC · PII masking<br/>safe abstention"]
+
+    S -. "routes · prompts · tools · tokens" .-> O["watsonx observation<br/>AgentOps + Langfuse"]
+    R -. "validated ingestion" .-> C["GitHub Actions<br/>preprocess · ingest · validate"]
+
+    classDef control fill:#e8f0fe,stroke:#4a6da7,color:#1f2328
+    classDef agent fill:#fdf0e3,stroke:#c98b3a,color:#1f2328
+    classDef service fill:#f5f6f8,stroke:#8b93a7,color:#1f2328
+    classDef safety fill:#e9f5ec,stroke:#4a8a5f,color:#1f2328
+    class S,O,C control
+    class L,I,N agent
+    class G,A,H,M,R service
+    class P safety
 ```
 
 ### Agent responsibilities
 
-| Agent | Responsibility | Main integrations |
+| Agent | User need | Tools and controls |
 |---|---|---|
-| `lunch_agent` | Find nearby restaurants in real time, search internal review data, and filter unsuitable options | Google API, Astra DB, workflow, API, RAG |
-| `ibm_specs_agent` | Answer questions about IBM products, watsonx Orchestrate, and ADK/CLI usage | Astra DB hybrid search, MCP client, `wxo-docs` MCP, RAG |
-| `notes_qa_agent` | Retrieve and summarize meeting/seminar notes while enforcing access and privacy rules | Astra DB, RAG, RBAC, PII masking |
+| `lunch_agent` | Find a suitable restaurant near the workplace | Google API, internal review RAG, preference collection, availability filtering |
+| `ibm_specs_agent` | Understand IBM products or look up watsonx Orchestrate ADK/CLI usage | Astra DB hybrid search, Granite embeddings, `wxo-docs` MCP |
+| `notes_qa_agent` | Retrieve and summarize meeting or seminar notes | Astra DB RAG, RBAC, PII masking, evidence-based abstention |
 
----
+### Request flow
 
-## 3. Main Use Cases
+1. The supervisor classifies the user's intent and checks request guardrails.
+2. It routes the request to one specialist agent instead of exposing every tool
+   to every agent.
+3. The specialist retrieves internal evidence, calls an external service, or
+   executes a workflow as required.
+4. Access rules and response controls are applied before the answer is returned.
+5. Routing, model calls, tools, prompts, tokens, sessions, and tags are captured
+   for evaluation and debugging.
 
-### Lunch recommendations
+### Retrieval and automation
 
-`lunch_agent` handles requests such as “What should I eat for lunch near IFC?” by combining:
+The IBM knowledge agent uses hybrid retrieval to combine semantic and lexical
+signals. The documented design adds title prefixes to chunks and uses
+Korean-aware Granite embeddings to improve source traceability and Korean query
+quality. Product questions and ADK/CLI lookups are routed to different sources.
 
-- Real-time restaurant search through Google API
-- Internal restaurant review lookup through Astra DB
-- User preference collection, including cuisine type and free-form input
-- Filtering for restaurants that are not currently available or suitable
-- A final response that separates internal IBM recommendations from Google recommendations
-
-### IBM product and developer questions
-
-`ibm_specs_agent` answers questions such as “What is watsonx Orchestrate?” or “What does the `agents import` option do?”. The agent uses RAG for product knowledge and an MCP connection for external documentation and current developer information.
-
-The design emphasizes source traceability, Korean search quality, and a clear distinction between a product lookup and an ADK/CLI lookup. The presentation describes a move from basic vector retrieval to Astra DB hybrid search using vector and lexical signals, together with title-prefix chunking and Korean-aware Granite embeddings.
-
-### Meeting-note Q&A
-
-`notes_qa_agent` retrieves information from meeting notes and seminar notes. The security design includes:
-
-- RBAC: an anonymous `Guest` cannot access the notes agent, while an authenticated user with `role=intern` can be routed to it
-- PII masking: names and email addresses are masked before the answer is returned
-- Supervisor guardrails for profanity and prompt injection
-- A safe abstention response when the requested information is not present in the indexed notes
-
----
-
-## 4. Enterprise-Level Engineering
-
-The project explores the operational concerns that become important beyond a toy agent demo.
-
-### Reliability and error handling
-
-- Separates tool, flow, and agent-level failures
-- Returns structured failure information such as `error_kind`, `retriable`, and a user-facing note
-- Uses retry and failure branches instead of allowing a failure to silently become a normal answer
-- Consolidates normal, no-match, and collection-failure outcomes into a single flow output
-
-### Data consistency and concurrency
-
-- Uses deterministic document IDs based on restaurant, date, and name
-- Uses upsert-style writes to avoid duplicate records when a note is processed repeatedly
-- Handles concurrent writes with delete/insert ordering and bounded retry logic
-- The presentation reports an improvement from 51% document loss to 0% in the tested concurrent-write scenario, and from 30/48 to 48/48 successful writes after retry handling
-
-### Automation
-
-Meeting-note ingestion is designed as an automated pipeline:
+Meeting-note ingestion follows a validated automation path:
 
 ```text
-Raw meeting note
-   -> preprocessing
-   -> Astra DB ingestion
-   -> validation
-   -> searchable note
+Raw note
+  → preprocessing
+  → Astra DB ingestion
+  → validation
+  → searchable note
 ```
 
-The documented GitHub Actions flow detects new raw files, preprocesses them, validates the result, and stops the pipeline when validation fails. If no new raw file is found, the job is skipped.
+The GitHub Actions design runs this flow when a new raw file is detected, stops
+when validation fails, and skips the job when there is no new input.
 
-### Observability
+### Reliability and enterprise controls
 
-The project compares watsonx-native observations with Langfuse session-oriented tracing. The presentation highlights visibility into routing, plugins, tool calls, prompts, tokens, sessions, and tags. It also documents a two-path approach using AgentOps REST polling and Langfuse push because the native export path was not sufficient for the tested workflow.
+- Tool, flow, and agent failures are represented separately with fields such as
+  `error_kind`, `retriable`, and a user-facing note.
+- Retry and failure branches prevent collection errors from appearing as normal
+  answers.
+- Deterministic document IDs and upsert-style writes reduce duplicate notes.
+- Delete/insert ordering and bounded retries protect concurrent writes.
+- Anonymous `Guest` users cannot access meeting notes; authenticated users with
+  `role=intern` can be routed to `notes_qa_agent`.
+- Names and email addresses are masked before note-based responses are returned.
+- Supervisor guardrails cover abusive input and prompt-injection attempts.
 
----
+## 3. Results
 
-## 5. Evaluation
+### Evaluation snapshot
 
-The evaluation workflow is structured as:
+The project evaluates the full journey from case definition to agent execution,
+trace review, feedback, and iteration.
 
-```text
-Case definition -> watsonx Orchestrate execution -> JSON result and traces -> feedback -> iteration
-```
+| Evaluation area | Reported prototype result |
+|---|---|
+| `ibm_specs_agent` cases | 7 evaluated · 6 passed · 1 failed |
+| Agent-level metrics | Mostly `1.00` in the reported run |
+| Citation accuracy | `0.86` |
+| Tool calls | Expected and actual calls matched in the tested cases |
+| Reproducibility | No reported metric drift across two evaluation runs |
 
-The project uses three groups of metrics:
+Metrics cover three levels:
 
-- Agent metrics: journey success, routing accuracy, total steps, LLM steps, response time, keyword match, semantic match, and text match
-- Tool metrics: total calls, expected/correct calls, missed calls, relevant calls, bad parameters, recall, precision, and match success
-- Custom RAG rubrics: faithfulness, factual correctness, answer relevance, context recall, citation accuracy, and abstain accuracy
+- **Agent:** journey success, routing accuracy, total and LLM steps, response
+  time, keyword match, semantic match, and text match.
+- **Tool:** expected and correct calls, missed or irrelevant calls, bad
+  parameters, precision, recall, and match success.
+- **RAG:** faithfulness, factual correctness, answer relevance, context recall,
+  citation accuracy, and abstention accuracy.
 
-### Reported evaluation snapshot
+The failed `case07_related_product_trap` exposed a weakness in keyword-based
+scoring: surface-level term overlap can pass even when the answer does not
+satisfy the intended product distinction. It motivated stronger semantic,
+tool-use, and case-level checks.
 
-- `ibm_specs_agent`: 7 cases evaluated, 6 passed and 1 failed
-- Agent-level scores were mostly `1.00`; citation accuracy was reported as `0.86`
-- Tool-call evaluation matched the expected calls in the tested cases
-- Two-run reproducibility checks found no metric drift in the reported run
-- The failed `case07_related_product_trap` exposed a limitation in keyword-based scoring and the need for stronger evaluation checks
+### Reliability results
 
-These results are a documented prototype snapshot, not a production benchmark. The presentation also notes that judge-based evaluation can miss tool omissions, vary across repeated judgments, and become difficult to review when raw JSON is complex. The IBM Bob workflow and `SUMMARY.md` concept are proposed to add reproducibility checks, independent metric review, and concise case-level Pass/Fail explanations.
+| Tested scenario | Before | After |
+|---|---:|---:|
+| Document loss during concurrent writes | 51% | **0%** |
+| Successful writes with retry handling | 30 / 48 | **48 / 48** |
 
----
+These results support the use of deterministic IDs, explicit write ordering,
+and bounded retries in the tested ingestion workflow.
 
-## 6. Repository Contents
+### What the prototype demonstrated
+
+- Three specialist agents can serve distinct workplace needs through one chat
+  interface while keeping their tools and permissions scoped.
+- RAG, MCP, workflow execution, and external APIs can be combined behind a
+  supervisor without losing agent-level traceability.
+- RBAC, PII masking, prompt-injection defenses, safe abstention, and structured
+  failure handling can be designed into the end-to-end flow.
+- Session-oriented traces make routing and tool behavior easier to inspect than
+  final-answer evaluation alone.
+
+### Limitations and next steps
+
+- The reported numbers are a prototype snapshot from the presentation, not a
+  production benchmark or service-level guarantee.
+- Judge-based evaluation can overlook missing tool calls and may vary across
+  repeated judgments.
+- Raw evaluation JSON is difficult to review without a concise case-level
+  explanation.
+- The proposed next step is an IBM Bob workflow that reruns cases, independently
+  checks metrics, and generates a `SUMMARY.md` with Pass/Fail evidence.
+- The evaluation set should expand beyond the seven reported
+  `ibm_specs_agent` cases to cover routing, lunch recommendations, note access,
+  privacy controls, abstention, and failure recovery.
+
+## Project artifacts
 
 | File | Description |
 |---|---|
-| `AskIntern_presentation.pdf` | Project presentation covering architecture, agent flows, engineering decisions, observability, and evaluation |
-| `demo_askintern.mp4` | Demonstration video of the AskIntern experience |
-| `README.md` | English project documentation |
-| `README_KOR.md` | Korean project documentation |
+| [AskIntern_presentation.pdf](./AskIntern_presentation.pdf) | Architecture, agent flows, reliability work, observability, and evaluation |
+| [demo_askintern_zoom.mp4](./demo_askintern_zoom.mp4) | AskIntern prototype demonstration |
+| [README_KOR.md](./README_KOR.md) | Korean project documentation |
 
-The current folder contains presentation/demo artifacts rather than the full executable source code. Therefore, deployment commands and environment-variable setup are not included here.
-
----
-
-## 7. Key Takeaways
-
-- Multi-agent routing turns repeated intern questions into a single chat experience.
-- RAG, MCP, and external APIs are assigned to the agents that need them instead of being exposed uniformly.
-- RBAC, PII masking, prompt-injection defense, retries, and trace collection are treated as core product requirements.
-- Enterprise-grade agent development requires end-to-end evaluation and reproducible feedback, not only successful demo conversations.
+This folder contains the presentation and demo artifacts rather than the full
+executable source. Deployment commands and environment-variable setup are
+therefore outside the scope of this repository snapshot.

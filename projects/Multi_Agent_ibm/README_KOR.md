@@ -3,7 +3,7 @@
 AskIntern은 **IBM watsonx Orchestrate**를 기반으로 만든 멀티 에이전트 업무 지원 어시스턴트입니다. 인턴들이 업무 중 반복적으로 묻는 점심 식당, IBM 제품 및 개발 도구, 회의·세미나 노트 관련 질문을 하나의 웹 채팅 화면에서 처리하는 것을 목표로 합니다.
 
 - [English](./README.md)
-- 데모: [`demo_askintern.mp4`](./demo_askintern.mp4)
+- 데모: [`demo_askintern_zoom.mp4`](./demo_askintern_zoom.mp4)
 - 발표 자료: [`AskIntern_presentation.pdf`](./AskIntern_presentation.pdf)
 
 ---

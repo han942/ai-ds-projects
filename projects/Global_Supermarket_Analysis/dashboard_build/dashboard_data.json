@@ -1,7 +1,27 @@
 {
   "meta": {
-    "n_transactions": 51290
+    "n_transactions": 51290,
+    "date_start": "2019-01-01",
+    "date_end": "2022-12-31"
   },
+  "yearly_counts": [
+    {
+      "year": 2019,
+      "count": 8998
+    },
+    {
+      "year": 2020,
+      "count": 10962
+    },
+    {
+      "year": 2021,
+      "count": 13799
+    },
+    {
+      "year": 2022,
+      "count": 17531
+    }
+  ],
   "kpi": {
     "total_sales": 12642905.0,
     "total_profit": 1467457.29,
@@ -729,5 +749,2038 @@
       "eta": 7,
       "count": 3057
     }
-  ]
+  ],
+  "by_year": {
+    "2019": {
+      "meta": {
+        "n_transactions": 8998,
+        "date_start": "2019-01-01",
+        "date_end": "2019-12-31"
+      },
+      "yearly_counts": [
+        {
+          "year": 2019,
+          "count": 8998
+        }
+      ],
+      "kpi": {
+        "total_sales": 2259511.0,
+        "total_profit": 248940.81,
+        "margin_pct": 11.02,
+        "avg_discount_pct": 14.82,
+        "n_transactions": 8998,
+        "yoy_transaction_growth_pct": {},
+        "discount_profit_correlation": -0.33
+      },
+      "monthly_series": [
+        {
+          "month": "2019-01",
+          "sales": 98902.0,
+          "profit": 8321.8,
+          "count": 433
+        },
+        {
+          "month": "2019-02",
+          "sales": 91152.0,
+          "profit": 12417.91,
+          "count": 378
+        },
+        {
+          "month": "2019-03",
+          "sales": 145726.0,
+          "profit": 15303.57,
+          "count": 539
+        },
+        {
+          "month": "2019-04",
+          "sales": 116927.0,
+          "profit": 12902.32,
+          "count": 564
+        },
+        {
+          "month": "2019-05",
+          "sales": 146762.0,
+          "profit": 12183.83,
+          "count": 566
+        },
+        {
+          "month": "2019-06",
+          "sales": 215214.0,
+          "profit": 23415.25,
+          "count": 917
+        },
+        {
+          "month": "2019-07",
+          "sales": 115518.0,
+          "profit": 5585.0,
+          "count": 495
+        },
+        {
+          "month": "2019-08",
+          "sales": 207570.0,
+          "profit": 23713.67,
+          "count": 878
+        },
+        {
+          "month": "2019-09",
+          "sales": 290230.0,
+          "profit": 35776.88,
+          "count": 1052
+        },
+        {
+          "month": "2019-10",
+          "sales": 199070.0,
+          "profit": 25963.42,
+          "count": 774
+        },
+        {
+          "month": "2019-11",
+          "sales": 298499.0,
+          "profit": 32709.18,
+          "count": 1139
+        },
+        {
+          "month": "2019-12",
+          "sales": 333941.0,
+          "profit": 40647.98,
+          "count": 1263
+        }
+      ],
+      "by_sub_category": [
+        {
+          "key": "Tables",
+          "total": -11075.29,
+          "loss": -27148.59,
+          "gain": 16073.29
+        },
+        {
+          "key": "Fasteners",
+          "total": 1936.92,
+          "loss": -972.16,
+          "gain": 2909.08
+        },
+        {
+          "key": "Labels",
+          "total": 3118.89,
+          "loss": -594.58,
+          "gain": 3713.47
+        },
+        {
+          "key": "Supplies",
+          "total": 4580.42,
+          "loss": -3151.98,
+          "gain": 7732.4
+        },
+        {
+          "key": "Envelopes",
+          "total": 5066.18,
+          "loss": -1899.89,
+          "gain": 6966.07
+        },
+        {
+          "key": "Furnishings",
+          "total": 7310.21,
+          "loss": -4254.75,
+          "gain": 11564.95
+        },
+        {
+          "key": "Machines",
+          "total": 9224.91,
+          "loss": -14876.34,
+          "gain": 24101.24
+        },
+        {
+          "key": "Art",
+          "total": 10399.02,
+          "loss": -3799.29,
+          "gain": 14198.31
+        },
+        {
+          "key": "Paper",
+          "total": 10664.96,
+          "loss": -1731.15,
+          "gain": 12396.11
+        },
+        {
+          "key": "Binders",
+          "total": 11447.21,
+          "loss": -12251.12,
+          "gain": 23698.33
+        },
+        {
+          "key": "Accessories",
+          "total": 15719.86,
+          "loss": -8091.26,
+          "gain": 23811.12
+        },
+        {
+          "key": "Storage",
+          "total": 15944.5,
+          "loss": -14155.28,
+          "gain": 30099.78
+        },
+        {
+          "key": "Appliances",
+          "total": 22838.44,
+          "loss": -12389.94,
+          "gain": 35228.38
+        },
+        {
+          "key": "Bookcases",
+          "total": 27518.86,
+          "loss": -17648.48,
+          "gain": 45167.34
+        },
+        {
+          "key": "Chairs",
+          "total": 29943.16,
+          "loss": -18155.96,
+          "gain": 48099.12
+        },
+        {
+          "key": "Copiers",
+          "total": 30375.09,
+          "loss": -14350.81,
+          "gain": 44725.91
+        },
+        {
+          "key": "Phones",
+          "total": 53927.49,
+          "loss": -13836.57,
+          "gain": 67764.06
+        }
+      ],
+      "by_market_area": [
+        {
+          "key": "Canada",
+          "total": 1807.08,
+          "loss": 0.0,
+          "gain": 1807.08
+        },
+        {
+          "key": "EMEA",
+          "total": 5280.03,
+          "loss": -23169.52,
+          "gain": 28449.55
+        },
+        {
+          "key": "Africa",
+          "total": 10944.11,
+          "loss": -16812.78,
+          "gain": 27756.89
+        },
+        {
+          "key": "LATAM",
+          "total": 36708.42,
+          "loss": -31213.0,
+          "gain": 67921.42
+        },
+        {
+          "key": "US",
+          "total": 49543.97,
+          "loss": -31892.77,
+          "gain": 81436.75
+        },
+        {
+          "key": "EU",
+          "total": 61625.62,
+          "loss": -29736.61,
+          "gain": 91362.24
+        },
+        {
+          "key": "APAC",
+          "total": 83031.58,
+          "loss": -36483.48,
+          "gain": 119515.05
+        }
+      ],
+      "by_order_region": [
+        {
+          "key": "Canada",
+          "total": 1807.08,
+          "loss": 0.0,
+          "gain": 1807.08
+        },
+        {
+          "key": "Southeast Asia",
+          "total": 3243.0,
+          "loss": -15209.21,
+          "gain": 18452.21
+        },
+        {
+          "key": "Caribbean",
+          "total": 4358.91,
+          "loss": -5116.9,
+          "gain": 9475.81
+        },
+        {
+          "key": "EMEA",
+          "total": 5280.03,
+          "loss": -23169.52,
+          "gain": 28449.55
+        },
+        {
+          "key": "Africa",
+          "total": 10944.11,
+          "loss": -16812.78,
+          "gain": 27756.89
+        },
+        {
+          "key": "East",
+          "total": 17059.61,
+          "loss": -8397.98,
+          "gain": 25457.59
+        },
+        {
+          "key": "South",
+          "total": 17849.1,
+          "loss": -30527.87,
+          "gain": 48376.97
+        },
+        {
+          "key": "West",
+          "total": 20065.69,
+          "loss": -3391.7,
+          "gain": 23457.39
+        },
+        {
+          "key": "Oceania",
+          "total": 21428.76,
+          "loss": -8061.39,
+          "gain": 29490.15
+        },
+        {
+          "key": "Central Asia",
+          "total": 22846.45,
+          "loss": -3940.79,
+          "gain": 26787.24
+        },
+        {
+          "key": "North Asia",
+          "total": 35513.37,
+          "loss": -9272.08,
+          "gain": 44785.46
+        },
+        {
+          "key": "North",
+          "total": 35866.23,
+          "loss": -6345.48,
+          "gain": 42211.71
+        },
+        {
+          "key": "Central",
+          "total": 52678.47,
+          "loss": -39062.46,
+          "gain": 91740.93
+        }
+      ],
+      "discount_buckets": [
+        {
+          "bucket": "0-10%",
+          "count": 5107,
+          "loss": -95.51,
+          "gain": 319161.46
+        },
+        {
+          "bucket": "10-20%",
+          "count": 890,
+          "loss": -4886.81,
+          "gain": 62492.64
+        },
+        {
+          "bucket": "20-30%",
+          "count": 1100,
+          "loss": -10715.44,
+          "gain": 33233.06
+        },
+        {
+          "bucket": "30-40%",
+          "count": 104,
+          "loss": -9577.17,
+          "gain": 1629.98
+        },
+        {
+          "bucket": "40-50%",
+          "count": 713,
+          "loss": -36596.46,
+          "gain": 1731.83
+        },
+        {
+          "bucket": "50-60%",
+          "count": 308,
+          "loss": -31662.61,
+          "gain": 0.0
+        },
+        {
+          "bucket": "60-70%",
+          "count": 336,
+          "loss": -32746.96,
+          "gain": 0.0
+        },
+        {
+          "bucket": "70-80%",
+          "count": 367,
+          "loss": -31597.32,
+          "gain": 0.0
+        },
+        {
+          "bucket": "80-90%",
+          "count": 73,
+          "loss": -11429.87,
+          "gain": 0.0
+        },
+        {
+          "bucket": "90-100%",
+          "count": 0,
+          "loss": 0.0,
+          "gain": 0.0
+        }
+      ],
+      "headline": {
+        "hi_discount_txn_share_pct": 14.4,
+        "hi_discount_gain_share_pct": 0.0,
+        "hi_discount_loss_share_pct": 68.6
+      },
+      "tables_by_manufacturer": [
+        {
+          "manufacturer": "Barricks",
+          "profit": -3370.51
+        },
+        {
+          "manufacturer": "Chromcraft",
+          "profit": -3057.5
+        },
+        {
+          "manufacturer": "Bevis",
+          "profit": -2086.59
+        },
+        {
+          "manufacturer": "Balt",
+          "profit": -719.91
+        },
+        {
+          "manufacturer": "Lesro",
+          "profit": -705.99
+        },
+        {
+          "manufacturer": "Hon",
+          "profit": -498.08
+        },
+        {
+          "manufacturer": "Riverside",
+          "profit": -249.56
+        },
+        {
+          "manufacturer": "Bush",
+          "profit": -248.39
+        },
+        {
+          "manufacturer": "BPI",
+          "profit": -175.26
+        },
+        {
+          "manufacturer": "BoxOffice",
+          "profit": -161.88
+        },
+        {
+          "manufacturer": "Bretford",
+          "profit": -133.33
+        },
+        {
+          "manufacturer": "KI",
+          "profit": -45.55
+        },
+        {
+          "manufacturer": "Safco",
+          "profit": 19.16
+        },
+        {
+          "manufacturer": "SAFCO",
+          "profit": 358.07
+        }
+      ],
+      "ship_mode_dist": [
+        {
+          "mode": "Standard Class",
+          "count": 5365
+        },
+        {
+          "mode": "Second Class",
+          "count": 1799
+        },
+        {
+          "mode": "First Class",
+          "count": 1367
+        },
+        {
+          "mode": "Same Day",
+          "count": 467
+        }
+      ],
+      "eta_dist": [
+        {
+          "eta": 0,
+          "count": 450
+        },
+        {
+          "eta": 1,
+          "count": 313
+        },
+        {
+          "eta": 2,
+          "count": 1273
+        },
+        {
+          "eta": 3,
+          "count": 866
+        },
+        {
+          "eta": 4,
+          "count": 2491
+        },
+        {
+          "eta": 5,
+          "count": 2046
+        },
+        {
+          "eta": 6,
+          "count": 1005
+        },
+        {
+          "eta": 7,
+          "count": 554
+        }
+      ]
+    },
+    "2020": {
+      "meta": {
+        "n_transactions": 10962,
+        "date_start": "2020-01-02",
+        "date_end": "2020-12-31"
+      },
+      "yearly_counts": [
+        {
+          "year": 2020,
+          "count": 10962
+        }
+      ],
+      "kpi": {
+        "total_sales": 2677493.0,
+        "total_profit": 307415.28,
+        "margin_pct": 11.48,
+        "avg_discount_pct": 14.13,
+        "n_transactions": 10962,
+        "yoy_transaction_growth_pct": {},
+        "discount_profit_correlation": -0.351
+      },
+      "monthly_series": [
+        {
+          "month": "2020-01",
+          "sales": 135775.0,
+          "profit": 10401.64,
+          "count": 539
+        },
+        {
+          "month": "2020-02",
+          "sales": 100521.0,
+          "profit": 15000.1,
+          "count": 429
+        },
+        {
+          "month": "2020-03",
+          "sales": 163092.0,
+          "profit": 17992.92,
+          "count": 662
+        },
+        {
+          "month": "2020-04",
+          "sales": 161060.0,
+          "profit": 17366.97,
+          "count": 657
+        },
+        {
+          "month": "2020-05",
+          "sales": 208370.0,
+          "profit": 29876.7,
+          "count": 840
+        },
+        {
+          "month": "2020-06",
+          "sales": 256181.0,
+          "profit": 34407.15,
+          "count": 1136
+        },
+        {
+          "month": "2020-07",
+          "sales": 145247.0,
+          "profit": 15585.39,
+          "count": 659
+        },
+        {
+          "month": "2020-08",
+          "sales": 303158.0,
+          "profit": 43573.88,
+          "count": 1083
+        },
+        {
+          "month": "2020-09",
+          "sales": 289390.0,
+          "profit": 27776.18,
+          "count": 1223
+        },
+        {
+          "month": "2020-10",
+          "sales": 252942.0,
+          "profit": 30662.88,
+          "count": 990
+        },
+        {
+          "month": "2020-11",
+          "sales": 323512.0,
+          "profit": 31820.72,
+          "count": 1460
+        },
+        {
+          "month": "2020-12",
+          "sales": 338245.0,
+          "profit": 32950.75,
+          "count": 1284
+        }
+      ],
+      "by_sub_category": [
+        {
+          "key": "Tables",
+          "total": -8421.7,
+          "loss": -27619.64,
+          "gain": 19197.95
+        },
+        {
+          "key": "Fasteners",
+          "total": 3003.98,
+          "loss": -1168.61,
+          "gain": 4172.59
+        },
+        {
+          "key": "Labels",
+          "total": 3230.34,
+          "loss": -758.66,
+          "gain": 3989.0
+        },
+        {
+          "key": "Supplies",
+          "total": 5012.07,
+          "loss": -3212.06,
+          "gain": 8224.12
+        },
+        {
+          "key": "Envelopes",
+          "total": 6602.89,
+          "loss": -2438.79,
+          "gain": 9041.68
+        },
+        {
+          "key": "Furnishings",
+          "total": 9661.92,
+          "loss": -6294.18,
+          "gain": 15956.09
+        },
+        {
+          "key": "Paper",
+          "total": 10687.24,
+          "loss": -2930.8,
+          "gain": 13618.04
+        },
+        {
+          "key": "Art",
+          "total": 11841.33,
+          "loss": -5051.66,
+          "gain": 16892.99
+        },
+        {
+          "key": "Machines",
+          "total": 15403.56,
+          "loss": -16048.21,
+          "gain": 31451.76
+        },
+        {
+          "key": "Binders",
+          "total": 17122.52,
+          "loss": -8674.54,
+          "gain": 25797.06
+        },
+        {
+          "key": "Storage",
+          "total": 21489.01,
+          "loss": -17521.27,
+          "gain": 39010.28
+        },
+        {
+          "key": "Appliances",
+          "total": 24316.13,
+          "loss": -17733.76,
+          "gain": 42049.89
+        },
+        {
+          "key": "Bookcases",
+          "total": 28137.27,
+          "loss": -23178.77,
+          "gain": 51316.03
+        },
+        {
+          "key": "Chairs",
+          "total": 28755.35,
+          "loss": -16873.88,
+          "gain": 45629.22
+        },
+        {
+          "key": "Accessories",
+          "total": 33507.1,
+          "loss": -7965.8,
+          "gain": 41472.9
+        },
+        {
+          "key": "Phones",
+          "total": 45223.05,
+          "loss": -19847.81,
+          "gain": 65070.86
+        },
+        {
+          "key": "Copiers",
+          "total": 51843.23,
+          "loss": -18023.92,
+          "gain": 69867.15
+        }
+      ],
+      "by_market_area": [
+        {
+          "key": "Canada",
+          "total": 4887.84,
+          "loss": 0.0,
+          "gain": 4887.84
+        },
+        {
+          "key": "EMEA",
+          "total": 5419.57,
+          "loss": -29181.84,
+          "gain": 34601.42
+        },
+        {
+          "key": "Africa",
+          "total": 11908.93,
+          "loss": -19456.82,
+          "gain": 31365.76
+        },
+        {
+          "key": "LATAM",
+          "total": 50184.9,
+          "loss": -32349.46,
+          "gain": 82534.35
+        },
+        {
+          "key": "US",
+          "total": 61618.6,
+          "loss": -32529.39,
+          "gain": 94147.99
+        },
+        {
+          "key": "EU",
+          "total": 83984.58,
+          "loss": -41550.36,
+          "gain": 125534.93
+        },
+        {
+          "key": "APAC",
+          "total": 89410.85,
+          "loss": -40274.47,
+          "gain": 129685.32
+        }
+      ],
+      "by_order_region": [
+        {
+          "key": "Southeast Asia",
+          "total": 2738.13,
+          "loss": -19473.75,
+          "gain": 22211.88
+        },
+        {
+          "key": "Canada",
+          "total": 4887.84,
+          "loss": 0.0,
+          "gain": 4887.84
+        },
+        {
+          "key": "EMEA",
+          "total": 5419.57,
+          "loss": -29181.84,
+          "gain": 34601.42
+        },
+        {
+          "key": "Caribbean",
+          "total": 8706.26,
+          "loss": -4259.22,
+          "gain": 12965.48
+        },
+        {
+          "key": "Africa",
+          "total": 11908.93,
+          "loss": -19456.82,
+          "gain": 31365.76
+        },
+        {
+          "key": "West",
+          "total": 20492.19,
+          "loss": -3885.23,
+          "gain": 24377.43
+        },
+        {
+          "key": "East",
+          "total": 21091.01,
+          "loss": -12512.18,
+          "gain": 33603.19
+        },
+        {
+          "key": "North Asia",
+          "total": 28020.32,
+          "loss": -3467.98,
+          "gain": 31488.3
+        },
+        {
+          "key": "Central Asia",
+          "total": 28977.08,
+          "loss": -5060.14,
+          "gain": 34037.23
+        },
+        {
+          "key": "Oceania",
+          "total": 29675.32,
+          "loss": -12272.6,
+          "gain": 41947.92
+        },
+        {
+          "key": "South",
+          "total": 30975.36,
+          "loss": -30820.8,
+          "gain": 61796.16
+        },
+        {
+          "key": "North",
+          "total": 50905.94,
+          "loss": -8422.84,
+          "gain": 59328.78
+        },
+        {
+          "key": "Central",
+          "total": 63617.31,
+          "loss": -46528.93,
+          "gain": 110146.24
+        }
+      ],
+      "discount_buckets": [
+        {
+          "bucket": "0-10%",
+          "count": 6329,
+          "loss": -249.73,
+          "gain": 382775.64
+        },
+        {
+          "bucket": "10-20%",
+          "count": 1232,
+          "loss": -8912.15,
+          "gain": 81257.11
+        },
+        {
+          "bucket": "20-30%",
+          "count": 1165,
+          "loss": -9280.65,
+          "gain": 35449.44
+        },
+        {
+          "bucket": "30-40%",
+          "count": 117,
+          "loss": -8937.51,
+          "gain": 1839.31
+        },
+        {
+          "bucket": "40-50%",
+          "count": 898,
+          "loss": -44311.0,
+          "gain": 1436.12
+        },
+        {
+          "bucket": "50-60%",
+          "count": 310,
+          "loss": -35489.51,
+          "gain": 0.0
+        },
+        {
+          "bucket": "60-70%",
+          "count": 445,
+          "loss": -37987.11,
+          "gain": 0.0
+        },
+        {
+          "bucket": "70-80%",
+          "count": 397,
+          "loss": -42271.92,
+          "gain": 0.0
+        },
+        {
+          "bucket": "80-90%",
+          "count": 69,
+          "loss": -7902.75,
+          "gain": 0.0
+        },
+        {
+          "bucket": "90-100%",
+          "count": 0,
+          "loss": 0.0,
+          "gain": 0.0
+        }
+      ],
+      "headline": {
+        "hi_discount_txn_share_pct": 13.3,
+        "hi_discount_gain_share_pct": 0.0,
+        "hi_discount_loss_share_pct": 69.4
+      },
+      "tables_by_manufacturer": [
+        {
+          "manufacturer": "Hon",
+          "profit": -3523.1
+        },
+        {
+          "manufacturer": "Bevis",
+          "profit": -3163.67
+        },
+        {
+          "manufacturer": "Chromcraft",
+          "profit": -2977.78
+        },
+        {
+          "manufacturer": "Lesro",
+          "profit": -1600.35
+        },
+        {
+          "manufacturer": "Riverside",
+          "profit": -567.96
+        },
+        {
+          "manufacturer": "Balt",
+          "profit": -220.35
+        },
+        {
+          "manufacturer": "KI",
+          "profit": -179.51
+        },
+        {
+          "manufacturer": "Iceberg",
+          "profit": -15.1
+        },
+        {
+          "manufacturer": "Anderson",
+          "profit": -14.16
+        },
+        {
+          "manufacturer": "Laminate",
+          "profit": -13.87
+        },
+        {
+          "manufacturer": "SAFCO",
+          "profit": 13.38
+        },
+        {
+          "manufacturer": "Bretford",
+          "profit": 116.17
+        },
+        {
+          "manufacturer": "Bush",
+          "profit": 649.63
+        },
+        {
+          "manufacturer": "Barricks",
+          "profit": 3074.98
+        }
+      ],
+      "ship_mode_dist": [
+        {
+          "mode": "Standard Class",
+          "count": 6717
+        },
+        {
+          "mode": "Second Class",
+          "count": 2107
+        },
+        {
+          "mode": "First Class",
+          "count": 1577
+        },
+        {
+          "mode": "Same Day",
+          "count": 561
+        }
+      ],
+      "eta_dist": [
+        {
+          "eta": 0,
+          "count": 530
+        },
+        {
+          "eta": 1,
+          "count": 344
+        },
+        {
+          "eta": 2,
+          "count": 1486
+        },
+        {
+          "eta": 3,
+          "count": 971
+        },
+        {
+          "eta": 4,
+          "count": 3181
+        },
+        {
+          "eta": 5,
+          "count": 2456
+        },
+        {
+          "eta": 6,
+          "count": 1360
+        },
+        {
+          "eta": 7,
+          "count": 634
+        }
+      ]
+    },
+    "2021": {
+      "meta": {
+        "n_transactions": 13799,
+        "date_start": "2021-01-01",
+        "date_end": "2021-12-31"
+      },
+      "yearly_counts": [
+        {
+          "year": 2021,
+          "count": 13799
+        }
+      ],
+      "kpi": {
+        "total_sales": 3405860.0,
+        "total_profit": 406935.23,
+        "margin_pct": 11.95,
+        "avg_discount_pct": 14.03,
+        "n_transactions": 13799,
+        "yoy_transaction_growth_pct": {},
+        "discount_profit_correlation": -0.293
+      },
+      "monthly_series": [
+        {
+          "month": "2021-01",
+          "sales": 199197.0,
+          "profit": 26810.56,
+          "count": 709
+        },
+        {
+          "month": "2021-02",
+          "sales": 167247.0,
+          "profit": 23762.5,
+          "count": 605
+        },
+        {
+          "month": "2021-03",
+          "sales": 198591.0,
+          "profit": 23433.77,
+          "count": 766
+        },
+        {
+          "month": "2021-04",
+          "sales": 177835.0,
+          "profit": 19462.04,
+          "count": 785
+        },
+        {
+          "month": "2021-05",
+          "sales": 260525.0,
+          "profit": 28495.69,
+          "count": 1057
+        },
+        {
+          "month": "2021-06",
+          "sales": 396513.0,
+          "profit": 45478.41,
+          "count": 1530
+        },
+        {
+          "month": "2021-07",
+          "sales": 229940.0,
+          "profit": 28863.83,
+          "count": 925
+        },
+        {
+          "month": "2021-08",
+          "sales": 326491.0,
+          "profit": 31023.67,
+          "count": 1442
+        },
+        {
+          "month": "2021-09",
+          "sales": 376626.0,
+          "profit": 38905.67,
+          "count": 1682
+        },
+        {
+          "month": "2021-10",
+          "sales": 293423.0,
+          "profit": 42433.22,
+          "count": 1100
+        },
+        {
+          "month": "2021-11",
+          "sales": 373996.0,
+          "profit": 48063.0,
+          "count": 1596
+        },
+        {
+          "month": "2021-12",
+          "sales": 405476.0,
+          "profit": 50202.87,
+          "count": 1602
+        }
+      ],
+      "by_sub_category": [
+        {
+          "key": "Tables",
+          "total": -14040.49,
+          "loss": -35072.16,
+          "gain": 21031.67
+        },
+        {
+          "key": "Fasteners",
+          "total": 2912.22,
+          "loss": -1698.65,
+          "gain": 4610.88
+        },
+        {
+          "key": "Labels",
+          "total": 3606.57,
+          "loss": -961.49,
+          "gain": 4568.07
+        },
+        {
+          "key": "Supplies",
+          "total": 5625.37,
+          "loss": -5124.9,
+          "gain": 10750.27
+        },
+        {
+          "key": "Envelopes",
+          "total": 9571.95,
+          "loss": -2638.44,
+          "gain": 12210.39
+        },
+        {
+          "key": "Furnishings",
+          "total": 14604.65,
+          "loss": -8764.57,
+          "gain": 23369.22
+        },
+        {
+          "key": "Machines",
+          "total": 15611.66,
+          "loss": -21403.89,
+          "gain": 37015.55
+        },
+        {
+          "key": "Art",
+          "total": 15629.79,
+          "loss": -5179.17,
+          "gain": 20808.97
+        },
+        {
+          "key": "Paper",
+          "total": 16879.65,
+          "loss": -2835.2,
+          "gain": 19714.85
+        },
+        {
+          "key": "Binders",
+          "total": 21523.63,
+          "loss": -11265.59,
+          "gain": 32789.22
+        },
+        {
+          "key": "Storage",
+          "total": 32011.03,
+          "loss": -18892.7,
+          "gain": 50903.73
+        },
+        {
+          "key": "Accessories",
+          "total": 38805.42,
+          "loss": -10203.65,
+          "gain": 49009.07
+        },
+        {
+          "key": "Chairs",
+          "total": 40449.49,
+          "loss": -28702.72,
+          "gain": 69152.21
+        },
+        {
+          "key": "Appliances",
+          "total": 41485.52,
+          "loss": -14791.8,
+          "gain": 56277.31
+        },
+        {
+          "key": "Bookcases",
+          "total": 43049.24,
+          "loss": -27816.52,
+          "gain": 70865.76
+        },
+        {
+          "key": "Phones",
+          "total": 46908.83,
+          "loss": -33018.21,
+          "gain": 79927.04
+        },
+        {
+          "key": "Copiers",
+          "total": 72300.69,
+          "loss": -17537.52,
+          "gain": 89838.21
+        }
+      ],
+      "by_market_area": [
+        {
+          "key": "Canada",
+          "total": 5129.46,
+          "loss": 0.0,
+          "gain": 5129.46
+        },
+        {
+          "key": "EMEA",
+          "total": 10598.04,
+          "loss": -30718.92,
+          "gain": 41316.96
+        },
+        {
+          "key": "Africa",
+          "total": 26687.11,
+          "loss": -25818.5,
+          "gain": 52505.61
+        },
+        {
+          "key": "LATAM",
+          "total": 61415.37,
+          "loss": -48203.41,
+          "gain": 109618.79
+        },
+        {
+          "key": "US",
+          "total": 81726.93,
+          "loss": -37837.71,
+          "gain": 119564.65
+        },
+        {
+          "key": "EU",
+          "total": 98275.18,
+          "loss": -52960.1,
+          "gain": 151235.29
+        },
+        {
+          "key": "APAC",
+          "total": 123103.13,
+          "loss": -50368.54,
+          "gain": 173471.67
+        }
+      ],
+      "by_order_region": [
+        {
+          "key": "Southeast Asia",
+          "total": 3166.2,
+          "loss": -22556.29,
+          "gain": 25722.49
+        },
+        {
+          "key": "Canada",
+          "total": 5129.46,
+          "loss": 0.0,
+          "gain": 5129.46
+        },
+        {
+          "key": "Caribbean",
+          "total": 8973.54,
+          "loss": -7106.5,
+          "gain": 16080.04
+        },
+        {
+          "key": "EMEA",
+          "total": 10598.04,
+          "loss": -30718.92,
+          "gain": 41316.96
+        },
+        {
+          "key": "East",
+          "total": 20176.81,
+          "loss": -16748.45,
+          "gain": 36925.26
+        },
+        {
+          "key": "West",
+          "total": 23959.94,
+          "loss": -6378.45,
+          "gain": 30338.39
+        },
+        {
+          "key": "Africa",
+          "total": 26687.11,
+          "loss": -25818.5,
+          "gain": 52505.61
+        },
+        {
+          "key": "Central Asia",
+          "total": 33109.18,
+          "loss": -9483.62,
+          "gain": 42592.81
+        },
+        {
+          "key": "Oceania",
+          "total": 37553.45,
+          "loss": -13014.34,
+          "gain": 50567.8
+        },
+        {
+          "key": "South",
+          "total": 39755.14,
+          "loss": -47382.57,
+          "gain": 87137.7
+        },
+        {
+          "key": "North Asia",
+          "total": 49274.29,
+          "loss": -5314.28,
+          "gain": 54588.57
+        },
+        {
+          "key": "North",
+          "total": 51167.43,
+          "loss": -13220.17,
+          "gain": 64387.6
+        },
+        {
+          "key": "Central",
+          "total": 97384.63,
+          "loss": -48165.09,
+          "gain": 145549.72
+        }
+      ],
+      "discount_buckets": [
+        {
+          "bucket": "0-10%",
+          "count": 8067,
+          "loss": -420.99,
+          "gain": 516954.98
+        },
+        {
+          "bucket": "10-20%",
+          "count": 1405,
+          "loss": -9631.87,
+          "gain": 88500.5
+        },
+        {
+          "bucket": "20-30%",
+          "count": 1473,
+          "loss": -13290.0,
+          "gain": 41348.85
+        },
+        {
+          "bucket": "30-40%",
+          "count": 144,
+          "loss": -13897.83,
+          "gain": 2739.2
+        },
+        {
+          "bucket": "40-50%",
+          "count": 1187,
+          "loss": -55174.33,
+          "gain": 3298.89
+        },
+        {
+          "bucket": "50-60%",
+          "count": 427,
+          "loss": -45063.07,
+          "gain": 0.0
+        },
+        {
+          "bucket": "60-70%",
+          "count": 590,
+          "loss": -52014.86,
+          "gain": 0.0
+        },
+        {
+          "bucket": "70-80%",
+          "count": 442,
+          "loss": -51178.28,
+          "gain": 0.0
+        },
+        {
+          "bucket": "80-90%",
+          "count": 64,
+          "loss": -5235.95,
+          "gain": 0.0
+        },
+        {
+          "bucket": "90-100%",
+          "count": 0,
+          "loss": 0.0,
+          "gain": 0.0
+        }
+      ],
+      "headline": {
+        "hi_discount_txn_share_pct": 13.2,
+        "hi_discount_gain_share_pct": 0.0,
+        "hi_discount_loss_share_pct": 69.4
+      },
+      "tables_by_manufacturer": [
+        {
+          "manufacturer": "Lesro",
+          "profit": -4784.76
+        },
+        {
+          "manufacturer": "Bevis",
+          "profit": -4391.05
+        },
+        {
+          "manufacturer": "Chromcraft",
+          "profit": -3326.38
+        },
+        {
+          "manufacturer": "Bretford",
+          "profit": -1137.01
+        },
+        {
+          "manufacturer": "Bush",
+          "profit": -642.48
+        },
+        {
+          "manufacturer": "BPI",
+          "profit": -547.69
+        },
+        {
+          "manufacturer": "Iceberg",
+          "profit": -445.39
+        },
+        {
+          "manufacturer": "Barricks",
+          "profit": -296.12
+        },
+        {
+          "manufacturer": "KI",
+          "profit": -217.7
+        },
+        {
+          "manufacturer": "Laminate",
+          "profit": -192.66
+        },
+        {
+          "manufacturer": "Safco",
+          "profit": -1.42
+        },
+        {
+          "manufacturer": "Balt",
+          "profit": 146.16
+        },
+        {
+          "manufacturer": "Office",
+          "profit": 261.23
+        },
+        {
+          "manufacturer": "Global",
+          "profit": 354.03
+        },
+        {
+          "manufacturer": "SAFCO",
+          "profit": 431.11
+        },
+        {
+          "manufacturer": "Hon",
+          "profit": 749.62
+        }
+      ],
+      "ship_mode_dist": [
+        {
+          "mode": "Standard Class",
+          "count": 8254
+        },
+        {
+          "mode": "Second Class",
+          "count": 2838
+        },
+        {
+          "mode": "First Class",
+          "count": 1958
+        },
+        {
+          "mode": "Same Day",
+          "count": 749
+        }
+      ],
+      "eta_dist": [
+        {
+          "eta": 0,
+          "count": 732
+        },
+        {
+          "eta": 1,
+          "count": 441
+        },
+        {
+          "eta": 2,
+          "count": 1914
+        },
+        {
+          "eta": 3,
+          "count": 1307
+        },
+        {
+          "eta": 4,
+          "count": 3766
+        },
+        {
+          "eta": 5,
+          "count": 3013
+        },
+        {
+          "eta": 6,
+          "count": 1759
+        },
+        {
+          "eta": 7,
+          "count": 867
+        }
+      ]
+    },
+    "2022": {
+      "meta": {
+        "n_transactions": 17531,
+        "date_start": "2022-01-01",
+        "date_end": "2022-12-31"
+      },
+      "yearly_counts": [
+        {
+          "year": 2022,
+          "count": 17531
+        }
+      ],
+      "kpi": {
+        "total_sales": 4300041.0,
+        "total_profit": 504165.97,
+        "margin_pct": 11.72,
+        "avg_discount_pct": 14.33,
+        "n_transactions": 17531,
+        "yoy_transaction_growth_pct": {},
+        "discount_profit_correlation": -0.313
+      },
+      "monthly_series": [
+        {
+          "month": "2022-01",
+          "sales": 241267.0,
+          "profit": 28001.39,
+          "count": 918
+        },
+        {
+          "month": "2022-02",
+          "sales": 184848.0,
+          "profit": 19751.7,
+          "count": 756
+        },
+        {
+          "month": "2022-03",
+          "sales": 263110.0,
+          "profit": 37357.26,
+          "count": 1068
+        },
+        {
+          "month": "2022-04",
+          "sales": 242781.0,
+          "profit": 23782.3,
+          "count": 1051
+        },
+        {
+          "month": "2022-05",
+          "sales": 288404.0,
+          "profit": 33953.56,
+          "count": 1284
+        },
+        {
+          "month": "2022-06",
+          "sales": 401843.0,
+          "profit": 43778.6,
+          "count": 1748
+        },
+        {
+          "month": "2022-07",
+          "sales": 258718.0,
+          "profit": 28035.87,
+          "count": 1087
+        },
+        {
+          "month": "2022-08",
+          "sales": 456633.0,
+          "profit": 53542.89,
+          "count": 1675
+        },
+        {
+          "month": "2022-09",
+          "sales": 481186.0,
+          "profit": 67979.45,
+          "count": 2018
+        },
+        {
+          "month": "2022-10",
+          "sales": 422785.0,
+          "profit": 58209.83,
+          "count": 1626
+        },
+        {
+          "month": "2022-11",
+          "sales": 555312.0,
+          "profit": 62856.59,
+          "count": 2147
+        },
+        {
+          "month": "2022-12",
+          "sales": 503154.0,
+          "profit": 46916.52,
+          "count": 2153
+        }
+      ],
+      "by_sub_category": [
+        {
+          "key": "Tables",
+          "total": -30545.91,
+          "loss": -54282.76,
+          "gain": 23736.85
+        },
+        {
+          "key": "Fasteners",
+          "total": 3672.31,
+          "loss": -2433.88,
+          "gain": 6106.18
+        },
+        {
+          "key": "Labels",
+          "total": 5054.72,
+          "loss": -1446.03,
+          "gain": 6500.75
+        },
+        {
+          "key": "Supplies",
+          "total": 7365.41,
+          "loss": -6695.49,
+          "gain": 14060.9
+        },
+        {
+          "key": "Envelopes",
+          "total": 8360.09,
+          "loss": -3886.44,
+          "gain": 12246.53
+        },
+        {
+          "key": "Furnishings",
+          "total": 15390.65,
+          "loss": -9201.01,
+          "gain": 24591.66
+        },
+        {
+          "key": "Machines",
+          "total": 18627.75,
+          "loss": -26344.31,
+          "gain": 44972.06
+        },
+        {
+          "key": "Art",
+          "total": 20083.76,
+          "loss": -7630.5,
+          "gain": 27714.26
+        },
+        {
+          "key": "Paper",
+          "total": 20975.83,
+          "loss": -2802.34,
+          "gain": 23778.17
+        },
+        {
+          "key": "Binders",
+          "total": 22356.49,
+          "loss": -20692.81,
+          "gain": 43049.3
+        },
+        {
+          "key": "Storage",
+          "total": 39016.95,
+          "loss": -25494.72,
+          "gain": 64511.68
+        },
+        {
+          "key": "Chairs",
+          "total": 41248.27,
+          "loss": -32352.34,
+          "gain": 73600.61
+        },
+        {
+          "key": "Accessories",
+          "total": 41593.93,
+          "loss": -13596.79,
+          "gain": 55190.72
+        },
+        {
+          "key": "Appliances",
+          "total": 53040.5,
+          "loss": -19076.2,
+          "gain": 72116.7
+        },
+        {
+          "key": "Bookcases",
+          "total": 63219.05,
+          "loss": -32802.53,
+          "gain": 96021.58
+        },
+        {
+          "key": "Phones",
+          "total": 70657.64,
+          "loss": -29715.07,
+          "gain": 100372.71
+        },
+        {
+          "key": "Copiers",
+          "total": 104048.54,
+          "loss": -21635.25,
+          "gain": 125683.78
+        }
+      ],
+      "by_market_area": [
+        {
+          "key": "Canada",
+          "total": 5993.01,
+          "loss": 0.0,
+          "gain": 5993.01
+        },
+        {
+          "key": "EMEA",
+          "total": 22600.32,
+          "loss": -39995.64,
+          "gain": 62595.96
+        },
+        {
+          "key": "Africa",
+          "total": 39331.47,
+          "loss": -26786.93,
+          "gain": 66118.4
+        },
+        {
+          "key": "LATAM",
+          "total": 73334.8,
+          "loss": -54051.29,
+          "gain": 127386.09
+        },
+        {
+          "key": "US",
+          "total": 93507.51,
+          "loss": -53871.41,
+          "gain": 147378.92
+        },
+        {
+          "key": "EU",
+          "total": 128944.36,
+          "loss": -61941.92,
+          "gain": 190886.28
+        },
+        {
+          "key": "APAC",
+          "total": 140454.5,
+          "loss": -73441.28,
+          "gain": 213895.77
+        }
+      ],
+      "by_order_region": [
+        {
+          "key": "Canada",
+          "total": 5993.01,
+          "loss": 0.0,
+          "gain": 5993.01
+        },
+        {
+          "key": "Southeast Asia",
+          "total": 8705.0,
+          "loss": -32232.47,
+          "gain": 40937.47
+        },
+        {
+          "key": "Caribbean",
+          "total": 12532.62,
+          "loss": -7777.3,
+          "gain": 20309.92
+        },
+        {
+          "key": "EMEA",
+          "total": 22600.32,
+          "loss": -39995.64,
+          "gain": 62595.96
+        },
+        {
+          "key": "Oceania",
+          "total": 31431.58,
+          "loss": -22624.86,
+          "gain": 54056.43
+        },
+        {
+          "key": "East",
+          "total": 33195.35,
+          "loss": -11931.99,
+          "gain": 45127.34
+        },
+        {
+          "key": "Africa",
+          "total": 39331.47,
+          "loss": -26786.93,
+          "gain": 66118.4
+        },
+        {
+          "key": "West",
+          "total": 43900.63,
+          "loss": -9065.57,
+          "gain": 52966.2
+        },
+        {
+          "key": "Central Asia",
+          "total": 47547.48,
+          "loss": -11083.49,
+          "gain": 58630.97
+        },
+        {
+          "key": "South",
+          "total": 51776.16,
+          "loss": -48503.52,
+          "gain": 100279.68
+        },
+        {
+          "key": "North Asia",
+          "total": 52770.44,
+          "loss": -7500.46,
+          "gain": 60270.9
+        },
+        {
+          "key": "North",
+          "total": 56658.35,
+          "loss": -24146.36,
+          "gain": 80804.71
+        },
+        {
+          "key": "Central",
+          "total": 97723.57,
+          "loss": -68439.88,
+          "gain": 166163.46
+        }
+      ],
+      "discount_buckets": [
+        {
+          "bucket": "0-10%",
+          "count": 10117,
+          "loss": -369.27,
+          "gain": 632063.8
+        },
+        {
+          "bucket": "10-20%",
+          "count": 1817,
+          "loss": -9645.91,
+          "gain": 115429.65
+        },
+        {
+          "bucket": "20-30%",
+          "count": 1887,
+          "loss": -21283.57,
+          "gain": 60784.41
+        },
+        {
+          "bucket": "30-40%",
+          "count": 198,
+          "loss": -18656.62,
+          "gain": 2807.8
+        },
+        {
+          "bucket": "40-50%",
+          "count": 1535,
+          "loss": -73501.78,
+          "gain": 3168.78
+        },
+        {
+          "bucket": "50-60%",
+          "count": 610,
+          "loss": -55878.91,
+          "gain": 0.0
+        },
+        {
+          "bucket": "60-70%",
+          "count": 675,
+          "loss": -52333.13,
+          "gain": 0.0
+        },
+        {
+          "bucket": "70-80%",
+          "count": 580,
+          "loss": -61302.95,
+          "gain": 0.0
+        },
+        {
+          "bucket": "80-90%",
+          "count": 112,
+          "loss": -17116.31,
+          "gain": 0.0
+        },
+        {
+          "bucket": "90-100%",
+          "count": 0,
+          "loss": 0.0,
+          "gain": 0.0
+        }
+      ],
+      "headline": {
+        "hi_discount_txn_share_pct": 13.6,
+        "hi_discount_gain_share_pct": 0.0,
+        "hi_discount_loss_share_pct": 66.2
+      },
+      "tables_by_manufacturer": [
+        {
+          "manufacturer": "Barricks",
+          "profit": -12641.53
+        },
+        {
+          "manufacturer": "Lesro",
+          "profit": -6006.66
+        },
+        {
+          "manufacturer": "Bevis",
+          "profit": -5277.43
+        },
+        {
+          "manufacturer": "Bush",
+          "profit": -1314.49
+        },
+        {
+          "manufacturer": "Hon",
+          "profit": -1069.54
+        },
+        {
+          "manufacturer": "BoxOffice",
+          "profit": -986.56
+        },
+        {
+          "manufacturer": "Balt",
+          "profit": -981.19
+        },
+        {
+          "manufacturer": "Riverside",
+          "profit": -745.81
+        },
+        {
+          "manufacturer": "Chromcraft",
+          "profit": -568.88
+        },
+        {
+          "manufacturer": "Office",
+          "profit": -328.06
+        },
+        {
+          "manufacturer": "KI",
+          "profit": -284.93
+        },
+        {
+          "manufacturer": "Bretford",
+          "profit": -208.9
+        },
+        {
+          "manufacturer": "SAFCO",
+          "profit": -139.81
+        },
+        {
+          "manufacturer": "BPI",
+          "profit": -73.02
+        },
+        {
+          "manufacturer": "Anderson",
+          "profit": -3.35
+        },
+        {
+          "manufacturer": "Safco",
+          "profit": 16.33
+        },
+        {
+          "manufacturer": "Iceberg",
+          "profit": 67.94
+        }
+      ],
+      "ship_mode_dist": [
+        {
+          "mode": "Standard Class",
+          "count": 10439
+        },
+        {
+          "mode": "Second Class",
+          "count": 3565
+        },
+        {
+          "mode": "First Class",
+          "count": 2603
+        },
+        {
+          "mode": "Same Day",
+          "count": 924
+        }
+      ],
+      "eta_dist": [
+        {
+          "eta": 0,
+          "count": 888
+        },
+        {
+          "eta": 1,
+          "count": 564
+        },
+        {
+          "eta": 2,
+          "count": 2353
+        },
+        {
+          "eta": 3,
+          "count": 1891
+        },
+        {
+          "eta": 4,
+          "count": 4996
+        },
+        {
+          "eta": 5,
+          "count": 3706
+        },
+        {
+          "eta": 6,
+          "count": 2131
+        },
+        {
+          "eta": 7,
+          "count": 1002
+        }
+      ]
+    }
+  },
+  "source": {
+    "file": "datafile/[DArt-B 5기] Global_Supermarket.csv",
+    "grain": "One row per order line; not unique orders",
+    "discount_threshold": "discount > 0.4",
+    "shipping_definition": "ship_date - order_date; dispatch lead time, not delivery time",
+    "manufacturer_definition": "First token of product_name; inferred, not verified manufacturer"
+  }
 }
