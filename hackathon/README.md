@@ -1,120 +1,83 @@
 # Campus Mate
 
-Codex Community Hackathon — Seoul for Students · [Korean](./README_KOR.md)
+> Find open lunch hours from a class timetable, then match students who are free on the same campus.
 
-[Live Site](https://campusmate.site) · [Demo Video](https://github.com/han942/codex-hackerthon/blob/main/campusmate_demo.mov) · [Event Page](https://codex-community-korea.skysplit.chatgpt.site/en/hackathon/seoul-2026) · [Source Repository](https://github.com/han942/codex-hackerthon)
+Team project · 2026.08.16 · Codex Community Hackathon — Seoul for Students · Team 10 · [Korean](./README_KOR.md)
 
-## About The Project
+[Live site](https://campusmate.site) · [Demo video](https://github.com/han942/codex-hackerthon/blob/main/campusmate_demo.mov) · [Source code](https://github.com/han942/codex-hackerthon) · [Event page](https://codex-community-korea.skysplit.chatgpt.site/en/hackathon/seoul-2026)
 
-Students have gaps between classes, but no way to know who else on campus is free at the same time.
+Campus Mate calculates lunch-hour gaps from a student's timetable, recommends other students with overlapping availability, suggests a place to eat, and carries the match through to a meeting proposal. Four teammates who met on the morning of the event took it from feature definition to deployment and presentation in one day.
 
-Campus Mate reads a class timetable, computes the free periods, and matches two students whose gaps overlap — then suggests somewhere nearby to eat. The goal was to turn a timetable into a matching signal, built in a single day by a team formed on the spot.
+## 1. Goal
 
-### The Event
+Having a gap between classes does not make it easy to find someone for lunch. Students still need to ask who is on the same campus, compare timetables, and agree on how long they can meet. Meeting someone new adds another round of coordination around shared interests and where to eat.
 
-| | |
-|---|---|
-| Event | [Codex Community Hackathon — Seoul for Students](https://codex-community-korea.skysplit.chatgpt.site/en/hackathon/seoul-2026) |
-| Organizer | Codex Community Korea |
-| Date | August 16, 2026 · 09:00–21:00 |
+This project treats a timetable as **data for connecting people**, rather than something that is only displayed back to its owner.
 
-### Built With
+- Calculate actual free periods from a class timetable.
+- Find students on the same campus whose gaps and minimum meeting times overlap.
+- Use shared interests and natural-language requests to rank candidates.
+- Continue from a match to venue selection and a meeting proposal.
 
-| Layer | Choice | Note |
-|---|---|---|
-| Frontend | React 19, TypeScript, Vite | Mock API mode for backend-free screen checks |
-| Backend | Node.js 22, Express 5, TypeScript | `tsx` runtime, `vitest` for tests |
-| Database | PostgreSQL 17 | Raw SQL migrations, no ORM |
-| Auth | Supabase | External provider only — no self-built tokens |
-| AI | OpenAI API + Zod | Structured output, schema-validated |
-| Infra | Docker Compose, nginx | TLS proxy in front of the stack |
+The team had 12 hours and had never worked together before, so we did not try to include every possible feature. We focused on a core flow that still worked without AI, stayed consistent when schedules changed or proposals were accepted concurrently, and allowed the frontend and two backend owners to develop without waiting on one another.
 
-## Architecture
+## 2. Architecture
 
-Campus Mate is a single Docker Compose stack with a deliberately separated React frontend and Express backend. The browser talks to the backend through the versioned `/api/v1` contract; authentication remains with Supabase rather than being reimplemented in the application.
+The React frontend and Express backend run separately, with nginx serving the SPA and proxying `/api/v1`. Supabase handles authentication, while PostgreSQL stores application data. The OpenAI API is optional and is used only to interpret natural-language requests and adjust recommendation order.
 
 ```mermaid
 flowchart LR
-    Browser[Browser]
+    Browser[Browser] --> Edge[Nginx<br/>TLS · SPA · API proxy]
 
-    subgraph Frontend[Frontend · React 19 + TypeScript + Vite]
-        App[App.tsx<br/>auth state · tabs · screens]
-        AuthClient[lib/auth.ts<br/>Supabase email auth · session storage]
-        ApiClient[lib/api.ts<br/>API client · Bearer token · mock branch]
-        Contracts[lib/contracts.ts<br/>UI/API contract types]
+    subgraph Frontend[React 19 + TypeScript + Vite]
+        App[Sign-in · timetable · matching · meetings]
+        AuthClient[Supabase Auth client]
+        ApiClient[API client<br/>Bearer token · mock mode]
         App --> AuthClient
         App --> ApiClient
-        ApiClient --> Contracts
     end
 
-    Edge[Nginx<br/>TLS ingress · SPA serving · /api proxy]
+    subgraph Backend[Node.js + Express + TypeScript]
+        Auth[Auth and input validation]
+        Core[Core Time<br/>profile · timetable · free time]
+        Social[Social Flow<br/>match · venue · proposal]
+        Port[CoreQueryPort]
+        Rules[Time · matching · conflict rules]
+        AI[OpenAI adapter]
+        Auth --> Core
+        Auth --> Social
+        Social --> Port --> Core
+        Core --> Rules
+        Social --> Rules
+        Social --> AI
+    end
+
     Supabase[Supabase Auth]
-
-    subgraph Backend[Backend · Node.js + Express + TypeScript]
-        Auth[requireAuth<br/>Supabase verifier or demo verifier]
-        Routers[HTTP routers<br/>profile · schedule · match · venue<br/>conversation · proposal]
-        Domain[Pure domain rules<br/>time.ts · social.ts]
-        Port[CoreQueryPort<br/>stable seam between backend areas]
-        Store[SocialStore]
-        AI[RecommendationAi<br/>optional OpenAI adapter]
-        Fallback[Rule ranking + template reasons]
-        Auth --> Routers
-        Routers --> Domain
-        Routers --> Port
-        Routers --> Store
-        Routers --> AI
-        AI -. unavailable or invalid .-> Fallback
-    end
-
-    DB[(PostgreSQL 17<br/>raw SQL migrations)]
+    DB[(PostgreSQL 17)]
     OpenAI[OpenAI Responses API]
 
-    Browser --> App
-    AuthClient -->|email/password · refresh token| Supabase
-    ApiClient -->|/api/v1 + Authorization: Bearer| Edge
-    Edge -->|static SPA| App
-    Edge -->|API reverse proxy| Auth
-    Port --> Store
-    Store --> DB
+    Edge --> App
+    Edge --> Auth
+    ApiClient -->|/api/v1| Edge
+    AuthClient --> Supabase
+    Core --> DB
+    Social --> DB
     AI --> OpenAI
-    AI -. failure .-> Fallback
+    AI -. error or not configured .-> Rules
 
     classDef frontend fill:#e8f0fe,stroke:#4a6da7,color:#1f2328
     classDef backend fill:#fdf0e3,stroke:#c98b3a,color:#1f2328
     classDef external fill:#e9f5ec,stroke:#4a8a5f,color:#1f2328
-    class App,AuthClient,ApiClient,Contracts frontend
-    class Auth,Routers,Domain,Port,Store,AI,Fallback backend
-    class Supabase,DB,OpenAI,Edge external
+    class App,AuthClient,ApiClient frontend
+    class Auth,Core,Social,Port,Rules,AI backend
+    class Edge,Supabase,DB,OpenAI external
 ```
 
-### Frontend architecture
+### Free-time calculation and matching
 
-The frontend is a Vite-built React SPA. The current implementation keeps screen composition and local UI state in `frontend/src/app/App.tsx` rather than introducing a separate router or state-management library.
+`Core Time` owns profiles, class schedules, and preferred lunch periods. It first finds gaps between classes, limits them to the `11:00–15:00` service window, and intersects them with the times a user has chosen. Even when two students have an overlapping gap, the match is discarded if it does not meet both users' minimum-duration settings.
 
-| Area | Implementation | Responsibility |
-|---|---|---|
-| App shell | `src/main.tsx`, `src/app/App.tsx` | Auth loading, login/onboarding guard, tab navigation, screens, proposal refresh |
-| Authentication | `src/lib/auth.ts` | Calls Supabase Auth, persists access/refresh tokens in `localStorage` or `sessionStorage`, injects the access token into the API client |
-| API boundary | `src/lib/api.ts` | Calls `/api/v1`, adds Bearer headers, normalizes API errors, and switches to mock data when `VITE_USE_MOCK_API=true` |
-| Contract types | `src/lib/contracts.ts` | TypeScript representations of the API response and request shapes |
-| Static serving | `frontend/nginx.conf` | SPA fallback for client-side paths and `/api/` proxying in the container; Vite proxies `/api` during local development |
-
-The production and mock paths share the same UI contract types. Mock mode replaces the network calls with local in-memory state for schedules, availability, matches, venues, and proposals; it does not change the screens or user flow.
-
-### Backend architecture
-
-The backend is assembled through `createApp()`, which accepts the store, token verifier, `CoreQueryPort`, AI adapter, and clock as dependencies. This keeps HTTP tests independent of PostgreSQL and makes the boundary between the two backend workstreams explicit.
-
-| Layer | Location | Responsibility |
-|---|---|---|
-| HTTP boundary | `backend/src/http/*.ts` | Authentication-aware routes, Zod input validation, pagination, and consistent error responses |
-| Core Time | `profile-routes.ts`, `schedule-routes.ts`, `core-query-service.ts` | Profile, match preferences, schedules, service-window free time, preferred availability, and the public match view |
-| Social Flow | `match-routes.ts`, `match-conversation-routes.ts`, `venue-routes.ts`, `proposal-routes.ts` | Candidate matching, natural-language chat, venue ranking, proposal creation/listing, and status transitions |
-| Domain rules | `backend/src/domain/time.ts`, `domain/social.ts` | Pure functions for free-time calculation, slot intersection, scoring, venue ranking, conflicts, and state transitions |
-| Port and store | `domain/core-query-port.ts`, `core-query-service.ts`, `store.ts`, `postgres-store.ts` | Hides timetable/profile reads behind `CoreQueryPort`; supports an in-memory store for tests and a PostgreSQL store for runtime |
-| AI boundary | `ai-recommendation-service.ts` | Structured intent parsing and re-ranking through Zod-validated responses, with a disabled adapter when no API key is configured |
-
-Backend A owns the Core Time data and APIs. Backend B consumes only the following interface instead of reading A's timetable tables directly:
+`Social Flow` does not query timetable tables directly. It receives only the data it needs through `CoreQueryPort`.
 
 ```ts
 interface CoreQueryPort {
@@ -124,50 +87,114 @@ interface CoreQueryPort {
 }
 ```
 
-The HTTP contract is split accordingly:
+While Backend A implemented the real timetable features, Backend B worked against a fake implementation of this interface. The same boundary also lets HTTP tests use an in-memory store instead of PostgreSQL.
 
-| Backend A · Core Time | Backend B · Social Flow |
+### Where AI fits
+
+AI does not decide who is eligible for a match. The server first checks campus, visibility settings, overlapping free time, and minimum meeting duration. AI only changes the order of candidates that have already passed those rules and provides a short recommendation reason.
+
+```text
+Natural-language request
+→ extract date, time, duration, and budget
+→ filter and score candidates with server rules
+→ adjust candidate order with AI
+→ validate the response shape and returned IDs
+→ return recommendations
+```
+
+The model can choose at most five students from the rule-scored top 50 and three venues from the top 30. It receives anonymous IDs and matching evidence such as shared interests, but not email addresses, course names, or complete timetables. Responses are checked with a Zod schema. If the API key is missing or the response is invalid, the server uses its original ranking and prewritten reasons.
+
+### Preventing meeting conflicts
+
+A schedule may change after a student opens the candidate list, so common availability is checked again both when a proposal is created and when it is accepted. If the time now conflicts with an accepted meeting, the API returns `409` with the current available slots so the user can choose again.
+
+A per-user lock and conditional status update ensure that only one of two simultaneous acceptances can succeed. An accepted `MeetingProposal` is also the appointment record, avoiding a second table with the same information.
+
+### Implementation
+
+| Area | Technology | Responsibility |
+|---|---|---|
+| Frontend | React 19, TypeScript, Vite | Sign-in, onboarding, timetable, chat, matching, venue, and meeting screens |
+| Backend | Node.js 22, Express 5, Zod | Auth, validation, free-time calculation, matching, and proposal transitions |
+| Database | PostgreSQL 17, raw SQL migrations | Profiles, timetables, venues, and meeting data |
+| Auth | Supabase Auth | Email authentication and session management |
+| AI | OpenAI API | Natural-language intent parsing and re-ranking valid candidates |
+| Infrastructure | Docker Compose, nginx | Full-stack runtime, TLS, and SPA/API routing |
+
+The backend is assembled in `createApp()` from an injected store, token verifier, `CoreQueryPort`, AI adapter, and clock. This keeps the HTTP layer independent of concrete database and external-service implementations and makes lightweight test substitutes possible.
+
+The real API and mock API paths share the same frontend TypeScript contracts. With `VITE_USE_MOCK_API=true`, timetable, availability, match, venue, and proposal data live in browser memory, so the same screens and user flow can be developed before the backend is ready.
+
+### How the team split the work
+
+All four teammates met for the first time at the event, and implementation could not start until the afternoon. Instead of immediately dividing up screens and endpoints, we spent the first hour agreeing on the feature source of truth and API contract.
+
+1. Set `docs/funtiondalspec.md` as the single source of truth for scope and business rules.
+2. Define requests and responses in `docs/api/` so frontend and backend work from the same contract.
+3. Split the backend into `Core Time` and `Social Flow`, with clear file ownership and no-touch areas.
+4. Use a fake `CoreQueryPort` to remove waiting time between the two backend workstreams.
+5. Integrate in a fixed order: skeleton merge → rebase → real port → migrate, seed, test, and smoke test.
+
+| Member | Role | Main work |
+|---|---|---|
+| 신진범 (bumsoft) | Backend A — Core Time | Server skeleton, auth, profiles, schedule CRUD, free-time calculation, infrastructure and deployment |
+| 한승원 (han942) | Backend B — Social Flow | Match, venue, and proposal routes; chat-based AI matching API |
+| HangJun | Frontend | React screens, timetable UI, and chat integration |
+| 박진희 | Planning | Functional specification and presentation |
+
+## 3. Results
+
+The final version covers the complete path from account and profile setup to timetable registration, free-time matching, venue selection, proposal, and acceptance. A student can ask, “Find me someone for lunch for an hour at noon on Thursday,” or browse the candidate list directly.
+
+| Flow | Result |
 |---|---|
-| `GET /schools` | `GET /matches` |
-| `GET /schools/:schoolId/campuses` | `POST /match-conversations/messages` |
-| `GET /profile-options` | `GET /venues/recommendations` |
-| `GET/PUT /me/profile` | `POST /meeting-proposals` |
-| `GET/PUT /me/match-preferences` | `GET /meeting-proposals` |
-| `GET/POST /me/schedules` | `PATCH /meeting-proposals/:proposalId/status` |
-| `PATCH/DELETE /me/schedules/:scheduleId` |  |
-| `GET /me/free-times` |  |
-| `GET/PUT /me/availability` |  |
+| Profile and timetable | Register school, campus, interests, classes, and preferred lunch periods |
+| Free-time matching | Recommend students who satisfy campus and common-availability rules |
+| Venue recommendation | Return up to three options based on walking distance, budget, and remaining time; custom input is also supported |
+| Meeting proposal | Reflect acceptance or rejection in both students' meeting lists |
+| Failure handling | Re-check changed schedules and concurrent acceptances; use rule results when AI fails |
 
-### Matching and proposal data flow
+The React SPA, Express API, and PostgreSQL database were deployed to `campusmate.site` as a Docker Compose stack, with nginx handling TLS and API proxying. Seed data covers schools, campuses, venues, and 100 demo members. The frontend can also run through the same screens in mock mode without the backend.
 
-1. Profile, class schedules, and preferred lunch slots are stored by Core Time. Free time is calculated inside the `11:00–15:00` service window and intersected with preferred availability.
-2. Social Flow obtains a restricted `UserMatchView` and effective slots through `CoreQueryPort`. The server first filters by same school/campus, discoverability, activity, common time, and minimum meeting duration.
-3. Rule-scored candidates are optionally re-ranked by AI. The server accepts only returned IDs that were already in the filtered candidate set; malformed or unavailable AI responses fall back to rule ranking and template reasons.
-4. Venue recommendations use seeded, active venues. The server rule-ranks up to 30 candidates and may ask AI to select up to 3. A custom venue remains available when no recommendation exists.
-5. Proposal creation and acceptance both re-check common availability and accepted-proposal conflicts. A user lock and conditional status update prevent two concurrent acceptances from succeeding. Accepted `MeetingProposal` records are displayed as appointments; there is no separate `Appointment` table.
+The commit-intensive period from the first commit to deployment and submission was about **3 hours 15 minutes**.
 
-## Getting Started
+| Time (KST) | Work completed |
+|---|---|
+| 14:16 | Repository initialized |
+| 14:33–14:49 | Functional source of truth, API docs, and backend work-split guide |
+| 14:56–15:00 | Backend skeleton, Core Time API, authentication, and contract tests |
+| 15:24–15:39 | Initial frontend screens and match/proposal routes |
+| 16:06–16:22 | PostgreSQL persistence and 100-member demo seed |
+| 16:33–16:37 | Chat-based AI matching and frontend–backend integration |
+| 16:51–17:26 | Deployment fixes, TLS proxy, and demo video |
+| 17:30 | Codex Build Logs and presentation submitted |
 
-### Prerequisites
+### What we learned
 
-- Node.js 22 or later
-- Docker
+- With a newly formed team, agreeing on the API and areas of ownership saved more time than starting code immediately.
+- A small interface such as `CoreQueryPort` was enough to let the two backend owners work independently.
+- Placing rules and validation around AI kept the core feature available even when the API failed.
+- For a one-day project, deciding what not to build was as important as choosing what to build.
 
-### Installation
+### Limitations and next steps
 
-Full stack (frontend + backend + PostgreSQL):
+Self-built token/session APIs, blocking and reporting, timetable OCR, live venue search, activities other than `LUNCH`, and real-time notifications were left out of the one-day scope. We also did not have time to measure match quality, proposal acceptance rate, or time to first meeting with real users. Those measurements should come before deciding which feature to add next.
+
+## Running the project
+
+Node.js 22 or later and Docker are required.
 
 ```bash
 git clone https://github.com/han942/codex-hackerthon.git
 cd codex-hackerthon
-cp .env.example .env      # set POSTGRES_PASSWORD, and SUPABASE_* if using real auth
+cp .env.example .env      # set POSTGRES_PASSWORD; set SUPABASE_* for real auth
 docker compose up -d --build
 # frontend  http://localhost:5173
 # backend   http://localhost:3000
 docker compose down
 ```
 
-Backend only:
+To run the backend on its own:
 
 ```bash
 cd backend
@@ -176,132 +203,20 @@ docker compose up -d       # PostgreSQL
 npm run migrate
 npm run seed
 npm start
-npm test                   # in-memory store, no database needed
+npm test                   # uses the in-memory store; no database required
 ```
 
-Notes:
+- Local demo auth: `Authorization: Bearer demo:user_a`
+- Frontend mock mode: `VITE_USE_MOCK_API=true`
+- Without AI: leave `OPENAI_API_KEY` unset to use rule-based recommendations
 
-- `VITE_USE_MOCK_API=true` runs the frontend against mock data with no backend at all.
-- Local demo auth uses `Authorization: Bearer demo:user_a`.
-- `OPENAI_API_KEY` is optional — without it the AI paths fall back to rule-based ranking.
+## Team and event
 
-## Usage
+The Codex Community Hackathon — Seoul for Students ran from 09:00 to 21:00 on August 16, 2026. One hundred university students participated in 25 teams formed on site. Because the judges also reviewed how each team used Codex and recovered from problems, we removed system prompts and secrets from the per-member session logs and submitted them under [`codexlog/`](https://github.com/han942/codex-hackerthon/tree/main/codexlog).
 
-1. **Sign in** and complete the profile — school, campus, interests.
-2. **Register your timetable**, then add your preferred lunch times. This step is required: with no registered availability there are no common free periods to compute. The server derives free time inside an `11:00–15:00` window.
-3. **Ask in the chat** — "목요일 12시에 한 시간 점심 친구 찾아줘" — or browse the mate list directly. Candidates are filtered to the same campus, overlapping free time, and both sides' minimum meeting duration.
-4. **Pick a venue** from the 3 recommendations, ranked by walking distance, budget, and remaining time — or type your own (2–50 characters).
-5. **Send the proposal.** The recipient accepts or rejects; accepted proposals appear for both sides under appointments.
+- **Organizer:** [Codex Community Korea](https://codex-community-korea.skysplit.chatgpt.site/)
+- **Co-hosts:** [ToBigs](https://www.datamarket.ai.kr/), [Pseudo Lab](https://pseudo-lab.com/), [BITAmin](https://www.bitamin.ai.kr/)
+- **Partners:** [OpenAI Codex](https://openai.com/codex/), [AWS](https://aws.amazon.com/), [Runpod](https://www.runpod.io/), Elev8, [DEVOCEAN](https://devocean.sk.com/), Hugging Face KREW, [Endplan](https://endplan.ai/ko)
+- **Contact:** Seung-Won Han — [@han942](https://github.com/han942)
 
-A `409` conflict on creation or acceptance is a normal part of the flow — the common free time is re-checked at both points, and the UI re-offers the current slots.
-
-## Development Timeline
-
-```mermaid
-flowchart LR
-    A["Functional spec<br/>docs/funtiondalspec.md<br/>(single source of truth)"] --> B["API contract<br/>docs/api/*.md"]
-    B --> C["Work-split guides<br/>docs/backend/*.md"]
-    C --> D["Backend A · Core Time<br/>feat/be-core-time"]
-    C --> E["Backend B · Social Flow<br/>feat/be-social-flow"]
-    C --> F["Frontend<br/>feat/frontend"]
-    D -->|CoreQueryPort| E
-    D --> G["Integration<br/>migrate · seed · smoke test"]
-    E --> G
-    F --> G
-    G --> H["Docker Compose + nginx<br/>campusmate.site"]
-
-    classDef spec fill:#e8f0fe,stroke:#4a6da7,color:#1f2328
-    classDef dev fill:#fdf0e3,stroke:#c98b3a,color:#1f2328
-    classDef ship fill:#e9f5ec,stroke:#4a8a5f,color:#1f2328
-    class A,B,C spec
-    class D,E,F dev
-    class G,H ship
-```
-
-> Spec first, contract second, code third — so three agents could work in parallel without stepping on each other
-
-| Time (KST) | Event |
-|---|---|
-| 09:00 | Event opens; teams formed on site from strangers |
-| 14:16 | Initial commit, repo setup |
-| 14:33 – 14:49 | Functional spec, API docs, backend work-split guide |
-| 14:56 – 15:00 | Backend skeleton, core-time APIs, auth provider, contract tests |
-| 15:24 – 15:39 | First frontend screens; match & proposal routes |
-| 16:06 – 16:22 | PostgreSQL persistence, demo seed (100 members) |
-| 16:33 – 16:37 | Chat-based AI matching API, frontend ↔ server integration |
-| 16:51 – 17:26 | Deployment fixes, TLS proxy, demo video |
-| 17:30 | Codex Build Logs and presentation submitted |
-| 21:00 | Event closes |
-
-Roughly **3 hours 15 minutes** of commits, inside a 12-hour day that also had to cover meeting the team, agreeing on a problem, and preparing the presentation.
-
-### How the parallel work was organized
-
-| Member | Role | Main output |
-|---|---|---|
-| 신진범 (bumsoft) | Backend A — Core Time | Server skeleton, auth, profile, schedule CRUD, free-time calculation, infra & deploy |
-| 한승원 (han942) | Backend B — Social Flow | Match/venue/proposal routes, chat-based AI matching API |
-| HangJun | Frontend | React screens, timetable UI, chat integration |
-| 박진희 | Spec | Functional specification, presentation |
-
-Four people who had not worked together before needed a way to write code simultaneously without colliding. The answer was to spend the first hour writing documents instead of code:
-
-1. **Fix a single source of truth.** `docs/funtiondalspec.md` defines scope and rules, with an explicit precedence order — spec > API docs > code — and a rule that no P0 feature may be added from the API docs alone.
-2. **Turn the spec into an HTTP contract** (`docs/api/`) before any implementation, so frontend and backend could start simultaneously against the same endpoints.
-3. **Split the backend into two non-overlapping owners** with a file-ownership table and an explicit "do not touch" list.
-4. **Decouple the two halves with an interface.** Backend B never queries A's timetable tables — it goes through `CoreQueryPort`, built against a **fake implementation** until A's real one landed.
-
-   ```ts
-   interface CoreQueryPort {
-     getUserMatchView(userId: string): Promise<UserMatchView>;
-     listDiscoverableCampusUsers(campusId: string, excludeUserId: string): Promise<UserMatchView[]>;
-     getEffectiveSlots(userId: string): Promise<TimeSlot[]>;
-   }
-   ```
-
-5. **Integrate in a fixed order** — A's skeleton merges first, B rebases, the fake port is swapped for the real one, then migrate/seed/test/smoke on a clean clone.
-
-### AI design
-
-AI is used as a **re-ranker inside a rule-filtered candidate set**, never as the source of truth:
-
-- The server first enforces same school/campus, discoverability, common available time, and minimum meeting duration
-- Only anonymized candidate IDs and shared-attribute evidence reach the model — no emails, course names, or full timetables
-- The model re-ranks at most **5 mates** (from a rule-scored top 50) and **3 venues** (from top 30), and returns IDs the server re-validates
-- Every AI response is parsed through a Zod schema; on failure the system falls back to rule-based ranking with templated reasons
-
-The natural-language intent parser follows the same pattern: the model extracts date, time, duration, budget, and atmosphere, and the server does the actual matching.
-
-## Roadmap
-
-Cut from the one-day build on purpose: self-built token/session APIs, block & report, timetable OCR, live venue search, and any activity other than `LUNCH`. Real-time notifications were also left out.
-
-The event page will become a public archive after results are confirmed:
-
-- [ ] Winning teams and selection rationale
-- [ ] Project gallery of participating teams
-- [ ] Public GitHub and demo links
-- [ ] Event recap and verified participation statistics
-
-## Takeaways
-
-- **Writing the contract before the code is what made parallel agent work possible.** Four strangers generating code simultaneously will collide unless ownership and endpoints are decided up front.
-- **An interface seam (`CoreQueryPort`) plus a fake implementation removed the blocking dependency** — Backend B was not idle while Backend A built the foundation.
-- **Constraining the AI beats trusting it.** Rules filter, AI re-ranks, server re-validates, fallback always exists. The demo works even with the OpenAI key removed.
-- **A written "do not build this" list** kept scope from expanding past what a single day allows.
-- **The build log is part of the deliverable.** Because judging reviewed *how* Codex was used and recovered from, keeping a clean session log mattered as much as shipping the feature.
-
-## Contact
-
-Seung-Won Han — [@han942](https://github.com/han942)
-
-Source repository: https://github.com/han942/codex-hackerthon
-
-> This folder is a write-up of a hackathon submission, not an open-source project accepting contributions. The source repository declares no license.
-
-## Acknowledgments
-
-- **Organizer** — [Codex Community Korea](https://codex-community-korea.skysplit.chatgpt.site/)
-- **Co-hosts** — [투빅스 (ToBigs)](https://www.datamarket.ai.kr/), [가짜연구소 (Pseudo Lab)](https://pseudo-lab.com/), [비타민 (BITAmin)](https://www.bitamin.ai.kr/)
-- **Partners** — [OpenAI Codex](https://openai.com/codex/), [AWS](https://aws.amazon.com/), [Runpod](https://www.runpod.io/), Elev8, [DEVOCEAN](https://devocean.sk.com/), Hugging Face KREW, [Endplan](https://endplan.ai/ko)
-- Teammates 신진범, HangJun, and 박진희, met on the morning of the event
+> This folder documents a hackathon submission. The source repository does not declare a license.
