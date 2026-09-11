@@ -156,6 +156,7 @@ requires a future leave-one-out evaluation with sampled negatives.
 
 ```bash
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
 Python 3.10 is recommended. The notebooks were originally run across Python
@@ -166,7 +167,7 @@ Additional requirements:
 - **KoNLPy/Okt:** a JDK;
 - **Selenium:** compatible Chrome and ChromeDriver versions;
 - **MySQL:** used by the regional bulk-load notebook, with credentials in
-  `.env`;
+  this project's `.env`;
 - **MLflow:** a tracking server at `http://localhost:5000` (`mlflow ui`); and
 - **fastText:** `cc.ko.300.bin`, downloaded separately from
   [fasttext.cc](https://fasttext.cc/docs/en/crawl-vectors.html).

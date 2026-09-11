@@ -23,7 +23,7 @@ model. This follow-up focuses on faster iteration and operational visibility.
 | Core approach | QLoRA fine-tuning of `gemma-3-1b-it` | Prompted OpenAI models orchestrated by LangGraph |
 | Quality improvement | Curate data and retrain | Edit versioned prompts and rerun experiments |
 | Quality control | Offline test-set metrics | In-graph critique/refinement plus post-run evaluation |
-| Observability | Notebook outputs | Langfuse traces for prompts, latency, tokens, cost, and scores |
+| Observability | Notebook outputs | LangSmith Studio graph inspection and execution traces |
 
 ## 2. Architecture
 
@@ -41,18 +41,18 @@ flowchart LR
     R --> C
     C -- "Yes or max iterations" --> OUT["Simplified article"]
 
-    LF["Langfuse<br/>prompts · traces · scores"] -. "versioned prompts" .-> A
-    LF -. "versioned prompts" .-> S
-    LF -. "versioned prompts" .-> C
-    LF -. "versioned prompts" .-> R
+    LS["LangSmith Studio<br/>graph · states · traces"] -. "inspect runs" .-> A
+    LS -. "inspect runs" .-> S
+    LS -. "inspect runs" .-> C
+    LS -. "inspect runs" .-> R
     OUT --> E["Evaluation<br/>LLM judge · readability · ROUGE-L"]
-    E -. "experiment results" .-> LF
+    E -. "trace and compare" .-> LS
 
     classDef process fill:#fdf0e3,stroke:#c98b3a,color:#1f2328
     classDef platform fill:#e8f0fe,stroke:#4a6da7,color:#1f2328
     classDef result fill:#e9f5ec,stroke:#4a8a5f,color:#1f2328
     class A,S,C,R process
-    class LF platform
+    class LS platform
     class OUT,E result
 ```
 
@@ -61,10 +61,11 @@ flowchart LR
 - **LangGraph** defines the `analyze → simplify → critique ↔ refine` state
   graph and its stopping condition.
 - **LangChain** provides the `ChatOpenAI` calls used by every graph node.
-- **Langfuse** manages versioned prompts and records traces, generations,
-  latency, token usage, cost, and evaluation scores.
-- **Local fallbacks** keep the full simplification workflow available when
-  Langfuse is not configured.
+- **LangSmith Studio** visualizes the graph, intermediate state, model calls,
+  and errors while the local Agent Server is running.
+- **LangSmith tracing** records runs for later comparison when enabled.
+- **Local prompts** keep the simplification workflow runnable without a
+  separate prompt-management service.
 
 ## 3. Results
 
@@ -116,10 +117,10 @@ All commands below should be run from `projects/NLP_Newspaper_CUAI`.
 
 ```bash
 pip install -r requirements-agent.txt
-cp ../../.env.example ../../.env
+cp .env.example .env
 ```
 
-Set `OPENAI_API_KEY` in `.env`, then simplify an article:
+Set `OPENAI_API_KEY` in this project's `.env`, then simplify an article:
 
 ```bash
 python -m agent.cli simplify \
@@ -142,6 +143,32 @@ Langfuse.
 Langfuse is optional. When its credentials are absent, tracing and remote
 prompt management become no-ops and the prompts in `agent/prompts.py` are used.
 
+### LangSmith Studio
+
+The graph is configured for LangSmith Studio through `langgraph.json`. From
+this project directory, start the local Agent Server with:
+
+```bash
+source .venv/bin/activate
+langgraph dev
+```
+
+Studio opens in the browser and connects to the local server at
+`http://127.0.0.1:2024`. Select `newspaper-agent`, then provide only the input
+article:
+
+```json
+{
+  "article": "어려운 뉴스 원문..."
+}
+```
+
+Studio shows the `analyze`, `simplify`, `critique`, and optional `refine`
+steps, including their intermediate state and model calls. Code changes are
+hot-reloaded while the development server is running. A LangSmith API key is
+required for Studio; set `LANGSMITH_TRACING=false` if traces should remain on
+the local server instead of being sent to LangSmith.
+
 ### Environment variables
 
 | Variable | Required | Purpose |
@@ -149,13 +176,17 @@ prompt management become no-ops and the prompts in `agent/prompts.py` are used.
 | `OPENAI_API_KEY` | Yes | OpenAI API access |
 | `OPENAI_MODEL` | No | Rewrite model; default: `gpt-4o` |
 | `JUDGE_MODEL` | No | Analyze, critique, and judge model; default: `gpt-4o-mini` |
+| `AGENT_MAX_TOKENS` | No | Maximum output tokens per model call; default: `4000` |
+| `AGENT_TEMPERATURE` | No | Sampling temperature; default: `0.3` |
+| `AGENT_EFFORT` | No | Reasoning effort for supported models; default: `medium` |
 | `TARGET_READER` | No | Description of the intended reader |
 | `MAX_REFINE_ITERS` | No | Maximum number of refinement passes; default: `2` |
 | `LANGSMITH_TRACING` | No | Set to `true` to send LangChain/LangGraph traces to LangSmith |
-| `LANGSMITH_API_KEY` | No | LangSmith API key used when tracing is enabled |
+| `LANGSMITH_API_KEY` | Yes for Studio | Connects the local Agent Server to LangSmith Studio and enables tracing |
 | `LANGSMITH_PROJECT` | No | Destination tracing project; default in `.env.example`: `NLP-Newspaper-Agent` |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | No | Enable tracing, prompt management, and remote experiments |
 | `LANGFUSE_HOST` | No | Langfuse Cloud or a self-hosted URL |
+| `LANGFUSE_PROMPT_LABEL` | No | Prompt label to fetch; default: `production` |
 
 ## Usage
 
@@ -202,6 +233,8 @@ print(result.iterations, result.approved)
 | `agent/llm.py` | `ChatOpenAI` factory and response parsing |
 | `agent/config.py` | Environment-based runtime settings |
 | `agent/cli.py` | Command-line interface |
+| `agent/studio.py` | Compiled graph exported to LangSmith Studio |
+| `langgraph.json` | Local Agent Server and Studio configuration |
 
 ## Design notes
 

@@ -115,6 +115,7 @@ Global_Supermarket_Analysis/
 ```bash
 # 0. Install dependencies
 pip install -r requirements.txt
+cp .env.example .env
 
 # 1. Regenerate aggregated data for the dashboard (requires the raw CSV)
 python dashboard_build/build_dashboard_data.py

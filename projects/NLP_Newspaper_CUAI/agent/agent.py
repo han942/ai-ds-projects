@@ -24,13 +24,20 @@ from .config import Settings
 from .llm import build_chat, extract_json, message_text
 
 
-class AgentState(TypedDict):
+class AgentInput(TypedDict):
     article: str
+
+
+class AgentOutput(TypedDict):
     analysis: str
     draft: str
     critiques: list[dict[str, Any]]
     iterations: int
     approved: bool
+
+
+class AgentState(AgentInput, AgentOutput):
+    """Internal state shared by all LangGraph nodes."""
 
 
 @dataclass
@@ -94,7 +101,13 @@ class NewsSimplifierAgent:
             "news-analyze", model, effort,
             article=state["article"], target_reader=self.settings.target_reader,
         )
-        return {"analysis": analysis}
+        return {
+            "analysis": analysis,
+            "draft": "",
+            "critiques": [],
+            "iterations": 0,
+            "approved": False,
+        }
 
     def _node_simplify(self, state: AgentState) -> dict[str, Any]:
         model, effort = self._cfg("news-simplify", "main")
@@ -137,7 +150,13 @@ class NewsSimplifierAgent:
         return "refine"
 
     def _build_graph(self):
-        g = StateGraph(AgentState)
+        # Separate schemas make Studio's input form require only the article,
+        # while preserving the richer internal and output state for debugging.
+        g = StateGraph(
+            AgentState,
+            input_schema=AgentInput,
+            output_schema=AgentOutput,
+        )
         g.add_node("analyze", self._node_analyze)
         g.add_node("simplify", self._node_simplify)
         g.add_node("critique", self._node_critique)

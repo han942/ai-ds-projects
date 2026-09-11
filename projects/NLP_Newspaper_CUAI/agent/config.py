@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
-try:  # optional, but recommended for local dev
-    from dotenv import load_dotenv
+from dotenv import load_dotenv
 
-    load_dotenv()
-except Exception:  # pragma: no cover - dotenv is optional
-    pass
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(PROJECT_ROOT / ".env", override=False)
 
 
 def _get_bool(name: str, default: bool) -> bool:

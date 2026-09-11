@@ -114,8 +114,9 @@ flowchart TB
 
 ```bash
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
 - **Python 3.12** 기준(노트북은 3.12.3에서 실행됨). 라이브러리 버전은 pin되어 있지 않으며, 노트북 내 `!pip install -U`가 최신본을 설치합니다.
 - 노트북은 Gemma 3 1B에 대한 4-bit QLoRA 파인튜닝을 수행하므로 CUDA 지원 GPU가 필요합니다. `bitsandbytes`는 CUDA toolkit이 설치된 Linux/WSL 환경을 전제로 합니다.
-- `google/gemma-3-1b-it` 다운로드를 위해 Hugging Face access token(`.env` 또는 `huggingface_hub.login`)이 필요합니다.
+- `google/gemma-3-1b-it` 다운로드를 위해 Hugging Face access token(이 프로젝트의 `.env` 또는 `huggingface_hub.login`)이 필요합니다.

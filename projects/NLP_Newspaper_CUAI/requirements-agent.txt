@@ -4,6 +4,7 @@ langchain>=1.0.0
 langchain-core>=1.0.0
 langchain-openai>=1.0.0
 langgraph>=1.0.0
+langgraph-cli[inmem]
 langsmith>=0.3.0
 langfuse>=4.0.0
 python-dotenv

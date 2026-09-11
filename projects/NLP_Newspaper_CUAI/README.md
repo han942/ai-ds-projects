@@ -109,8 +109,9 @@ Against the team's own benchmark thresholds from the presentation (SARI ≥ 40 =
 
 ```bash
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
 - Tested with **Python 3.12** (the notebook was executed on 3.12.3). Library versions are not pinned — `!pip install -U` in the notebook installs the latest.
 - The notebook trains a 4-bit QLoRA fine-tune of Gemma 3 1B, so a CUDA-capable GPU is expected. `bitsandbytes` requires a Linux/WSL environment with a matching CUDA toolkit.
-- A Hugging Face access token (set via `.env` or `huggingface_hub.login`) is required to download `google/gemma-3-1b-it`.
+- A Hugging Face access token (set in this project's `.env` or via `huggingface_hub.login`) is required to download `google/gemma-3-1b-it`.

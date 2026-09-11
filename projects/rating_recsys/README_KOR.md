@@ -156,6 +156,7 @@ negative를 사용하는 leave-one-out 평가가 추가로 필요하다.
 
 ```bash
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
 Python 3.10을 권장한다. Notebook은 Python 3.8.20, 3.9.21, 3.10.18 환경에서
@@ -165,7 +166,7 @@ Python 3.10을 권장한다. Notebook은 Python 3.8.20, 3.9.21, 3.10.18 환경�
 
 - **KoNLPy/Okt:** JDK
 - **Selenium:** 호환되는 Chrome과 ChromeDriver
-- **MySQL:** 지역별 bulk load에 사용하며 접속 정보는 `.env`에서 로드
+- **MySQL:** 지역별 bulk load에 사용하며 접속 정보는 이 프로젝트의 `.env`에서 로드
 - **MLflow:** `http://localhost:5000`의 tracking server (`mlflow ui`)
 - **fastText:** [fasttext.cc](https://fasttext.cc/docs/en/crawl-vectors.html)에서
   별도로 내려받은 `cc.ko.300.bin`

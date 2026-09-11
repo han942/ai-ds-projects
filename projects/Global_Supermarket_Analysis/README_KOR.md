@@ -118,6 +118,7 @@ US·EU·APAC·LATAM·Africa 등 여러 시장에 걸쳐 있습니다.
 ```bash
 # 0. 의존성 설치
 pip install -r requirements.txt
+cp .env.example .env
 
 # 1. 대시보드용 집계 데이터 재생성 (원본 CSV 필요)
 python dashboard_build/build_dashboard_data.py
