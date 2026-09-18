@@ -1,6 +1,6 @@
 # Rating Recommender System v2 확장 계획
 
-> 상태: 설계 단계  
+> 상태: M1·M2 완료, M3 leakage-free dataset 설계
 > 방향: DB-backed data pipeline → Stage 1 candidate retrieval → Stage 2 learning-to-rank  
 > 비용 원칙: 로컬·오픈소스 우선, 관리형 서비스와 유료 API는 기본 구성에서 제외
 
@@ -15,7 +15,8 @@ DeepCoNN 계열 모델을 분석한 프로젝트였다. v2는 평점 회귀 실�
 1. CSV가 아닌 PostgreSQL을 모델링 데이터의 기준 저장소로 사용한다.
 2. 데이터 수집부터 학습 데이터 생성까지 재실행 가능하고 중복에 안전한
    파이프라인을 만든다.
-3. 시간 기준의 leakage-free 평가 프로토콜을 확립한다.
+3. 사용자별 chronological split과 전역 temporal benchmark를 함께 사용하여
+   leakage-free 평가 프로토콜을 확립한다.
 4. Stage 1 candidate retrieval과 Stage 2 learning-to-rank를 분리하여 각 단계의
    성능을 측정한다.
 5. 리뷰·메뉴·지역 정보를 활용한 vector retrieval을 추가한다.
@@ -36,21 +37,22 @@ DeepCoNN 계열 모델을 분석한 프로젝트였다. v2는 평점 회귀 실�
 | 항목 | 값 |
 |---|---:|
 | 원본 행 | 31,085 |
-| 사용자 | 6,994 |
-| 식당 | 약 748 |
-| 정규화된 복합키 기준 중복 추정 | 7,870행 |
-| 중복 제거 후 행 | 약 23,215 |
-| 사용자 interaction 중앙값 | 2 |
-| 중복 제거 후 interaction 1회 사용자 | 3,443 |
-| interaction 5회 이상 사용자 | 1,357 |
+| 익명 사용자 | 6,987 |
+| 식당 | 748 |
+| 적재 전 중복 행 | 7,866 |
+| 중복 제거 후 리뷰 | 23,207 |
+| 사용자별 고유 식당 중앙값 | 2 |
+| 고유 식당 1개 사용자 | 3,461 |
+| 고유 식당 3개 이상 사용자 | 2,396 |
+| 고유 식당 5개 이상 사용자 | 1,347 |
 | 평점 4점 이상 | 87.76% |
 | 평점 2점 이하 | 2.35% |
 | 연도가 없는 날짜 | 1,280건 |
-| 상대 날짜 | 118건 |
+| 상대 날짜 | 117건 |
+| 날짜 해석 불가 | 1건 |
 
-중복 추정에는 `item_name`, `item_spec_area`, `user_name`, `user_query`, `date`를
-공백 정규화한 복합키를 사용했다. 실제 중복 제거 규칙은 원본 행 표본을
-검토한 뒤 확정한다.
+위 수치는 2026-09-19 Supabase 적재 결과를 기준으로 한다. 원본 31,085행은
+리뷰 23,207건, 중복 7,866건, 필수값 누락 12건으로 reconciliation되었다.
 
 ### 우선 해결할 데이터 위험
 
@@ -66,11 +68,32 @@ v2는 사용자의 과거 리뷰와 식당이 기존에 받은 리뷰를 이용�
 정답 label로만 사용한다. 기존 DeepCoNN도 이 조건에 맞게 user/item document를
 다시 구성하여 Stage 1 baseline으로 비교할 수 있다.
 
-#### 2.2 랜덤 분할
+#### 2.2 희소한 사용자 이력과 데이터 분할
 
-사용자별 랜덤 80/20 분할을 제거하고 전역 시간 기준 train/validation/test
-분할을 사용한다. 날짜가 불완전한 행은 crawl 시각을 근거로 복원 여부와
-신뢰도를 기록한다.
+사용자별 랜덤 분할은 미래 interaction이 과거 feature에 섞일 수 있으므로
+사용하지 않는다. 반면 전역 시간 분할만 사용하면 test에 처음 등장하는
+사용자가 많아 personalized model 평가가 cold-start 성능과 뒤섞인다. 현재
+snapshot의 전역 80/10/10 시간 분할에서는 test 사용자 1,269명 중 593명
+(46.7%)이 train에 존재하지 않았다.
+
+따라서 다음 두 평가 프로토콜을 함께 사용한다.
+
+1. **Primary seen-user benchmark**: `(user_id, restaurant_id)`별 최초 interaction만
+   남기고, 고유 식당이 3개 이상인 사용자의 마지막 interaction을 test,
+   마지막에서 두 번째를 validation, 나머지를 train으로 배치한다. train 이력이
+   1개 이상인 사용자를 하나의 `seen user` 집단으로 평가한다.
+2. **Secondary temporal benchmark**: 전역 또는 rolling time cutoff를 사용하여
+   실제 배포 상황을 재현한다. cutoff 이전 이력이 1개 이상이면 `seen user`,
+   없으면 `new user`로 구분하여 결과를 별도로 보고한다.
+
+기존의 warm과 few-shot은 별도 모델 경로로 나누지 않는다. 두 집단을
+`seen user`로 합쳐 동일한 personalized pipeline을 사용하고, train history
+1~2개와 3개 이상 구간의 지표는 성능 진단용 breakdown으로만 유지한다.
+`new user`는 popularity와 content/context fallback으로 평가한다. 사용자 정보와
+과거 이력이 모두 없는 경우 collaborative personalization이 불가능하다는 점을
+명시한다.
+
+날짜가 불완전한 행은 crawl 시각을 근거로 복원 여부와 신뢰도를 기록한다.
 
 #### 2.3 Positive 편향
 
@@ -130,7 +153,7 @@ stage 수에는 포함하지 않는다. 사용자는 중간 candidate를 보지 
 | 관계형 DB | PostgreSQL | 로컬 무료 |
 | Vector 검색 | pgvector | 무료 |
 | 공간 검색 | PostGIS | 무료 |
-| DB migration | Alembic | 무료 |
+| DB migration | Ordered SQL migration runner | 무료 |
 | ORM / SQL | SQLAlchemy | 무료 |
 | 모델링 | PyTorch, LightGBM | 무료 |
 | 실험 관리 | 로컬 MLflow | 무료 |
@@ -333,10 +356,19 @@ candidate_model_version
 ### 8.1 데이터 분할
 
 1. 날짜를 절대 시각으로 정규화한다.
-2. 전역 시간 기준으로 train/validation/test 구간을 나눈다.
-3. 각 query 시점보다 늦은 interaction은 feature 생성에서 제외한다.
-4. 동일 사용자·식당의 중복 행이 서로 다른 split에 들어가지 않게 한다.
-5. warm user와 cold-start user를 별도 보고한다.
+2. 아직 방문하지 않은 식당 추천이라는 task에 맞게 동일 사용자·식당의 반복
+   리뷰는 최초 interaction 하나로 축약한다.
+3. Primary benchmark는 고유 식당이 3개 이상인 사용자에게 chronological
+   leave-last-two-out을 적용한다. 마지막 interaction은 test, 마지막에서 두 번째는
+   validation, 나머지는 train이다.
+4. Primary metric은 train 이력이 1개 이상인 `seen user` 전체를 대상으로 한다.
+   train history 1~2개와 3개 이상 결과는 별도의 diagnostic breakdown으로 함께
+   기록하되, 모델과 serving 경로를 분리하지 않는다.
+5. Secondary benchmark는 전역 또는 rolling time cutoff로 구성한다. cutoff 이전
+   이력이 있는 `seen user`와 처음 등장한 `new user`를 섞지 않고 별도 보고한다.
+6. 각 query 시점보다 늦은 interaction과 target review에서 파생된 정보는 feature
+   생성에서 제외한다.
+7. 날짜 추론 방식과 dataset snapshot을 기록하여 같은 split을 재현한다.
 
 ### 8.2 평가 지표
 
@@ -360,11 +392,18 @@ Ranking 단계:
 Rating RMSE는 보조 분석 지표로만 유지하고 최종 추천 모델의 주 지표로
 사용하지 않는다.
 
+Candidate와 Ranking의 주 지표는 `seen user` 전체에서 계산한다. train history
+1~2개와 3개 이상 breakdown은 희소 이력에 따른 성능 저하를 진단하는 용도로
+함께 보고한다. `new user`에는 personalized model과 동일한 기준을 강제하지 않고
+popularity/content fallback의 HitRate, coverage 및 다양성을 별도로 기록한다.
+
 ### 8.3 초기 통과 기준
 
 - Candidate Recall@100 목표: 0.95 이상
 - Ranker가 candidate retrieval score 정렬보다 NDCG@10을 개선
-- popularity baseline보다 personalized metric을 개선
+- seen user 전체에서 popularity baseline보다 personalized metric을 개선
+- train history 1~2개 집단에서 성능이 급락하는지 별도 확인
+- new user fallback 결과와 해당 집단의 전체 비중을 별도 보고
 - 개선 결과에 paired bootstrap confidence interval 보고
 - 성능 개선이 coverage와 diversity의 심각한 하락을 동반하지 않을 것
 - 재실행 시 동일 데이터 snapshot과 seed에서 결과 재현
@@ -482,30 +521,36 @@ Notebook은 `src/`의 versioned 코드를 호출하여 결과를 탐색하고 �
 
 ### M1. DB 기반 구축
 
-- [ ] PostgreSQL + pgvector + PostGIS Docker Compose
-- [ ] Alembic 초기 migration
-- [ ] core schema 및 constraint 생성
-- [ ] `.env.example` 작성
+- [x] Supabase PostgreSQL 연결 설정과 private `recsys` schema 설계
+- [x] Ordered SQL 초기 migration 구현
+- [x] core schema 및 constraint 구현
+- [x] `.env.example` 작성
+- [x] 실제 Supabase project에 migration 적용
+- [ ] pgvector 및 PostGIS extension은 해당 feature 구현 시 활성화
 - [ ] health check와 DB integration test
 
 ### M2. 재실행 가능한 ingestion
 
-- [ ] CSV bootstrap importer
-- [ ] `crawl_run` provenance 기록
-- [ ] text normalization
-- [ ] stable content hash와 upsert
-- [ ] 중복 검출 report
-- [ ] 날짜 parsing 및 quality flag
-- [ ] 사용자 식별자 hashing
-- [ ] DB row count와 source reconciliation test
+- [x] CSV bootstrap importer 구현
+- [x] `crawl_run` provenance 기록 구현
+- [x] text normalization
+- [x] stable content hash와 set-based upsert
+- [x] 중복 검출 report
+- [x] 날짜 parsing 및 quality flag
+- [x] 사용자 식별자 salted hashing
+- [x] 5개 CSV dry-run 및 transformation test
+- [x] 실제 Supabase에 5개 CSV 적재
+- [x] DB row count와 source reconciliation 확인
 
 ### M3. Leakage-free dataset과 baseline
 
-- [ ] temporal split builder
+- [ ] user-item 최초 interaction dataset builder
+- [ ] seen-user chronological leave-last-two-out builder
+- [ ] global/rolling temporal benchmark builder
 - [ ] feature cutoff enforcement
 - [ ] popularity baseline
 - [ ] full-catalog evaluation
-- [ ] warm/cold segment report
+- [ ] seen/new user report와 history-depth diagnostic
 - [ ] MLflow dataset snapshot 및 metric 기록
 
 ### M4. Candidate retrieval
@@ -540,7 +585,7 @@ Notebook은 `src/`의 versioned 코드를 호출하여 결과를 탐색하고 �
 
 - [ ] 공개 데이터 TIGER 재현
 - [ ] item semantic ID 생성
-- [ ] warm-user subset 실험
+- [ ] seen-user subset 실험
 - [ ] conventional candidate model과 동일 조건 비교
 - [ ] 데이터 확대 여부 및 HSTU 검토
 
@@ -556,8 +601,8 @@ Notebook은 `src/`의 versioned 코드를 호출하여 결과를 탐색하고 �
 | E5 | E3 + content vector | LambdaRank | 리뷰·메뉴 정보 기여 측정 |
 | E6 | TIGER-style GenRec | 동일 LambdaRank | generative candidate 기여 측정 |
 
-모든 실험은 같은 temporal split, candidate evaluation protocol 및 ranking
-label 정의를 사용한다.
+모든 실험은 같은 primary seen-user split과 secondary temporal benchmark,
+candidate evaluation protocol 및 ranking label 정의를 사용한다.
 
 ## 14. 주요 위험과 대응
 
@@ -566,7 +611,7 @@ label 정의를 사용한다.
 | 불완전한 날짜 | temporal leakage | `raw_date`, `scraped_at`, parsing quality 보존 |
 | crawl 중복 | 인기·평점 왜곡 | content hash, unique constraint, reconciliation test |
 | positive-only 데이터 | noisy negative | 지역·시점 제약 sampling, impression 로그 도입 |
-| 짧은 사용자 이력 | sequential 모델 과적합 | warm/cold 분리, content·popularity fallback |
+| 짧은 사용자 이력 | sequential 모델 과적합 | seen user로 통합하되 history-depth별 진단, content·popularity fallback |
 | 현재 catalog가 작음 | 2-stage 이점 불명확 | full-catalog ranker를 반드시 함께 비교 |
 | 사용자명 노출 | 개인정보 위험 | source key hashing 및 원본 접근 제한 |
 | embedding 변경 | 재현 불가 | model/version/content hash 기록 |
@@ -574,17 +619,18 @@ label 정의를 사용한다.
 
 ## 15. 바로 시작할 첫 구현 단위
 
-첫 구현은 M1과 M2의 최소 vertical slice로 제한한다.
+M1과 M2가 완료되었으므로 다음 구현은 M3의 평가 dataset vertical slice다.
 
-1. PostgreSQL, pgvector, PostGIS를 실행하는 `docker-compose.yml`
-2. `crawl_run`, `restaurant`, `app_user`, `review` migration
-3. legacy CSV 한 개를 staging과 core table로 적재하는 CLI
-4. 같은 파일을 두 번 적재해도 row count가 늘지 않는 integration test
-5. DB에서 학습 입력을 읽는 repository 함수
-6. source row count, inserted, updated, rejected, duplicated를 출력하는 적재 report
+1. DB에서 `(user_id, restaurant_id, reviewed_at, rating)` interaction을 읽는
+   repository 함수
+2. 동일 사용자·식당을 최초 interaction으로 축약하는 dataset builder
+3. 고유 식당 3개 이상 사용자의 chronological leave-last-two-out 생성
+4. query 시점 이후 interaction과 target-derived feature를 차단하는 leakage test
+5. seen user 전체와 history 1~2개/3개 이상 breakdown을 출력하는 evaluator
+6. global/rolling cutoff에서 seen/new user 비중을 출력하는 temporal audit
+7. popularity 및 full-catalog baseline의 Recall@K와 NDCG@K 기록
 
-이 단위가 통과한 뒤 전체 지역 데이터 migration과 candidate 모델 구현으로
-확장한다.
+이 단위가 통과한 뒤 M4 candidate 모델 구현으로 확장한다.
 
 ## 16. 완료 정의
 
