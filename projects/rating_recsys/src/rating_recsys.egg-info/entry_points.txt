@@ -1,3 +1,4 @@
 [console_scripts]
+rating-recsys-dataset = rating_recsys.datasets.cli:main
 rating-recsys-ingest = rating_recsys.ingestion.cli:main
 rating-recsys-migrate = rating_recsys.db.migrate:main

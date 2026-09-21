@@ -6,7 +6,9 @@
 - 전체 계획: [RECOMMENDER_V2_PLAN.md](./RECOMMENDER_V2_PLAN.md)
 - 이전 버전: [legacy/v1_rating_prediction/](./legacy/v1_rating_prediction/)
 
-현재 단계에서는 v2의 Supabase PostgreSQL ingestion 기반을 구현하고 있다.
+현재 Supabase PostgreSQL ingestion과 DB-backed modeling dataset 기반이 구현되어
+있다. 다음 단계는 같은 split 위에서 popularity/full-catalog baseline을 측정하는
+것이다.
 기존의 노트북, 수집 데이터, 모델 checkpoint 및 예측 결과는 삭제하지 않고
 legacy 폴더에 그대로 보존하였다.
 
@@ -21,8 +23,8 @@ hash를 사용하므로 같은 파일을 다시 실행해도 리뷰가 중복 �
 
 ```bash
 cd projects/rating_recsys
-python -m venv .venv
-source .venv/bin/activate
+conda create --prefix ./.venv python=3.10 pip -y
+conda activate ./.venv
 pip install -e '.[dev]'
 cp .env.example .env
 ```
@@ -63,6 +65,45 @@ rating-recsys-ingest
 검증 query는 [queries/verify_ingestion.sql](./queries/verify_ingestion.sql)에
 있다.
 
+## DB-backed modeling dataset
+
+모델링 코드는 legacy CSV를 읽지 않는다. 아래 명령은 Supabase의
+`recsys.reviews`를 직접 읽고, 동일 사용자·식당의 최초 interaction만 남긴 뒤
+두 평가 split을 생성하여 JSON audit을 출력한다. DB에는 쓰지 않는 read-only
+명령이다.
+
+```bash
+rating-recsys-dataset
+```
+
+Primary benchmark는 고유 식당 3개 이상 사용자의 마지막 interaction을 test,
+마지막에서 두 번째를 validation, 나머지를 train으로 배치한다. train 이력이
+1개 이상인 사용자는 하나의 `seen user` 집단으로 평가하며 이력 1~2개와 3개
+이상 구간은 진단 지표로만 분리한다.
+
+Secondary benchmark는 전체 interaction의 날짜 분위수로 전역 cutoff를 만들고,
+cutoff 이전 이력이 있는 `seen user`와 이력이 없는 `new user`를 별도로
+집계한다.
+
+기본 설정을 바꿔 audit할 수도 있다.
+
+```bash
+rating-recsys-dataset \
+  --minimum-user-items 3 \
+  --train-fraction 0.8 \
+  --validation-fraction 0.1
+```
+
+현재 DB snapshot의 기본 결과는 다음과 같다.
+
+| 항목 | 값 |
+|---|---:|
+| 최초 user-item interaction | 23,017 |
+| Primary seen user | 2,396 |
+| Primary train / validation / test | 12,504 / 2,396 / 2,396 |
+| train history 1~2개 사용자 | 1,049 |
+| train history 3개 이상 사용자 | 1,347 |
+
 ### 주요 파일
 
 | 경로 | 역할 |
@@ -71,4 +112,8 @@ rating-recsys-ingest
 | `src/rating_recsys/ingestion/transform.py` | CSV 정규화, 날짜 parsing, pseudonym 및 dedup hash |
 | `src/rating_recsys/ingestion/loader.py` | PostgreSQL COPY와 set-based upsert |
 | `src/rating_recsys/ingestion/cli.py` | dry-run 및 전체 ingestion command |
+| `src/rating_recsys/datasets/repository.py` | Supabase에서 최초 user-item interaction 조회 |
+| `src/rating_recsys/datasets/split.py` | seen-user 및 global temporal split 생성 |
+| `src/rating_recsys/datasets/cli.py` | DB snapshot과 split audit command |
 | `tests/test_transform.py` | 변환 규칙과 5개 CSV smoke test |
+| `tests/test_dataset_split.py` | split, 중복 방지 및 seen/new cohort test |

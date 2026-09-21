@@ -1,6 +1,6 @@
 # Rating Recommender System v2 확장 계획
 
-> 상태: M1·M2 완료, M3 leakage-free dataset 설계
+> 상태: M1·M2 완료, M3 DB dataset/split 구현 완료·baseline 대기
 > 방향: DB-backed data pipeline → Stage 1 candidate retrieval → Stage 2 learning-to-rank  
 > 비용 원칙: 로컬·오픈소스 우선, 관리형 서비스와 유료 API는 기본 구성에서 제외
 
@@ -544,9 +544,10 @@ Notebook은 `src/`의 versioned 코드를 호출하여 결과를 탐색하고 �
 
 ### M3. Leakage-free dataset과 baseline
 
-- [ ] user-item 최초 interaction dataset builder
-- [ ] seen-user chronological leave-last-two-out builder
-- [ ] global/rolling temporal benchmark builder
+- [x] DB-backed user-item 최초 interaction dataset builder
+- [x] seen-user chronological leave-last-two-out builder
+- [x] global temporal benchmark와 seen/new cohort audit
+- [ ] rolling temporal benchmark extension
 - [ ] feature cutoff enforcement
 - [ ] popularity baseline
 - [ ] full-catalog evaluation

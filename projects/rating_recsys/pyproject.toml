@@ -20,6 +20,7 @@ dev = [
 [project.scripts]
 rating-recsys-migrate = "rating_recsys.db.migrate:main"
 rating-recsys-ingest = "rating_recsys.ingestion.cli:main"
+rating-recsys-dataset = "rating_recsys.datasets.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
