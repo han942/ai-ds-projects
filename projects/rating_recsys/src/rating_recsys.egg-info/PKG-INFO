@@ -5,5 +5,10 @@ Summary: DB-backed two-stage restaurant recommender
 Requires-Python: >=3.10
 Requires-Dist: psycopg[binary]<4,>=3.2
 Requires-Dist: python-dotenv<2,>=1.0
+Provides-Extra: experiment
+Requires-Dist: lightgbm<5,>=4.5; extra == "experiment"
+Requires-Dist: mlflow<4,>=3; extra == "experiment"
+Requires-Dist: pandas<3,>=2.2; extra == "experiment"
+Requires-Dist: streamlit<2,>=1.40; extra == "experiment"
 Provides-Extra: dev
 Requires-Dist: pytest<9,>=8; extra == "dev"

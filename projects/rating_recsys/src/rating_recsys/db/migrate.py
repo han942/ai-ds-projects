@@ -62,7 +62,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    settings = get_settings(require_database=True)
+    settings = get_settings(
+        require_database=True,
+        require_user_hash_salt=False,
+    )
     applied = apply_migrations(settings.database_url, args.migrations_dir)
     if applied:
         print("Applied migrations:")

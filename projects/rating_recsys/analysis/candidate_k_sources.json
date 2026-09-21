@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "user-history-coverage",
+      "title": "User-history sparsity and benchmark coverage",
+      "queries": [
+        {
+          "id": "interaction-count-distribution",
+          "source": {
+            "label": "Baseline run dataset snapshot",
+            "files": [
+              "artifacts/runs/20260921T084455858595Z-03a76325/dataset.jsonl"
+            ],
+            "metricDefinitions": [
+              {
+                "label": "Eligible user",
+                "definition": "A user with at least three distinct restaurant interactions, as required by the seen-user leave-last-two-out split."
+              },
+              {
+                "label": "Interaction count",
+                "definition": "The number of deduplicated user-restaurant interactions in the immutable modeling snapshot."
+              }
+            ],
+            "filters": [
+              "Dataset snapshot: 03a763252e30",
+              "Interaction grain: first observed user-restaurant pair"
+            ],
+            "caveats": [
+              "The primary benchmark excludes users with fewer than three interactions, so its results do not represent the full observed user population."
+            ],
+            "evidenceFlow": [
+              {
+                "kind": "calculation",
+                "title": "Population calculation",
+                "detail": "Count interactions by user, then classify users as 1, 2, 3, 4, or 5+ interactions and compute the share with at least three interactions."
+              },
+              {
+                "kind": "validation",
+                "title": "Reconciliation",
+                "detail": "The five history buckets sum to 6,987 users and the 3+ buckets sum to 2,396 benchmark-eligible users."
+              }
+            ]
+          },
+          "columns": [
+            {"field": "interactions", "label": "Interactions per user"},
+            {"field": "users", "label": "Users"}
+          ],
+          "rows": [
+            {"interactions": "1", "users": 3461},
+            {"interactions": "2", "users": 1130},
+            {"interactions": "3", "users": 650},
+            {"interactions": "4", "users": 399},
+            {"interactions": "5+", "users": 1347}
+          ],
+          "preview": {
+            "kind": "aggregate",
+            "note": "Complete aggregate distribution derived from all 6,987 users in the snapshot.",
+            "totalRows": 5
+          }
+        }
+      ],
+      "assumptions": [
+        "Five or more interactions is treated as the practical threshold for a relatively informative user history in this comparison."
+      ]
+    },
+    {
+      "id": "candidate-cutoff-value",
+      "title": "Candidate cutoff value and recall",
+      "queries": [
+        {
+          "id": "candidate-recall-by-k",
+          "source": {
+            "label": "Baseline test candidates and metrics",
+            "files": [
+              "artifacts/runs/20260921T084455858595Z-03a76325/queries.jsonl",
+              "artifacts/runs/20260921T084455858595Z-03a76325/candidates_test.jsonl",
+              "artifacts/runs/20260921T084455858595Z-03a76325/metrics.json"
+            ],
+            "metricDefinitions": [
+              {
+                "label": "Candidate Recall@K",
+                "definition": "Among relevant test queries, the share whose held-out restaurant appears within the first K RRF candidates."
+              },
+              {
+                "label": "Final Recall@K",
+                "definition": "Among relevant test queries, the share whose held-out restaurant appears within the first K LambdaMART predictions."
+              }
+            ],
+            "filters": [
+              "Phase: test",
+              "Relevant queries only: relevance > 0",
+              "Candidate stage: E3 RRF union",
+              "Final stage: E4 LambdaMART"
+            ],
+            "caveats": [
+              "K=100 is an internal candidate budget, not a user-visible recommendation-list size.",
+              "The held-out label is the next observed review interaction, not necessarily the user's complete real-world next visit."
+            ],
+            "evidenceFlow": [
+              {
+                "kind": "calculation",
+                "title": "Recall calculation",
+                "detail": "For each relevant test query, find the held-out restaurant's candidate rank and average the indicator rank <= K."
+              },
+              {
+                "kind": "validation",
+                "title": "Published metric reconciliation",
+                "detail": "Recomputed E3 Recall@20, @50, and @100 exactly match metrics.json."
+              }
+            ]
+          },
+          "columns": [
+            {"field": "k", "label": "K"},
+            {"field": "candidate_recall", "label": "E3 candidate recall"},
+            {"field": "final_recall", "label": "E4 final recall"}
+          ],
+          "rows": [
+            {"k": 5, "candidate_recall": 0.0685106383, "final_recall": 0.0693617021},
+            {"k": 10, "candidate_recall": 0.1093617021, "final_recall": 0.1157446809},
+            {"k": 20, "candidate_recall": 0.1689361702, "final_recall": null},
+            {"k": 50, "candidate_recall": 0.3110638298, "final_recall": null},
+            {"k": 100, "candidate_recall": 0.4672340426, "final_recall": null}
+          ],
+          "preview": {
+            "kind": "aggregate",
+            "note": "Complete set of evaluated cutoffs for this analysis.",
+            "totalRows": 5
+          }
+        }
+      ],
+      "assumptions": [
+        "A candidate cutoff is decision-useful when interpreted together with its share of the catalog, retrieval latency, and the fixed final recommendation cutoff."
+      ]
+    }
+  ]
+}

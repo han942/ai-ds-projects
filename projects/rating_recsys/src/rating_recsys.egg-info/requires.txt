@@ -3,3 +3,9 @@ python-dotenv<2,>=1.0
 
 [dev]
 pytest<9,>=8
+
+[experiment]
+lightgbm<5,>=4.5
+mlflow<4,>=3
+pandas<3,>=2.2
+streamlit<2,>=1.40

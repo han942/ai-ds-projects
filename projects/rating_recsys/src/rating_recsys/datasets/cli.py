@@ -54,7 +54,10 @@ def _snapshot_summary(interactions) -> dict[str, object]:
 
 def main() -> None:
     args = build_parser().parse_args()
-    settings = get_settings(require_database=True)
+    settings = get_settings(
+        require_database=True,
+        require_user_hash_salt=False,
+    )
 
     with connect(settings.database_url) as connection:
         interactions = InteractionRepository(connection).fetch_first_interactions()

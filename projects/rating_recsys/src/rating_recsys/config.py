@@ -27,8 +27,15 @@ def load_dotenv_if_available() -> None:
     load_dotenv(PROJECT_ROOT / ".env", override=False)
 
 
-def get_settings(*, require_database: bool = True) -> Settings:
+def get_settings(
+    *,
+    require_database: bool = True,
+    require_user_hash_salt: bool | None = None,
+) -> Settings:
     load_dotenv_if_available()
+
+    if require_user_hash_salt is None:
+        require_user_hash_salt = require_database
 
     database_url = os.getenv("DATABASE_URL", "").strip()
     user_hash_salt = os.getenv("USER_HASH_SALT", "").strip()
@@ -43,9 +50,12 @@ def get_settings(*, require_database: bool = True) -> Settings:
     errors: list[str] = []
     if require_database and not database_url:
         errors.append("DATABASE_URL is required")
-    if require_database and not user_hash_salt:
+    if require_user_hash_salt and not user_hash_salt:
         errors.append("USER_HASH_SALT is required")
-    if require_database and user_hash_salt == "replace-with-a-long-random-secret":
+    if (
+        require_user_hash_salt
+        and user_hash_salt == "replace-with-a-long-random-secret"
+    ):
         errors.append("USER_HASH_SALT must be changed from the example value")
     if errors:
         raise ValueError("; ".join(errors))

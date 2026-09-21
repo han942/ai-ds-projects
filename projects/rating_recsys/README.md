@@ -4,13 +4,67 @@
 사용하는 2-stage 식당 추천 시스템으로 확장한다.
 
 - 전체 계획: [RECOMMENDER_V2_PLAN.md](./RECOMMENDER_V2_PLAN.md)
+- Baseline 모델: [BASELINE_MODEL.md](./BASELINE_MODEL.md)
 - 이전 버전: [legacy/v1_rating_prediction/](./legacy/v1_rating_prediction/)
 
-현재 Supabase PostgreSQL ingestion과 DB-backed modeling dataset 기반이 구현되어
-있다. 다음 단계는 같은 split 위에서 popularity/full-catalog baseline을 측정하는
-것이다.
+현재 Supabase PostgreSQL ingestion, DB-backed modeling dataset과 실행 가능한
+2-stage baseline 골격이 구현되어 있다. 동일 split에서 global
+popularity/full-catalog(E0), popularity+item-item candidate(E3), LightGBM
+LambdaRank(E4)를 비교하고 immutable snapshot, MLflow와 Streamlit artifact를
+생성한다. 날짜는 초기 모델 feature로 사용하지 않고 chronological split과
+leakage 방지에만 사용하며, time-aware recommendation은 후속 연구로 둔다.
 기존의 노트북, 수집 데이터, 모델 checkpoint 및 예측 결과는 삭제하지 않고
 legacy 폴더에 그대로 보존하였다.
+
+## Two-stage baseline 실행
+
+실험 dependency를 설치한 뒤 Supabase snapshot에서 E0 popularity, E3
+popularity+item-item RRF와 E4 LightGBM LambdaRank를 한 번에 실행한다.
+
+```bash
+pip install -e '.[experiment,dev]'
+rating-recsys-experiment
+```
+
+실행 결과는 `artifacts/runs/<run_id>/`에 저장된다. MLflow에는 대용량 candidate와
+ranking JSONL 전체를 복제하지 않고 핵심 artifact, dataset lineage, 단계별 metric,
+추천 결과 table과 pipeline trace를 기록한다.
+
+MLflow UI는 별도 터미널에서 실행한다.
+
+```bash
+mlflow ui \
+  --backend-store-uri sqlite:///artifacts/mlflow.db \
+  --host 127.0.0.1 \
+  --port 5000
+```
+
+`rating-recsys-baseline` experiment에는 다음 구조가 생성된다.
+
+- Parent run: validation/test 핵심 metric, dataset input, chart, table, trace
+- `01 · E0 Popularity`: popularity candidate metric과 cutoff curve
+- `02 · Item-item CF`: item-item candidate metric과 cutoff curve
+- `03 · E3 RRF Candidate Union`: fused candidate metric과 cutoff curve
+- `04 · E4 LambdaMART`: final ranking metric과 cutoff curve
+- Tables: 단계별 metric 및 test 사용자별 top-K 추천 결과
+- Traces: split → candidate generation → LambdaMART → 평가 → artifact 기록
+
+개별 추천의 정성 평가에는 다음 로컬 UI를 사용한다. 사용자별 화면에서는 과거
+방문, held-out target, 실제 Top-K 추천, candidate 대비 최종 순위 이동과 source
+score를 확인할 수 있다. 과거 방문과 target에는 해당 방문에서 작성한 리뷰를
+함께 표시한다. 리뷰 본문은 별도 display-only artifact에 저장되며 모델 feature나
+MLflow artifact에는 포함하지 않는다. 아이템별 화면에서는 특정 식당이 어떤 사용자에게 몇
+순위로 추천됐는지, 실제 target과 일치했는지를 역조회할 수 있다. 기본 화면은
+작은 Top-K artifact만 읽으며, 전체 candidate와 feature는 해당 query에서 상세
+보기를 켰을 때만 불러온다. Metric은 순위 품질, coverage·discovery, 평가 모수·
+latency로 구분하며 stage별 @K 값과 각 지표의 도움말을 제공한다.
+
+```bash
+rating-recsys-dashboard
+```
+
+자세한 architecture, layer output과 metric 정의는
+[BASELINE_MODEL.md](./BASELINE_MODEL.md)를 참고한다.
 
 ## Supabase PostgreSQL ingestion
 
@@ -23,7 +77,7 @@ hash를 사용하므로 같은 파일을 다시 실행해도 리뷰가 중복 �
 
 ```bash
 cd projects/rating_recsys
-conda create --prefix ./.venv python=3.10 pip -y
+conda create --prefix ./.venv python=3.10 pip libgomp -y
 conda activate ./.venv
 pip install -e '.[dev]'
 cp .env.example .env

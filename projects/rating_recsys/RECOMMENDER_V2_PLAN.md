@@ -1,6 +1,6 @@
 # Rating Recommender System v2 확장 계획
 
-> 상태: M1·M2 완료, M3 DB dataset/split 구현 완료·baseline 대기
+> 상태: M1·M2·M3 완료, M4·M5 초기 E3/E4 baseline vertical slice 구현 완료
 > 방향: DB-backed data pipeline → Stage 1 candidate retrieval → Stage 2 learning-to-rank  
 > 비용 원칙: 로컬·오픈소스 우선, 관리형 서비스와 유료 API는 기본 구성에서 제외
 
@@ -82,9 +82,9 @@ snapshot의 전역 80/10/10 시간 분할에서는 test 사용자 1,269명 중 5
    남기고, 고유 식당이 3개 이상인 사용자의 마지막 interaction을 test,
    마지막에서 두 번째를 validation, 나머지를 train으로 배치한다. train 이력이
    1개 이상인 사용자를 하나의 `seen user` 집단으로 평가한다.
-2. **Secondary temporal benchmark**: 전역 또는 rolling time cutoff를 사용하여
-   실제 배포 상황을 재현한다. cutoff 이전 이력이 1개 이상이면 `seen user`,
-   없으면 `new user`로 구분하여 결과를 별도로 보고한다.
+2. **Secondary temporal audit**: 현재 구현된 전역 time cutoff로 seen/new user
+   비율만 진단한다. rolling benchmark와 time-aware 모델 비교는 Future Work로
+   둔다.
 
 기존의 warm과 few-shot은 별도 모델 경로로 나누지 않는다. 두 집단을
 `seen user`로 합쳐 동일한 personalized pipeline을 사용하고, train history
@@ -99,8 +99,9 @@ snapshot의 전역 80/10/10 시간 분할에서는 test 사용자 1,269명 중 5
 
 수집 데이터는 리뷰가 존재하는 interaction 중심이고 4점 이상 평점이 매우
 많다. 관측되지 않은 식당을 단순 negative로 간주하면 exposure bias가 생긴다.
-초기에는 같은 지역과 시점에서 popularity-matched negative sampling을 사용하되,
-장기적으로 impression/click/save 로그를 직접 수집한다.
+초기 baseline은 candidate generator가 반환한 미관측 식당을 약한 negative로
+사용한다. 지역·시점 matching과 exposure 보정은 시간·노출 정보를 다루는 후속
+실험으로 분리하고, 장기적으로 impression/click/save 로그를 직접 수집한다.
 
 ## 3. 목표 아키텍처
 
@@ -262,10 +263,21 @@ CSV는 raw archive 및 초기 bootstrap 입력으로만 사용한다. DB 적재 
 
 ### 6.1 Baseline
 
-- 지역별 popularity
-- 평점 수와 최근성을 결합한 Bayesian popularity
-- item-item co-occurrence
-- implicit BPR 또는 ALS
+- **E0 global popularity**: interaction 수로 전체 catalog를 정렬한다. 개인화가
+  없는 하한선이자 데이터·평가 파이프라인 검증용 baseline이다.
+- **E3 item-item co-occurrence**: 사용자의 과거 방문 식당과 함께 등장한 식당을
+  cosine-normalized co-occurrence로 검색하고 global popularity 후보와 합친다.
+  작고 희소한 implicit-feedback 데이터에서 학습 없이 개인화를 검증하기에
+  적합한 첫 collaborative baseline이다.
+- 서로 다른 candidate score는 직접 합산하지 않고 source rank 기반 RRF로
+  결합한다. 각 source score, rank와 기여 여부는 그대로 보존한다.
+
+Stage 1 평가는 popularity-only, item-item-only, popularity+item-item RRF를 각각
+남겨 item-item 개인화와 source fusion의 기여를 분리한다.
+
+BPR/ALS, LightGCN, two-tower와 content retrieval은 위의 비학습·근접 이웃
+baseline이 정상 동작한 뒤 비교한다. 현재 catalog가 약 748개이므로 E0은
+full-catalog로도 계산하여 2-stage 후보 절단으로 잃는 성능을 확인한다.
 
 ### 6.2 Personalized retrieval
 
@@ -319,17 +331,23 @@ candidate_model_version
 첫 ranker는 작은 데이터에서도 안정적이고 해석 가능한 LightGBM LambdaRank를
 사용한다.
 
+초기 **E4 baseline**은 E3와 동일한 candidate를 입력으로 받아 source score와
+rank, cutoff 이전 popularity, item-item similarity, 사용자 history 길이 같은
+표형 feature로 재정렬한다. 이는 복잡한 neural ranker를 도입하기 전에
+candidate 개선과 ranking 개선을 분리해 측정할 수 있고, feature importance를
+확인할 수 있다는 점에서 첫 LTR baseline으로 적합하다.
+
 ### 입력 feature
 
-- candidate source별 score와 source 존재 여부
-- user/item embedding similarity
-- 거리와 지역 일치 여부
-- 식당 popularity 및 최근성
-- 사용자의 카테고리·가격·맛·서비스 선호 집계
-- 최근 interaction과 식당 카테고리의 일치도
-- 신규 식당 여부
-- 리뷰 및 메뉴 content similarity
-- candidate 단계의 rank
+초기 E4에서는 candidate source별 score·rank·source 존재 여부, 식당 popularity,
+item-item similarity, 사용자 history 길이와 사용자의 과거 지역 분포 대비
+candidate 지역 affinity만 사용한다. 모두 query cutoff 이전 interaction에서
+집계한다.
+
+user/item embedding similarity, 거리, recency, 카테고리·가격·맛·서비스 선호,
+신규 식당 여부와 review/menu content similarity는 각 데이터·모델이 추가될 때
+feature ablation으로 도입한다. 특히 recency와 시간 감쇠 feature는 초기
+baseline에서 제외하고 8.5절의 Future Work로 관리한다.
 
 ### Ranking group과 label
 
@@ -339,17 +357,17 @@ candidate_model_version
 - unobserved item: sampling된 약한 negative
 - impression 이후 무반응: impression 로그가 쌓인 이후 negative 후보
 
-초기 graded relevance 예시는 다음과 같다.
+review-only 데이터에서 사용하는 초기 graded relevance는 다음과 같이 고정한다.
 
-| 사용자 반응 | relevance |
+| 관측 결과 | relevance |
 |---|---:|
-| 저장·높은 평점·명시적 재방문 | 3 |
-| 클릭·평점 4점대 | 2 |
-| 약한 interaction·평점 3점대 | 1 |
-| 낮은 평점 또는 노출 후 무반응 | 0 |
+| 평점 4.0 이상 | 2 |
+| 평점 3.0 이상 4.0 미만 | 1 |
+| 평점 3.0 미만 또는 sampled unobserved item | 0 |
 
 서로 다른 이벤트를 하나의 label로 합칠 때에는 이벤트 정의와 가중치를
-실험별로 versioning한다.
+실험별로 versioning한다. relevance가 모두 0인 query는 ranking metric에서
+제외하고 그 수와 비율을 별도 data-quality metric으로 기록한다.
 
 ## 8. 평가 계획
 
@@ -364,8 +382,8 @@ candidate_model_version
 4. Primary metric은 train 이력이 1개 이상인 `seen user` 전체를 대상으로 한다.
    train history 1~2개와 3개 이상 결과는 별도의 diagnostic breakdown으로 함께
    기록하되, 모델과 serving 경로를 분리하지 않는다.
-5. Secondary benchmark는 전역 또는 rolling time cutoff로 구성한다. cutoff 이전
-   이력이 있는 `seen user`와 처음 등장한 `new user`를 섞지 않고 별도 보고한다.
+5. Secondary temporal audit는 전역 time cutoff에서 seen/new user 비율을
+   출력한다. 초기 E0/E3/E4의 성능 비교에는 사용하지 않는다.
 6. 각 query 시점보다 늦은 interaction과 target review에서 파생된 정보는 feature
    생성에서 제외한다.
 7. 날짜 추론 방식과 dataset snapshot을 기록하여 같은 split을 재현한다.
@@ -374,20 +392,34 @@ candidate_model_version
 
 Candidate 단계:
 
-- Recall@20/50/100
-- HitRate@20/50/100
-- catalog coverage
-- candidate source별 unique contribution
-- retrieval latency
+- **Recall@20/50/100**: held-out relevant item을 후보군이 얼마나 보존하는지
+  측정하는 주 지표다.
+- **Catalog coverage@100**: 전체 식당 중 candidate로 한 번 이상 등장한 비율이다.
+- **Candidate source unique contribution@100**: 특정 source만 찾아낸 relevant
+  item과 candidate 수를 기록한다.
+- **Retrieval latency p50/p95**와 query당 candidate 수를 기록한다.
+
+현재 primary split은 query당 held-out item이 하나이므로 Recall@K와 HitRate@K가
+같다. 둘을 중복된 headline metric으로 보고하지 않고 HitRate는 Recall의 alias로
+artifact에만 남긴다.
 
 Ranking 단계:
 
-- NDCG@5/10
-- Recall@5/10
-- MRR@10
-- MAP@10
-- coverage, novelty, intra-list diversity
-- ranking latency
+- **NDCG@5/10**: graded relevance와 상위 순서를 함께 반영하는 주 지표다.
+- **Recall@5/10**과 **MRR@10**: relevant item 포함 여부와 첫 relevant item의
+  위치를 보여주는 보조 지표다.
+- **Catalog coverage@10**, novelty와 intra-list diversity를 guardrail로 둔다.
+- **Ranking latency p50/p95**를 기록한다.
+
+query당 relevant item이 하나인 현재 구성에서는 AP가 reciprocal rank와 같아
+MAP@10과 MRR@10도 사실상 중복된다. MAP은 impression 로그 또는 multi-positive
+evaluation이 생긴 뒤 활성화한다.
+
+같은 이유로 leave-one-out query의 NDCG는 정답 평점의 gain보다 정답이 놓인
+순위에 주로 좌우된다. 초기 relevance 1/2는 LambdaRank 학습 가중치와 query
+포함 여부에는 사용하지만, 진정한 graded ranking 성능을 주장하지 않는다.
+여러 positive가 같은 query에 존재하는 future-window 또는 impression 기반
+evaluation을 구축한 뒤 graded NDCG를 본래 의미로 해석한다.
 
 Rating RMSE는 보조 분석 지표로만 유지하고 최종 추천 모델의 주 지표로
 사용하지 않는다.
@@ -409,6 +441,66 @@ popularity/content fallback의 HitRate, coverage 및 다양성을 별도로 기�
 - 재실행 시 동일 데이터 snapshot과 seed에서 결과 재현
 
 목표값은 첫 leakage-free baseline 측정 후 현실적인 값으로 재조정한다.
+
+### 8.4 재현성 현황과 완료 조건
+
+현재 구현된 장치는 다음과 같다.
+
+- PostgreSQL을 모델링 데이터의 단일 source로 사용한다.
+- ingestion file SHA-256, review content hash와 idempotent upsert가 구현되어 있다.
+- interaction 정렬과 split tie-break가 결정적이며 split unit test가 존재한다.
+
+다만 현재 `rating-recsys-dataset`은 DB의 최신 상태를 매번 다시 읽고 요약 JSON만
+출력한다. 따라서 DB가 변경되면 과거 실험 입력을 완전히 복원할 수 없으며,
+seed, dependency version, Git commit, feature schema, 학습 artifact와 MLflow run도
+아직 연결되어 있지 않다. 즉 ingestion과 split의 반복 가능성은 확보했지만
+모델 실험의 완전한 재현성은 아직 확보되지 않았다.
+
+baseline 구현 시 아래를 완료 조건으로 추가한다.
+
+1. 정렬된 canonical row와 schema version으로 SHA-256 `dataset_snapshot_id`를
+   만들고, 실제 interaction snapshot도 immutable artifact로 보존한다. Parquet
+   파일 checksum은 row digest와 별도로 기록한다.
+2. repository query version, split configuration, relevance mapping, candidate K,
+   RRF 상수와 random seed 42를 하나의 versioned experiment config로 저장한다.
+3. Python 및 모든 transitive dependency를 lock file로 고정하고 실제 실행 환경의
+   package 목록과 OS 정보를 manifest에 기록한다.
+4. 모든 score tie는 `restaurant_id`로 결정하고 LightGBM seed와 deterministic
+   option을 고정한다. 병렬 실행에서도 순서가 달라지지 않게 테스트한다.
+5. Git commit과 feature schema version을 기록하고, 기본 strict mode에서는 dirty
+   worktree 실행을 거부한다. 예외 허용 시 diff를 artifact로 함께 저장한다.
+6. query, candidate, ranking 결과와 모델을 같은 MLflow run에 저장하고 dataset
+   digest를 input metadata로 연결한다. digest만 남기지 않고 실제 snapshot을
+   반드시 함께 보존한다.
+7. 동일 snapshot·config·code commit에서 candidate 순서와 metric이 같은지
+   end-to-end deterministic test로 검증한다.
+
+### 8.5 시간 정보의 현재 범위와 Future Work
+
+현재 시간 정보는 **평가 순서와 leakage 방지에만** 사용한다. `reviewed_at`을
+기준으로 최초 user-item interaction을 선택하고 chronological leave-last-two-out과
+global temporal audit을 구성한다. 이는 time-aware 추천 모델이 아니라 미래
+interaction이 과거 입력에 들어가지 않도록 하는 평가 규칙이다.
+
+현재 global temporal 구현에는 test cohort도 train history만 기준으로 분류하는
+제약이 있다. validation에 처음 등장한 사용자가 test에서 다시 등장해도 new로
+남을 수 있으므로, 이 audit을 정식 benchmark로 승격하기 전 test history를
+`train + validation`으로 확장하는 수정과 회귀 테스트가 필요하다.
+
+초기 E0/E3/E4 모델에는 아래 시간 feature와 알고리즘을 넣지 않는다.
+
+- 최근 interaction에 더 큰 가중치를 주는 recency feature
+- time-decay 또는 trend-aware popularity
+- 시간 창 기반 item-item co-occurrence와 session model
+- 요일·시간대·계절 feature
+- rolling-window retraining과 temporal drift monitoring
+- SASRec 등 순서·시간 의존 sequential recommender
+
+이 항목들은 baseline 결과와 신규 snapshot이 확보된 뒤 Future Work로 진행한다.
+첫 비교는 `static baseline → time-decay popularity/item-item → sequential model`
+순서로 하고, 같은 global temporal/rolling benchmark에서 정확도와 drift를 함께
+평가한다. 날짜가 `inferred_year`, `relative`, `unknown`인 interaction은 별도
+cohort로 보고하여 시간 feature 효과와 날짜 추론 오류를 섞지 않는다.
 
 ## 9. Generative recommendation 연구 트랙
 
@@ -547,30 +639,32 @@ Notebook은 `src/`의 versioned 코드를 호출하여 결과를 탐색하고 �
 - [x] DB-backed user-item 최초 interaction dataset builder
 - [x] seen-user chronological leave-last-two-out builder
 - [x] global temporal benchmark와 seen/new cohort audit
-- [ ] rolling temporal benchmark extension
-- [ ] feature cutoff enforcement
-- [ ] popularity baseline
-- [ ] full-catalog evaluation
-- [ ] seen/new user report와 history-depth diagnostic
-- [ ] MLflow dataset snapshot 및 metric 기록
+- [x] immutable dataset snapshot과 digest
+- [x] experiment config, seed, code/environment manifest
+- [x] feature cutoff enforcement
+- [x] popularity baseline
+- [x] full-catalog evaluation
+- [x] seen/new user report와 history-depth diagnostic
+- [x] MLflow dataset snapshot 및 metric 기록
 
 ### M4. Candidate retrieval
 
-- [ ] item-item baseline
+- [x] item-item baseline
 - [ ] BPR 또는 LightGCN
 - [ ] Two-tower
 - [ ] content embedding 생성
 - [ ] pgvector retrieval
-- [ ] candidate union과 source attribution
-- [ ] Recall@K 및 latency 비교
+- [x] candidate union과 source attribution
+- [x] Recall@K 및 latency 비교
 
 ### M5. Learning-to-rank
 
-- [ ] candidate training table 생성
+- [x] candidate training table 생성
 - [ ] negative sampling 전략 비교
-- [ ] LightGBM LambdaRank
+- [x] LightGBM LambdaRank
 - [ ] feature ablation
-- [ ] NDCG·coverage·diversity 검증
+- [x] NDCG·coverage·diversity evaluator
+- [x] MLflow tracking과 Streamlit recommendation explorer
 - [ ] full-catalog ranker와 2-stage recommender 비교
 
 ### M6. Serving과 피드백 수집
@@ -590,20 +684,30 @@ Notebook은 `src/`의 versioned 코드를 호출하여 결과를 탐색하고 �
 - [ ] conventional candidate model과 동일 조건 비교
 - [ ] 데이터 확대 여부 및 HSTU 검토
 
+### M8. Time-aware recommendation (Future Work)
+
+- [ ] temporal test cohort를 train+validation history 기준으로 수정
+- [ ] time-decay popularity와 item-item 비교
+- [ ] rolling-window evaluation과 retraining simulation
+- [ ] 날짜 parsing quality별 metric breakdown
+- [ ] temporal drift와 catalog freshness monitoring
+- [ ] session/sequential baseline과 SASRec 계열 비교
+
 ## 13. 핵심 실험표
 
 | ID | Candidate | Ranker | 목적 |
 |---|---|---|---|
-| E0 | 지역 popularity | score sort | 최소 baseline |
+| E0 | global popularity/full catalog | score sort | 비개인화 최소 baseline |
 | E1 | BPR/LightGCN | score sort | collaborative baseline |
 | E2 | Two-tower | score sort | dense retrieval 기준 |
-| E3 | 복수 candidate union | score normalization | recall 개선 측정 |
+| E3 | popularity + item-item | RRF | 개인화 candidate recall 측정 |
 | E4 | E3 | LambdaRank | LTR의 순수 기여 측정 |
 | E5 | E3 + content vector | LambdaRank | 리뷰·메뉴 정보 기여 측정 |
 | E6 | TIGER-style GenRec | 동일 LambdaRank | generative candidate 기여 측정 |
 
-모든 실험은 같은 primary seen-user split과 secondary temporal benchmark,
-candidate evaluation protocol 및 ranking label 정의를 사용한다.
+E0/E3/E4의 성능 비교는 같은 primary seen-user split, candidate evaluation
+protocol과 ranking label 정의를 사용한다. Secondary temporal 경로는 초기에는
+cohort audit만 수행하며 M8에서 정식 benchmark로 승격한다.
 
 ## 14. 주요 위험과 대응
 
@@ -611,7 +715,7 @@ candidate evaluation protocol 및 ranking label 정의를 사용한다.
 |---|---|---|
 | 불완전한 날짜 | temporal leakage | `raw_date`, `scraped_at`, parsing quality 보존 |
 | crawl 중복 | 인기·평점 왜곡 | content hash, unique constraint, reconciliation test |
-| positive-only 데이터 | noisy negative | 지역·시점 제약 sampling, impression 로그 도입 |
+| positive-only 데이터 | noisy negative | candidate negative로 시작하고 impression 로그 도입 |
 | 짧은 사용자 이력 | sequential 모델 과적합 | seen user로 통합하되 history-depth별 진단, content·popularity fallback |
 | 현재 catalog가 작음 | 2-stage 이점 불명확 | full-catalog ranker를 반드시 함께 비교 |
 | 사용자명 노출 | 개인정보 위험 | source key hashing 및 원본 접근 제한 |
@@ -628,7 +732,7 @@ M1과 M2가 완료되었으므로 다음 구현은 M3의 평가 dataset vertical
 3. 고유 식당 3개 이상 사용자의 chronological leave-last-two-out 생성
 4. query 시점 이후 interaction과 target-derived feature를 차단하는 leakage test
 5. seen user 전체와 history 1~2개/3개 이상 breakdown을 출력하는 evaluator
-6. global/rolling cutoff에서 seen/new user 비중을 출력하는 temporal audit
+6. global cutoff에서 seen/new user 비중을 출력하는 temporal audit
 7. popularity 및 full-catalog baseline의 Recall@K와 NDCG@K 기록
 
 이 단위가 통과한 뒤 M4 candidate 모델 구현으로 확장한다.
@@ -646,3 +750,12 @@ v2의 첫 번째 안정 버전은 다음 조건을 모두 만족할 때 완료�
 - popularity, collaborative, vector, LTR 실험 결과를 동일 조건에서 비교한다.
 - 추천 결과에 사용된 model version과 candidate source를 추적할 수 있다.
 - 유료 API 없이 로컬에서 전체 파이프라인을 실행할 수 있다.
+
+## 17. Baseline 선택 근거
+
+- [Amazon.com recommendations: item-to-item collaborative filtering](https://doi.org/10.1109/MIC.2003.1167344)
+- [Reciprocal rank fusion outperforms Condorcet and individual rank learning methods](https://research.google/pubs/reciprocal-rank-fusion-outperforms-condorcet-and-individual-rank-learning-methods/)
+- [Adapting Boosting for Information Retrieval Measures (LambdaMART)](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/LambdaMART_Final.pdf)
+- [LightGBM ranking parameters](https://lightgbm.readthedocs.io/en/latest/Parameters.html)
+- [MLflow experiment and dataset tracking](https://mlflow.org/docs/latest/ml/tracking/)
+- [Self-Attentive Sequential Recommendation (SASRec)](https://arxiv.org/abs/1808.09781)

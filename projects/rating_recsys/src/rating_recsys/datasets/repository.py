@@ -53,6 +53,13 @@ WHERE interaction_order = 1
 ORDER BY user_id, event_date, review_id
 """
 
+REVIEW_TEXTS_SQL = """
+SELECT review_id, review_text
+FROM recsys.reviews
+WHERE review_id = ANY(%s)
+ORDER BY review_id
+"""
+
 
 class InteractionRepository:
     """Repository for the canonical modeling interaction grain."""
@@ -82,3 +89,13 @@ class InteractionRepository:
                 )
                 for row in cursor.fetchall()
             ]
+
+    def fetch_review_texts(self, review_ids: list[int]) -> dict[int, str | None]:
+        """Fetch display-only review text without adding it to model interactions."""
+
+        ordered_ids = sorted(set(review_ids))
+        if not ordered_ids:
+            return {}
+        with self._connection.cursor() as cursor:
+            cursor.execute(REVIEW_TEXTS_SQL, (ordered_ids,), prepare=False)
+            return {int(row[0]): row[1] for row in cursor.fetchall()}

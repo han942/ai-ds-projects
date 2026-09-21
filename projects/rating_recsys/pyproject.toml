@@ -13,6 +13,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+experiment = [
+    "lightgbm>=4.5,<5",
+    "matplotlib>=3.8,<4",
+    "mlflow>=3,<4",
+    "pandas>=2.2,<3",
+    "streamlit>=1.40,<2",
+]
 dev = [
     "pytest>=8,<9",
 ]
@@ -21,6 +28,8 @@ dev = [
 rating-recsys-migrate = "rating_recsys.db.migrate:main"
 rating-recsys-ingest = "rating_recsys.ingestion.cli:main"
 rating-recsys-dataset = "rating_recsys.datasets.cli:main"
+rating-recsys-experiment = "rating_recsys.experiments.cli:main"
+rating-recsys-dashboard = "rating_recsys.observability.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
