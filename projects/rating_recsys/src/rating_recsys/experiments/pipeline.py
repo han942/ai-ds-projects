@@ -25,6 +25,7 @@ from rating_recsys.experiments.artifacts import (
     ranked_record,
     write_json,
     write_jsonl,
+    write_parquet,
 )
 from rating_recsys.experiments.config import ExperimentConfig
 from rating_recsys.experiments.models import (
@@ -36,7 +37,7 @@ from rating_recsys.experiments.models import (
 from rating_recsys.experiments.queries import (
     build_holdout_queries,
     build_prefix_queries,
-    interactions_before,
+    global_interaction_key,
 )
 from rating_recsys.experiments.snapshot import (
     code_manifest,
@@ -46,7 +47,10 @@ from rating_recsys.experiments.snapshot import (
 from rating_recsys.observability.tracking import ExperimentTrackingSession
 from rating_recsys.ranking.features import FEATURE_NAMES, build_feature_rows
 from rating_recsys.ranking.lambdarank import LightGBMLambdaRanker
-from rating_recsys.retrieval.baselines import BaselineCandidateGenerator
+from rating_recsys.retrieval.baselines import (
+    BaselineCandidateGenerator,
+    IncrementalRetrievalContext,
+)
 
 
 class Ranker(Protocol):
@@ -64,7 +68,9 @@ class PhaseData:
     queries: tuple[RecommendationQuery, ...]
     popularity: dict[str, tuple[Candidate, ...]]
     item_item: dict[str, tuple[Candidate, ...]]
+    region_popularity: dict[str, tuple[Candidate, ...]]
     union: dict[str, tuple[Candidate, ...]]
+    ranker_candidates: dict[str, tuple[Candidate, ...]]
     feature_rows: tuple[FeatureRow, ...]
     eligible_catalog: set[int]
     target_available: dict[str, bool]
@@ -212,6 +218,8 @@ def _execute_pipeline(
         primary.train,
         generator,
         inject_training_targets=True,
+        retain_source_candidates=False,
+        rank_expanded_candidates=config.promote_region_candidates,
     )
     validation_data = _build_traced_phase(
         tracking,
@@ -220,6 +228,8 @@ def _execute_pipeline(
         primary.train,
         generator,
         inject_training_targets=False,
+        retain_source_candidates=True,
+        rank_expanded_candidates=config.promote_region_candidates,
     )
     validation_training_data = _build_traced_phase(
         tracking,
@@ -228,6 +238,8 @@ def _execute_pipeline(
         primary.train,
         generator,
         inject_training_targets=True,
+        retain_source_candidates=False,
+        rank_expanded_candidates=config.promote_region_candidates,
     )
     test_data = _build_traced_phase(
         tracking,
@@ -236,6 +248,8 @@ def _execute_pipeline(
         test_history,
         generator,
         inject_training_targets=False,
+        retain_source_candidates=True,
+        rank_expanded_candidates=config.promote_region_candidates,
     )
 
     factory = ranker_factory or (
@@ -356,14 +370,14 @@ def _execute_pipeline(
                     for review_id in display_review_ids
                 ),
             )
-        _write_phase_artifacts(
+        validation_storage = _write_phase_artifacts(
             run_dir,
             "validation",
             validation_data,
             validation_ranked,
             ranking_k=config.ranking_k,
         )
-        _write_phase_artifacts(
+        test_storage = _write_phase_artifacts(
             run_dir,
             "test",
             test_data,
@@ -387,9 +401,17 @@ def _execute_pipeline(
                 "queries": "queries.jsonl",
                 "validation_recommendations": "recommendations_validation.jsonl",
                 "test_recommendations": "recommendations_test.jsonl",
+                "validation_candidates": "candidates_validation.parquet",
+                "test_candidates": "candidates_test.parquet",
+                "validation_rankings": "rankings_validation.parquet",
+                "test_rankings": "rankings_test.parquet",
                 "feature_importance": "feature_importance.json",
                 "validation_model": "validation_lambdarank.txt",
                 "final_model": "final_lambdarank.txt",
+            },
+            "artifact_storage": {
+                "validation": validation_storage,
+                "test": test_storage,
             },
         }
         if review_context_path.exists():
@@ -441,6 +463,8 @@ def _build_traced_phase(
     generator: BaselineCandidateGenerator,
     *,
     inject_training_targets: bool,
+    retain_source_candidates: bool,
+    rank_expanded_candidates: bool,
 ) -> PhaseData:
     with tracking.span(
         span_name,
@@ -456,6 +480,8 @@ def _build_traced_phase(
             reference_interactions,
             generator,
             inject_training_targets=inject_training_targets,
+            retain_source_candidates=retain_source_candidates,
+            rank_expanded_candidates=rank_expanded_candidates,
         )
         span.set_outputs(
             {
@@ -476,25 +502,56 @@ def _build_phase(
     generator: BaselineCandidateGenerator,
     *,
     inject_training_targets: bool,
+    retain_source_candidates: bool,
+    rank_expanded_candidates: bool,
 ) -> PhaseData:
     popularity: dict[str, tuple[Candidate, ...]] = {}
     item_item: dict[str, tuple[Candidate, ...]] = {}
+    region_popularity: dict[str, tuple[Candidate, ...]] = {}
     union: dict[str, tuple[Candidate, ...]] = {}
-    rows: list[FeatureRow] = []
+    ranker_candidates: dict[str, tuple[Candidate, ...]] = {}
+    rows_by_query: dict[str, tuple[FeatureRow, ...]] = {}
     eligible_catalog: set[int] = set()
     availability: dict[str, bool] = {}
     latencies: list[float] = []
 
-    for query in queries:
-        available = interactions_before(reference_interactions, query)
-        result, context = generator.retrieve(query, available)
-        popularity[query.query_id] = result.popularity
-        item_item[query.query_id] = result.item_item
-        phase_union = result.union
+    ordered_interactions = sorted(reference_interactions, key=global_interaction_key)
+    ordered_queries = sorted(
+        queries,
+        key=lambda query: global_interaction_key(query.target),
+    )
+    incremental = IncrementalRetrievalContext()
+    interaction_index = 0
+
+    for query in ordered_queries:
+        cutoff_key = global_interaction_key(query.target)
+        while (
+            interaction_index < len(ordered_interactions)
+            and global_interaction_key(ordered_interactions[interaction_index])
+            < cutoff_key
+        ):
+            incremental.add(ordered_interactions[interaction_index])
+            interaction_index += 1
+        result, context = generator.retrieve_from_context(
+            query,
+            incremental.context,
+        )
+        if retain_source_candidates:
+            popularity[query.query_id] = result.popularity
+            item_item[query.query_id] = result.item_item
+            region_popularity[query.query_id] = result.region_popularity
+        phase_union = (
+            result.union if rank_expanded_candidates else result.base_union
+        )
         if inject_training_targets and query.relevance > 0:
             phase_union = generator.inject_target(query, phase_union, context)
-        union[query.query_id] = phase_union
-        rows.extend(build_feature_rows(query, phase_union, context))
+        union[query.query_id] = (
+            result.union if retain_source_candidates else phase_union
+        )
+        ranker_candidates[query.query_id] = phase_union
+        rows_by_query[query.query_id] = build_feature_rows(
+            query, phase_union, context
+        )
         eligible_catalog.update(result.eligible_catalog)
         availability[query.query_id] = result.target_available
         latencies.append(result.latency_ms)
@@ -503,8 +560,14 @@ def _build_phase(
         queries=queries,
         popularity=popularity,
         item_item=item_item,
+        region_popularity=region_popularity,
         union=union,
-        feature_rows=tuple(rows),
+        ranker_candidates=ranker_candidates,
+        feature_rows=tuple(
+            row
+            for query in queries
+            for row in rows_by_query[query.query_id]
+        ),
         eligible_catalog=eligible_catalog,
         target_available=availability,
         retrieval_latencies_ms=latencies,
@@ -558,6 +621,7 @@ def _phase_metrics(
     for name, candidates in (
         ("e0_popularity", data.popularity),
         ("item_item_only", data.item_item),
+        ("region_popularity_only", data.region_popularity),
         ("e3_rrf_union", data.union),
     ):
         base[name] = evaluate_rankings(
@@ -585,7 +649,7 @@ def _training_summary(data: PhaseData) -> dict[str, int | float]:
     relevant_queries = [query for query in data.queries if query.relevance > 0]
     injected = sum(
         candidate.injected_for_training
-        for candidates in data.union.values()
+        for candidates in data.ranker_candidates.values()
         for candidate in candidates
     )
     available = sum(
@@ -595,7 +659,7 @@ def _training_summary(data: PhaseData) -> dict[str, int | float]:
         any(
             candidate.restaurant_id == query.target.restaurant_id
             and not candidate.injected_for_training
-            for candidate in data.union.get(query.query_id, ())
+            for candidate in data.ranker_candidates.get(query.query_id, ())
         )
         for query in relevant_queries
     )
@@ -619,17 +683,17 @@ def _write_phase_artifacts(
     ranked: tuple[RankedCandidate, ...],
     *,
     ranking_k: int,
-) -> None:
-    write_jsonl(
-        run_dir / f"candidates_{phase}.jsonl",
+) -> dict[str, dict[str, int | str]]:
+    candidates = write_parquet(
+        run_dir / f"candidates_{phase}.parquet",
         (
             candidate_record(candidate)
             for query_id in sorted(data.union)
             for candidate in data.union[query_id]
         ),
     )
-    write_jsonl(
-        run_dir / f"rankings_{phase}.jsonl",
+    rankings = write_parquet(
+        run_dir / f"rankings_{phase}.parquet",
         (ranked_record(item) for item in ranked),
     )
     write_jsonl(
@@ -643,3 +707,4 @@ def _write_phase_artifacts(
             if item.final_rank <= ranking_k
         ),
     )
+    return {"candidates": candidates, "rankings": rankings}

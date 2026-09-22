@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from itertools import islice
 from pathlib import Path
 from typing import Iterable
 
@@ -31,6 +32,107 @@ def write_jsonl(path: Path, records: Iterable[dict[str, object]]) -> None:
                 )
                 + "\n"
             )
+
+
+def write_parquet(
+    path: Path,
+    records: Iterable[dict[str, object]],
+    *,
+    batch_size: int = 50_000,
+) -> dict[str, int | str]:
+    """Write large detail artifacts in deterministic Zstandard Parquet batches."""
+
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise RuntimeError(
+            "Parquet artifacts require pyarrow from the experiment extra"
+        ) from exc
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    iterator = iter(records)
+    writer = None
+    schema = None
+    row_count = 0
+    try:
+        while batch := list(islice(iterator, batch_size)):
+            prepared = [_parquet_record(record) for record in batch]
+            table = pa.Table.from_pylist(
+                prepared,
+                schema=schema,
+            )
+            if writer is None:
+                schema = table.schema
+                writer = pq.ParquetWriter(
+                    path,
+                    table.schema,
+                    compression="zstd",
+                    compression_level=6,
+                    use_dictionary=True,
+                    write_statistics=True,
+                )
+            writer.write_table(table, row_group_size=batch_size)
+            row_count += len(batch)
+    finally:
+        if writer is not None:
+            writer.close()
+
+    if writer is None:
+        pq.write_table(pa.table({}), path, compression="zstd")
+    return {
+        "format": "parquet",
+        "compression": "zstd",
+        "rows": row_count,
+        "bytes": path.stat().st_size,
+    }
+
+
+def read_parquet(
+    path: Path,
+    *,
+    query_id: str | None = None,
+) -> list[dict[str, object]]:
+    """Read a detail artifact, optionally pushing a query filter into Parquet."""
+
+    try:
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise RuntimeError(
+            "Parquet artifacts require pyarrow from the experiment extra"
+        ) from exc
+
+    filters = [("query_id", "=", query_id)] if query_id is not None else None
+    table = pq.read_table(path, filters=filters)
+    return [_restore_parquet_record(record) for record in table.to_pylist()]
+
+
+_JSON_COLUMNS = ("source_scores", "source_ranks", "features")
+
+
+def _parquet_record(record: dict[str, object]) -> dict[str, object]:
+    prepared = dict(record)
+    for column in _JSON_COLUMNS:
+        if column in prepared:
+            prepared[f"{column}_json"] = json.dumps(
+                prepared.pop(column),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+    sources = prepared.get("candidate_sources")
+    if isinstance(sources, tuple):
+        prepared["candidate_sources"] = list(sources)
+    return prepared
+
+
+def _restore_parquet_record(record: dict[str, object]) -> dict[str, object]:
+    restored = dict(record)
+    for column in _JSON_COLUMNS:
+        encoded = restored.pop(f"{column}_json", None)
+        if encoded is not None:
+            restored[column] = json.loads(str(encoded))
+    return restored
 
 
 def query_record(query: RecommendationQuery) -> dict[str, object]:

@@ -15,14 +15,19 @@ EXPERIMENT_NAME = "rating-recsys-baseline"
 STAGE_RUNS = (
     ("e0_popularity", "01 · E0 Popularity"),
     ("item_item_only", "02 · Item-item CF"),
-    ("e3_rrf_union", "03 · E3 RRF Candidate Union"),
-    ("e4_lambdarank", "04 · E4 LambdaMART"),
+    ("region_popularity_only", "03 · Region popularity"),
+    ("e3_rrf_union", "04 · E3 RRF Candidate Union"),
+    ("e4_lambdarank", "05 · E4 LambdaMART"),
 )
 STAGE_DESCRIPTIONS = {
     "e0_popularity": "Global popularity candidate baseline.",
     "item_item_only": "Item-item collaborative filtering candidate baseline.",
-    "e3_rrf_union": "Popularity and item-item candidates fused with RRF.",
-    "e4_lambdarank": "LambdaMART reranking over the fused candidate set.",
+    "region_popularity_only": "Popularity restricted and weighted by the user's observed regions.",
+    "e3_rrf_union": "Popularity, item-item and region candidates fused with RRF.",
+    "e4_lambdarank": (
+        "LambdaMART reranking over the configured serving candidate policy; "
+        "region expansion stays in shadow mode by default."
+    ),
 }
 METRIC_AT_K = re.compile(r"^(?P<metric>.+)_at_(?P<cutoff>\d+)$")
 
@@ -94,7 +99,7 @@ class ExperimentTrackingSession:
                 "feature_schema_version": self.config["schema_version"],
                 "mlflow.note.content": (
                     "Two-stage recommendation baseline. Compare E0, item-item, "
-                    "E3 and E4 in the child runs; inspect Dataset inputs, Tables, "
+                    "region, E3 and E4 in the child runs; inspect Dataset inputs, Tables, "
                     "charts and Traces on this parent run."
                 ),
             }
@@ -227,7 +232,12 @@ def _headline_metrics(metrics: dict[str, object]) -> dict[str, float]:
             latency = phase_metrics[latency_name]
             result[f"{phase}/{latency_name}/p50_ms"] = float(latency["p50_ms"])
             result[f"{phase}/{latency_name}/p95_ms"] = float(latency["p95_ms"])
-        for stage in ("e0_popularity", "item_item_only", "e3_rrf_union"):
+        for stage in (
+            "e0_popularity",
+            "item_item_only",
+            "region_popularity_only",
+            "e3_rrf_union",
+        ):
             values = phase_metrics[stage]
             cutoff = _maximum_cutoff(values, "recall")
             result[f"{phase}/{stage}/recall_at_{cutoff}"] = float(

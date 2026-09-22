@@ -8,6 +8,7 @@ from pathlib import Path
 
 from rating_recsys.datasets.models import Interaction
 from rating_recsys.experiments.config import ExperimentConfig
+from rating_recsys.experiments.artifacts import read_parquet
 from rating_recsys.experiments.models import FeatureRow, RankedCandidate
 from rating_recsys.experiments.pipeline import run_baseline_experiment
 
@@ -89,8 +90,8 @@ class BaselinePipelineTests(unittest.TestCase):
 
             self.assertTrue((result.run_dir / "dataset.jsonl").exists())
             self.assertTrue((result.run_dir / "environment.lock.txt").exists())
-            self.assertTrue((result.run_dir / "candidates_test.jsonl").exists())
-            self.assertTrue((result.run_dir / "rankings_test.jsonl").exists())
+            self.assertTrue((result.run_dir / "candidates_test.parquet").exists())
+            self.assertTrue((result.run_dir / "rankings_test.parquet").exists())
             self.assertTrue((result.run_dir / "recommendations_test.jsonl").exists())
             self.assertTrue((result.run_dir / "review_context.jsonl").exists())
             self.assertEqual(
@@ -99,7 +100,24 @@ class BaselinePipelineTests(unittest.TestCase):
             )
             self.assertIn("e0_popularity", result.metrics["test"])
             self.assertIn("e3_rrf_union", result.metrics["test"])
+            self.assertIn("region_popularity_only", result.metrics["test"])
             self.assertIn("e4_lambdarank", result.metrics["test"])
+            candidate_rows = read_parquet(
+                result.run_dir / "candidates_test.parquet"
+            )
+            ranking_rows = read_parquet(result.run_dir / "rankings_test.parquet")
+            self.assertTrue(
+                any(
+                    "region_popularity" in row["candidate_sources"]
+                    for row in candidate_rows
+                )
+            )
+            self.assertFalse(
+                any(
+                    "region_popularity" in row["candidate_sources"]
+                    for row in ranking_rows
+                )
+            )
 
             repeated = run_baseline_experiment(
                 interactions(),
@@ -112,10 +130,10 @@ class BaselinePipelineTests(unittest.TestCase):
             for artifact in (
                 "dataset.jsonl",
                 "config.json",
-                "candidates_validation.jsonl",
-                "candidates_test.jsonl",
-                "rankings_validation.jsonl",
-                "rankings_test.jsonl",
+                "candidates_validation.parquet",
+                "candidates_test.parquet",
+                "rankings_validation.parquet",
+                "rankings_test.parquet",
                 "recommendations_validation.jsonl",
                 "recommendations_test.jsonl",
                 "feature_importance.json",
@@ -141,7 +159,7 @@ class BaselinePipelineTests(unittest.TestCase):
             self.assertTrue((result.run_dir / "final_lambdarank.txt").exists())
             self.assertTrue((root / "artifacts" / "mlflow.db").exists())
             self.assertIn("mlflow_run_id", result.manifest)
-            self.assertEqual(len(result.manifest["mlflow_child_run_ids"]), 4)
+            self.assertEqual(len(result.manifest["mlflow_child_run_ids"]), 5)
 
             from mlflow.tracking import MlflowClient
 

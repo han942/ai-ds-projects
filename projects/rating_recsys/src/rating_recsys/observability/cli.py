@@ -19,6 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=PROJECT_ROOT / "artifacts",
     )
     parser.add_argument("--port", type=int, default=8501)
+    parser.add_argument("--address", default="127.0.0.1")
     return parser
 
 
@@ -44,6 +45,8 @@ def main() -> None:
                 str(app_path),
                 "--server.port",
                 str(args.port),
+                "--server.address",
+                args.address,
             ],
             env=environment,
         )

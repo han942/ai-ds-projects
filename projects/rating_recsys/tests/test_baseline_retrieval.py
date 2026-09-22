@@ -5,7 +5,11 @@ from datetime import date
 
 from rating_recsys.datasets.models import Interaction
 from rating_recsys.experiments.models import RecommendationQuery
-from rating_recsys.retrieval.baselines import BaselineCandidateGenerator
+from rating_recsys.retrieval.baselines import (
+    BaselineCandidateGenerator,
+    IncrementalRetrievalContext,
+    build_context,
+)
 
 
 def interaction(review_id: int, user: int, restaurant: int, day: int) -> Interaction:
@@ -53,8 +57,34 @@ class BaselineCandidateGeneratorTests(unittest.TestCase):
         self.assertNotIn(1, {item.restaurant_id for item in result.union})
         self.assertEqual(result.item_item[0].restaurant_id, 3)
         target = next(item for item in result.union if item.restaurant_id == 3)
-        self.assertEqual(target.candidate_sources, ("popularity", "item_item"))
+        self.assertEqual(
+            target.candidate_sources,
+            ("popularity", "item_item", "region_popularity"),
+        )
         self.assertTrue(result.target_available)
+
+    def test_incremental_context_matches_batch_context_and_candidates(self) -> None:
+        incremental = IncrementalRetrievalContext()
+        for item in self.available:
+            incremental.add(item)
+
+        batch_context = build_context(self.available)
+        self.assertEqual(incremental.context, batch_context)
+
+        generator = BaselineCandidateGenerator(candidate_k=4)
+        batch_result, _ = generator.retrieve(self.query, self.available)
+        incremental_result, _ = generator.retrieve_from_context(
+            self.query,
+            incremental.context,
+        )
+        self.assertEqual(batch_result.popularity, incremental_result.popularity)
+        self.assertEqual(batch_result.item_item, incremental_result.item_item)
+        self.assertEqual(
+            batch_result.region_popularity,
+            incremental_result.region_popularity,
+        )
+        self.assertEqual(batch_result.base_union, incremental_result.base_union)
+        self.assertEqual(batch_result.union, incremental_result.union)
 
     def test_is_deterministic_and_uses_restaurant_id_for_ties(self) -> None:
         generator = BaselineCandidateGenerator(candidate_k=4)

@@ -12,8 +12,9 @@
 |---|---|---|---|
 | E0 | Global popularity | Interaction count 순 | 비개인화 하한선 |
 | E3-A | Item-item co-occurrence | Similarity 순 | 개인화 candidate의 단독 기여 |
-| E3 | Popularity + item-item | RRF 순 | Candidate source 결합 효과 |
-| E4 | E3와 동일 | LightGBM LambdaRank | LTR의 순수 재정렬 효과 |
+| E3-B | Region popularity | 선호 지역 안의 popularity 순 | 지역 source의 단독 기여 |
+| E3 | Popularity + item-item + region | Quota RRF 순 | 확장 candidate source 결합 효과 |
+| E4 | 기본은 검증된 2-source candidate | LightGBM LambdaRank | Candidate promotion과 LTR을 분리 |
 
 현재 catalog가 약 748개이므로 E0은 전체 catalog를 직접 정렬한다. 2-stage 구조는
 당장의 latency 최적화보다는 향후 BPR, two-tower, vector 및 generative retrieval을
@@ -29,8 +30,10 @@ flowchart TD
     P --> Q[Offline query builder]
     Q --> POP[Global popularity]
     Q --> I2I[Item-item cosine co-occurrence]
-    POP --> RRF[RRF candidate union Top-100]
+    Q --> REG[Preferred-region popularity]
+    POP --> RRF[Quota RRF candidate union Top-100]
     I2I --> RRF
+    REG --> RRF
     RRF --> F[Cutoff-safe feature builder]
     F --> LTR[LightGBM LambdaRank]
     RRF --> CE[Candidate evaluator]
@@ -51,6 +54,12 @@ flowchart TD
 catalog에 존재하지만 Top-100에서 누락된 경우에만 positive row를 주입하고
 `injected_for_training=true`로 기록한다. Run metric에는 retrieved/injected/
 unavailable positive query 수와 injection rate를 함께 남긴다.
+
+Candidate context는 query마다 과거 전체를 다시 계산하지 않는다. Query를 global
+cutoff 순으로 처리하면서 interaction count, rating sum, user-item set과 co-occurrence를
+증분 갱신한다. 각 interaction은 phase당 한 번만 추가되며 cutoff보다 같거나 늦은
+interaction은 포함하지 않는다. Batch context와 incremental context 및 후보 결과의
+동일성을 회귀 테스트로 검증한다.
 
 ## 3. Dataset
 
@@ -133,13 +142,18 @@ Interaction이 없는 신규 item과 history가 없는 신규 user에는 약하�
 ### Layer 1-C. Candidate union
 
 Popularity와 item-item의 score scale이 다르므로 raw score를 직접 더하지 않는다.
-각 source rank를 Reciprocal Rank Fusion으로 결합한다.
+각 source rank를 Reciprocal Rank Fusion으로 결합한다. Region source는 사용자의
+과거 방문 지역 비율과 해당 지역 내 item interaction count를 곱해 정렬한다.
 
 ```text
 RRF(item) = sum(1 / (60 + source_rank))
 ```
 
-중복을 제거하고 RRF 상위 100개를 Stage 2로 전달한다.
+기존 2-source RRF 상위 50개를 보존하고, 나머지를 region을 포함한 확장 RRF로
+채운다. 기본 실행에서는 확장 후보를 shadow 평가·저장하되 LambdaRank에는 검증된
+2-source 후보를 전달한다. `--promote-region-candidates`를 지정한 실험에서만 확장
+후보로 LambdaRank를 재학습한다. 현재 데이터에서는 확장 후보 재학습이 Recall@10을
+낮췄기 때문에 기본 승격하지 않는다.
 
 Candidate output:
 
@@ -194,7 +208,10 @@ final_rank
 ```
 
 `recommendations_*.jsonl`에는 위 serving-shaped 필드만 저장한다. Offline 분석용
-`rankings_*.jsonl`에는 target id, relevance와 전체 feature를 추가로 보존한다.
+`rankings_*.parquet`에는 target id, relevance와 전체 feature를 추가로 보존한다.
+대용량 candidate/ranking detail은 Zstandard Parquet, DB snapshot과 serving-shaped
+Top-K는 JSONL로 저장한다. 저장 포맷은 DB 조회나 in-memory candidate 계산에
+영향을 주지 않는다.
 
 로컬 run artifact:
 
@@ -207,10 +224,10 @@ artifacts/runs/<run_id>/
 ├── conda-environment.lock.txt
 ├── dataset.jsonl
 ├── queries.jsonl
-├── candidates_validation.jsonl
-├── candidates_test.jsonl
-├── rankings_validation.jsonl
-├── rankings_test.jsonl
+├── candidates_validation.parquet
+├── candidates_test.parquet
+├── rankings_validation.parquet
+├── rankings_test.parquet
 ├── recommendations_validation.jsonl
 ├── recommendations_test.jsonl
 ├── metrics.json
@@ -218,6 +235,17 @@ artifacts/runs/<run_id>/
 ├── validation_lambdarank.txt
 └── final_lambdarank.txt
 ```
+
+동일 snapshot 실측 결과:
+
+| 항목 | 기존 | 개선 | 변화 |
+|---|---:|---:|---:|
+| 전체 pipeline | 802.6초 | 263.7초 | 67.1% 단축 |
+| Candidate 4개 phase 합계 | 647.1초 | 120.0초 | 81.5% 단축 |
+| Candidate Recall@100 | 46.72% | 51.53% | +4.81%p |
+| LambdaRank Recall@10 | 11.57% | 11.57% | 회귀 없음 |
+| 전체 run artifact | 683.7MB | 82.0MB | 88.0% 감소 |
+| Candidate/ranking detail | 653.5MB | 49.9MB | 92.4% 감소 |
 
 ## 6. 측정 Metric
 
@@ -266,6 +294,12 @@ pip install -e '.[experiment,dev]'
 
 rating-recsys-experiment
 rating-recsys-dashboard
+```
+
+지역 후보를 ranker까지 승격하는 실험은 별도 flag로 실행한다.
+
+```bash
+rating-recsys-experiment --promote-region-candidates
 ```
 
 개발 중 미커밋 변경을 artifact에 포함해 실행하려면 다음을 사용한다.

@@ -6,7 +6,11 @@ from collections import Counter
 from typing import Iterable
 
 from rating_recsys.experiments.models import Candidate, FeatureRow, RecommendationQuery
-from rating_recsys.retrieval.baselines import ITEM_ITEM, POPULARITY, RetrievalContext
+from rating_recsys.retrieval.baselines import (
+    ITEM_ITEM,
+    POPULARITY,
+    RetrievalContext,
+)
 
 
 FEATURE_NAMES = (

@@ -7,12 +7,15 @@ import os
 from collections import Counter
 from pathlib import Path
 
+from rating_recsys.experiments.artifacts import read_parquet
+
 
 REQUIRED_RUN_FILES = ("manifest.json", "metrics.json", "queries.jsonl")
 
 STAGE_LABELS = {
     "e0_popularity": "E0 Popularity",
     "item_item_only": "Item-item CF",
+    "region_popularity_only": "Region popularity",
     "e3_rrf_union": "E3 RRF Union",
     "e4_lambdarank": "E4 LambdaMART",
 }
@@ -50,6 +53,12 @@ def _read_jsonl_query(path: Path, query_id: str) -> list[dict[str, object]]:
     token = f'"query_id":"{query_id}"'
     with path.open(encoding="utf-8") as handle:
         return [json.loads(line) for line in handle if token in line]
+
+
+def _read_detail_query(path: Path, query_id: str) -> list[dict[str, object]]:
+    if path.suffix == ".parquet":
+        return read_parquet(path, query_id=query_id)
+    return _read_jsonl_query(path, query_id)
 
 
 def _discover_run_dirs(artifacts_root: Path) -> list[Path]:
@@ -226,7 +235,7 @@ def main() -> None:
         path: str, modified_ns: int, query_id: str
     ) -> list[dict[str, object]]:
         del modified_ns
-        return _read_jsonl_query(Path(path), query_id)
+        return _read_detail_query(Path(path), query_id)
 
     def cached_jsonl(path: Path) -> list[dict[str, object]]:
         return load_jsonl(str(path), path.stat().st_mtime_ns)
@@ -602,7 +611,12 @@ def main() -> None:
             help="큰 ranking artifact에서 현재 query만 읽으므로 처음에는 잠시 걸릴 수 있습니다.",
         )
         if show_details:
-            rankings_path = run_dir / f"rankings_{phase}.jsonl"
+            parquet_path = run_dir / f"rankings_{phase}.parquet"
+            rankings_path = (
+                parquet_path
+                if parquet_path.exists()
+                else run_dir / f"rankings_{phase}.jsonl"
+            )
             with st.spinner("현재 query의 ranking detail을 읽는 중입니다..."):
                 detailed_rows = load_query_rows(
                     str(rankings_path), rankings_path.stat().st_mtime_ns, query_id

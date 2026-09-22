@@ -21,6 +21,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--minimum-user-items", type=int, default=3)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--promote-region-candidates",
+        action="store_true",
+        help=(
+            "Train and evaluate LambdaRank on the expanded region candidate set. "
+            "The default keeps region retrieval in shadow evaluation only."
+        ),
+    )
+    parser.add_argument(
         "--artifacts-dir",
         type=Path,
         default=PROJECT_ROOT / "artifacts",
@@ -46,6 +54,7 @@ def main() -> None:
         ranking_k=args.ranking_k,
         rrf_constant=args.rrf_constant,
         random_seed=args.seed,
+        promote_region_candidates=args.promote_region_candidates,
     )
     settings = get_settings(
         require_database=True,

@@ -15,8 +15,10 @@ from rating_recsys.observability.app import (
     _item_summary_rows,
     _metric_cutoff_rows,
     _query_review_ids,
+    _read_detail_query,
     _read_jsonl_query,
 )
+from rating_recsys.experiments.artifacts import write_parquet
 
 
 class DashboardDataTests(unittest.TestCase):
@@ -116,6 +118,13 @@ class DashboardDataTests(unittest.TestCase):
             )
             self.assertEqual(
                 _read_jsonl_query(path, "test:u1:r9"),
+                rankings,
+            )
+
+            parquet_path = Path(directory) / "rankings.parquet"
+            write_parquet(parquet_path, rankings, batch_size=1)
+            self.assertEqual(
+                _read_detail_query(parquet_path, "test:u1:r9"),
                 rankings,
             )
 

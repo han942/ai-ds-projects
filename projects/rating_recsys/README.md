@@ -9,7 +9,7 @@
 
 현재 Supabase PostgreSQL ingestion, DB-backed modeling dataset과 실행 가능한
 2-stage baseline 골격이 구현되어 있다. 동일 split에서 global
-popularity/full-catalog(E0), popularity+item-item candidate(E3), LightGBM
+popularity/full-catalog(E0), popularity+item-item+region candidate(E3), LightGBM
 LambdaRank(E4)를 비교하고 immutable snapshot, MLflow와 Streamlit artifact를
 생성한다. 날짜는 초기 모델 feature로 사용하지 않고 chronological split과
 leakage 방지에만 사용하며, time-aware recommendation은 후속 연구로 둔다.
@@ -19,7 +19,9 @@ legacy 폴더에 그대로 보존하였다.
 ## Two-stage baseline 실행
 
 실험 dependency를 설치한 뒤 Supabase snapshot에서 E0 popularity, E3
-popularity+item-item RRF와 E4 LightGBM LambdaRank를 한 번에 실행한다.
+quota RRF와 E4 LightGBM LambdaRank를 한 번에 실행한다. Region candidate는
+기본적으로 shadow 평가하며 validation guardrail을 통과하기 전에는 ranker에
+자동 승격하지 않는다.
 
 ```bash
 pip install -e '.[experiment,dev]'
@@ -27,7 +29,7 @@ rating-recsys-experiment
 ```
 
 실행 결과는 `artifacts/runs/<run_id>/`에 저장된다. MLflow에는 대용량 candidate와
-ranking JSONL 전체를 복제하지 않고 핵심 artifact, dataset lineage, 단계별 metric,
+ranking Parquet 전체를 복제하지 않고 핵심 artifact, dataset lineage, 단계별 metric,
 추천 결과 table과 pipeline trace를 기록한다.
 
 MLflow UI는 별도 터미널에서 실행한다.
@@ -44,8 +46,9 @@ mlflow ui \
 - Parent run: validation/test 핵심 metric, dataset input, chart, table, trace
 - `01 · E0 Popularity`: popularity candidate metric과 cutoff curve
 - `02 · Item-item CF`: item-item candidate metric과 cutoff curve
-- `03 · E3 RRF Candidate Union`: fused candidate metric과 cutoff curve
-- `04 · E4 LambdaMART`: final ranking metric과 cutoff curve
+- `03 · Region popularity`: 지역 candidate metric과 cutoff curve
+- `04 · E3 RRF Candidate Union`: fused candidate metric과 cutoff curve
+- `05 · E4 LambdaMART`: final ranking metric과 cutoff curve
 - Tables: 단계별 metric 및 test 사용자별 top-K 추천 결과
 - Traces: split → candidate generation → LambdaMART → 평가 → artifact 기록
 
@@ -60,7 +63,7 @@ MLflow artifact에는 포함하지 않는다. 아이템별 화면에서는 특�
 latency로 구분하며 stage별 @K 값과 각 지표의 도움말을 제공한다.
 
 ```bash
-rating-recsys-dashboard
+rating-recsys-dashboard --address 127.0.0.1
 ```
 
 자세한 architecture, layer output과 metric 정의는

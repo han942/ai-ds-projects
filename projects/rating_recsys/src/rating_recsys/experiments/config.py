@@ -9,13 +9,14 @@ from dataclasses import asdict, dataclass
 class ExperimentConfig:
     """All choices that can change the offline baseline result."""
 
-    schema_version: str = "baseline-v1"
+    schema_version: str = "baseline-v2-region-shadow-candidates"
     protocol: str = "seen-user-leave-last-two-out"
     minimum_user_items: int = 3
     candidate_k: int = 100
     ranking_k: int = 10
     rrf_constant: int = 60
     random_seed: int = 42
+    promote_region_candidates: bool = False
     relevance_high_threshold: float = 4.0
     relevance_low_threshold: float = 3.0
 
