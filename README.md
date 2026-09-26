@@ -6,30 +6,28 @@
 
 A working repository for my data science / AI works, which span through end-to-end projects, team hackathons, and others.
 
-Each flagship project ships with its own write-up covering the goal, the data, the modelling
-decisions, and the results — including the ones that did not improve the metric.
+Each flagship project ships with its own write-up covering the goal, the data,  modelling
+decisions, and final results/accomplishments.
 
 ## 1. Projects
 
 Flagship projects done through my academic - professional pathway. See [`projects/README.md`](./projects/README.md) for full write-ups.
 
-- **[Restaurant Rating RecSys](./projects/rating_recsys)** — Hybrid recommender combining
-  review-text embeddings with collaborative filtering, on Selenium-crawled DiningCode data.
+- **[Restaurant Rating RecSys](./projects/rating_recsys)** — Various approaches trying to enhance the recommnedation quality by integrating user review data, based on Selenium-crawled DiningCode data.
 - **[News Simplification for Youth](./projects/NLP_Newspaper_CUAI)** — Text-style-transfer
   via fine-tuned [Gemma 3-1B](https://huggingface.co/google/gemma-3-1b-it), with a
   GPT-4o-augmented parallel corpus. Retained **100%** factual accuracy on **75%+** of samples.
-- Other Projects: **[Global Supermarket Analysis](./projects/Global_Supermarket_Analysis)** | **[Target E-commerce Analysis](./projects/Target_Ecommerce)**
+- Others: **[Global Supermarket Analysis](./projects/Global_Supermarket_Analysis)** | **[Target E-commerce Analysis](./projects/Target_Ecommerce)**
 
 ## 2. Hackathon
 
 - **[Codex Community Hackathon — Seoul for Students](./hackerthon)** ([Korean](./hackerthon/README_KOR.md)) —
   A [one-day event](https://codex-community-korea.skysplit.chatgpt.site/en/hackathon/seoul-2026)
   where **teams are formed on site** and
-  projects are built from scratch that day. 
-- Our team shipped
-  **[Campus Mate](https://campusmate.site)**: a campus lunch-mate matcher that turns class
-  timetables into a matching signal.
-- Tech stack: React 19, Node.js 22 / Express 5, PostgreSQL 17, Supabase, OpenAI API, Docker Compose
+  projects are built from scratch that day.
+  -  **[Campus Mate](https://campusmate.site)**: a campus lunch-mate matcher that turns class
+    timetables into a matching signal.
+  - Tech stack: React, Node.js | Express, PostgreSQL, Supabase | Docker Compose
 
 ## 3. RecSys Study (`Study/RecSys/`)
 

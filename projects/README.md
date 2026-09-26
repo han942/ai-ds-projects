@@ -6,14 +6,13 @@ This folder contains my main data science/AI projects, organized by topic.
 ## 1. Constructing text-embedded hybrid recommendation models for korean dining resturants   
 
 - Link: https://github.com/han942/ai-ds-projects/tree/main/projects/rating_recsys
-- Goal: Constructing recommnedation model using crawled user review data from restaurant recommendation website
-- Tech stack: ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) ![MySQL](https://img.shields.io/badge/MySQL-4479A1?style=flat&logo=mysql&logoColor=white) ![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=flat&logo=pytorch&logoColor=white) ![Pandas](https://img.shields.io/badge/Pandas-150458?style=flat&logo=pandas&logoColor=white) ![Selenium](https://img.shields.io/badge/Selenium-43B02A?style=flat&logo=selenium&logoColor=white) ![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=flat&logo=scikit-learn&logoColor=white)
+- Goal: Constructing recommnedation model that represents user-reviews, leading to high quality recommendation in restuarant domains.
+- Tech stack: ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) ![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=flat&logo=pytorch&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white) ![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=flat&logo=supabase&logoColor=white) ![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white) ![Selenium](https://img.shields.io/badge/Selenium-43B02A?style=flat&logo=selenium&logoColor=white) ![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=flat&logo=scikit-learn&logoColor=white) ![MLflow](https://img.shields.io/badge/MLflow-0194E2?style=flat&logo=mlflow&logoColor=white) 
 - Main notebook/script: `diningcode_analysis.ipynb`
 - Highlights:
-  - Constructing real-time datasets using web-crawling techniques with Selenium
-  - Storing & retrieving crawled data into local MySQL sever using SQL queries
-  - Text embedding user reviews and integrating into traditional recommendation models to achive accurate rating predictions. 
-  - 
+  - Constructing real-time datasets using web-crawling techniques with Selenium/Playwright
+  - Storing & retrieving crawled data into local MySQL/PostgreSQL DB servers constructing efficient SQL queries
+  - Text embedding user reviews and integrating into traditional recommendation models to achive accurate rating predictions.
 
 ---
 
@@ -34,7 +33,7 @@ This folder contains my main data science/AI projects, organized by topic.
 
 - Link: https://github.com/han942/ai-ds-projects/tree/main/projects/Global_Supermarket_Analysis
 - Goal: Conducting exploratory data analysis (EDA) and loss analysis to develop strategies to improve loss status.
-- Tech stack: ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) ![Pandas](https://img.shields.io/badge/Pandas-150458?style=flat&logo=pandas&logoColor=white) ![Matplotlib](https://img.shields.io/badge/Matplotlib-11557C?style=flat&logo=matplotlib&logoColor=white) ![Seaborn](https://img.shields.io/badge/Seaborn-4C72B0?style=flat&logo=python&logoColor=white)
+- Tech stack: ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) ![Pandas](https://img.shields.io/badge/Pandas-150458?style=flat&logo=pandas&logoColor=white) ![Matplotlib](https://img.shields.io/badge/Matplotlib-11557C?style=flat&logo=matplotlib&logoColor=white) ![Seaborn](https://img.shields.io/badge/Seaborn-4C72B0?style=flat&logo=python&logoColor=white) ![MySQL](https://img.shields.io/badge/MySQL-4479A1?style=flat&logo=mysql&logoColor=white) ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=flat&logo=javascript&logoColor=black)
 - Main notebook/script: `supermarket_analysis.ipynb`, `Global_supermarket_Analysis.pdf`
 - Highlights:
   - Comprehensive EDA on global sales and logistics data
