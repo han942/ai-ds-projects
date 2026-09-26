@@ -1,6 +1,6 @@
 # Rating Recommender System v2 확장 계획
 
-> 상태: M1·M2·M3 완료, M4·M5 초기 E3/E4 baseline vertical slice 구현 완료
+> 상태: M1·M2·M3 완료, M4·M5 초기 C0-C3/R1 baseline vertical slice 구현 완료
 > 방향: DB-backed data pipeline → Stage 1 candidate retrieval → Stage 2 learning-to-rank  
 > 비용 원칙: 로컬·오픈소스 우선, 관리형 서비스와 유료 API는 기본 구성에서 제외
 
@@ -263,20 +263,22 @@ CSV는 raw archive 및 초기 bootstrap 입력으로만 사용한다. DB 적재 
 
 ### 6.1 Baseline
 
-- **E0 global popularity**: interaction 수로 전체 catalog를 정렬한다. 개인화가
-  없는 하한선이자 데이터·평가 파이프라인 검증용 baseline이다.
-- **E3 item-item co-occurrence**: 사용자의 과거 방문 식당과 함께 등장한 식당을
-  cosine-normalized co-occurrence로 검색하고 global popularity 후보와 합친다.
-  작고 희소한 implicit-feedback 데이터에서 학습 없이 개인화를 검증하기에
-  적합한 첫 collaborative baseline이다.
-- 서로 다른 candidate score는 직접 합산하지 않고 source rank 기반 RRF로
-  결합한다. 각 source score, rank와 기여 여부는 그대로 보존한다.
+- **C0 global popularity**: interaction 수로 전체 catalog를 정렬한다. 개인화가
+  없는 하한선이자 데이터·평가 파이프라인 검증용 candidate source다.
+- **C1 item-item co-occurrence**: 사용자의 과거 방문 식당과 함께 등장한 식당을
+  cosine-normalized co-occurrence로 검색한다. 작고 희소한 implicit-feedback
+  데이터에서 학습 없이 개인화를 검증하기에 적합한 collaborative source다.
+- **C2 region popularity**: 사용자의 과거 방문 지역 분포와 지역별 식당
+  popularity를 이용해 지역 선호 후보를 만든다.
+- **C3 quota RRF union**: C0·C1·C2의 raw score를 직접 더하지 않고 source rank
+  기반 RRF로 결합한다. 기존 C0+C1 상위 후보를 일정 수 보존한 뒤 C2를 포함한
+  확장 후보로 나머지를 채우며, 각 source score·rank·기여 여부를 보존한다.
 
-Stage 1 평가는 popularity-only, item-item-only, popularity+item-item RRF를 각각
-남겨 item-item 개인화와 source fusion의 기여를 분리한다.
+Stage 1 평가는 C0, C1, C2, C3를 각각 남겨 source별 기여와 fusion 효과를
+분리한다. C3에서 선택한 후보를 평가·저장하고, 동일한 후보를 R1에 전달한다.
 
 BPR/ALS, LightGCN, two-tower와 content retrieval은 위의 비학습·근접 이웃
-baseline이 정상 동작한 뒤 비교한다. 현재 catalog가 약 748개이므로 E0은
+baseline이 정상 동작한 뒤 비교한다. 현재 catalog가 약 748개이므로 C0은
 full-catalog로도 계산하여 2-stage 후보 절단으로 잃는 성능을 확인한다.
 
 ### 6.2 Personalized retrieval
@@ -331,15 +333,16 @@ candidate_model_version
 첫 ranker는 작은 데이터에서도 안정적이고 해석 가능한 LightGBM LambdaRank를
 사용한다.
 
-초기 **E4 baseline**은 E3와 동일한 candidate를 입력으로 받아 source score와
-rank, cutoff 이전 popularity, item-item similarity, 사용자 history 길이 같은
-표형 feature로 재정렬한다. 이는 복잡한 neural ranker를 도입하기 전에
+**R0**는 candidate source 또는 fusion 순서를 그대로 사용하는 identity ranker다.
+초기 learned ranker인 **R1**은 C3에서 선택한 후보를 입력으로 받아 source
+score와 rank, cutoff 이전 popularity, item-item similarity, 사용자 history 길이
+같은 표형 feature로 재정렬한다. 이는 복잡한 neural ranker를 도입하기 전에
 candidate 개선과 ranking 개선을 분리해 측정할 수 있고, feature importance를
 확인할 수 있다는 점에서 첫 LTR baseline으로 적합하다.
 
 ### 입력 feature
 
-초기 E4에서는 candidate source별 score·rank·source 존재 여부, 식당 popularity,
+초기 R1에서는 candidate source별 score·rank·source 존재 여부, 식당 popularity,
 item-item similarity, 사용자 history 길이와 사용자의 과거 지역 분포 대비
 candidate 지역 affinity만 사용한다. 모두 query cutoff 이전 interaction에서
 집계한다.
@@ -383,7 +386,7 @@ review-only 데이터에서 사용하는 초기 graded relevance는 다음과 �
    train history 1~2개와 3개 이상 결과는 별도의 diagnostic breakdown으로 함께
    기록하되, 모델과 serving 경로를 분리하지 않는다.
 5. Secondary temporal audit는 전역 time cutoff에서 seen/new user 비율을
-   출력한다. 초기 E0/E3/E4의 성능 비교에는 사용하지 않는다.
+   출력한다. 초기 C0-C3/R1의 성능 비교에는 사용하지 않는다.
 6. 각 query 시점보다 늦은 interaction과 target review에서 파생된 정보는 feature
    생성에서 제외한다.
 7. 날짜 추론 방식과 dataset snapshot을 기록하여 같은 split을 재현한다.
@@ -487,7 +490,7 @@ interaction이 과거 입력에 들어가지 않도록 하는 평가 규칙이�
 남을 수 있으므로, 이 audit을 정식 benchmark로 승격하기 전 test history를
 `train + validation`으로 확장하는 수정과 회귀 테스트가 필요하다.
 
-초기 E0/E3/E4 모델에는 아래 시간 feature와 알고리즘을 넣지 않는다.
+초기 C0-C3/R1 모델에는 아래 시간 feature와 알고리즘을 넣지 않는다.
 
 - 최근 interaction에 더 큰 가중치를 주는 recency feature
 - time-decay 또는 trend-aware popularity
@@ -693,19 +696,26 @@ Notebook은 `src/`의 versioned 코드를 호출하여 결과를 탐색하고 �
 - [ ] temporal drift와 catalog freshness monitoring
 - [ ] session/sequential baseline과 SASRec 계열 비교
 
-## 13. 핵심 실험표
+## 13. 컴포넌트 표
 
-| ID | Candidate | Ranker | 목적 |
+Candidate는 `C`, ranker는 `R`로 표시한다.
+
+| ID | Component | 단계 | 목적 |
 |---|---|---|---|
-| E0 | global popularity/full catalog | score sort | 비개인화 최소 baseline |
-| E1 | BPR/LightGCN | score sort | collaborative baseline |
-| E2 | Two-tower | score sort | dense retrieval 기준 |
-| E3 | popularity + item-item | RRF | 개인화 candidate recall 측정 |
-| E4 | E3 | LambdaRank | LTR의 순수 기여 측정 |
-| E5 | E3 + content vector | LambdaRank | 리뷰·메뉴 정보 기여 측정 |
-| E6 | TIGER-style GenRec | 동일 LambdaRank | generative candidate 기여 측정 |
+| C0 | global popularity/full catalog | Candidate | 비개인화 최소 baseline |
+| C1 | item-item co-occurrence | Candidate | 근접 이웃 개인화 기준 |
+| C2 | region popularity | Candidate | 지역 선호 source의 단독 기여 측정 |
+| C3 | C0+C1+C2 quota RRF union | Candidate fusion | 확장 candidate recall 측정 |
+| C4 | BPR/LightGCN | Candidate | 학습형 collaborative retrieval 비교 |
+| C5 | Two-tower | Candidate | dense retrieval 기준 |
+| C6 | content vector | Candidate | 리뷰·메뉴 정보 기여 측정 |
+| C7 | TIGER-style GenRec | Candidate | generative retrieval 기여 측정 |
+| R0 | source/fusion score sort | Ranker | candidate 순서를 그대로 쓰는 기준선 |
+| R1 | LightGBM LambdaRank | Ranker | LTR의 순수 재정렬 효과 측정 |
 
-E0/E3/E4의 성능 비교는 같은 primary seen-user split, candidate evaluation
+현재 실행은 C0~C3 후보를 각각 평가하고, R1은 C3 후보를 재정렬한다.
+
+C0-C3/R1의 성능 비교는 같은 primary seen-user split, candidate evaluation
 protocol과 ranking label 정의를 사용한다. Secondary temporal 경로는 초기에는
 cohort audit만 수행하며 M8에서 정식 benchmark로 승격한다.
 

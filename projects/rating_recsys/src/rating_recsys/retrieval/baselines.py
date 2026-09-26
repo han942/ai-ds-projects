@@ -23,7 +23,6 @@ class RetrievalResult:
     popularity: tuple[Candidate, ...]
     item_item: tuple[Candidate, ...]
     region_popularity: tuple[Candidate, ...]
-    base_union: tuple[Candidate, ...]
     union: tuple[Candidate, ...]
     eligible_catalog: frozenset[int]
     target_available: bool
@@ -140,11 +139,14 @@ def build_context(interactions: Iterable[Interaction]) -> RetrievalContext:
 class BaselineCandidateGenerator:
     """Generate source candidates and fuse them with reciprocal rank fusion."""
 
-    def __init__(self, *, candidate_k: int = 100, rrf_constant: int = 60) -> None:
+    def __init__(
+        self, *, candidate_k: int = 100, rrf_constant: int = 60, include_region: bool = True
+    ) -> None:
         if candidate_k < 1 or rrf_constant < 1:
             raise ValueError("candidate_k and rrf_constant must be positive")
         self.candidate_k = candidate_k
         self.rrf_constant = rrf_constant
+        self.include_region = include_region
 
     def retrieve(
         self,
@@ -179,20 +181,21 @@ class BaselineCandidateGenerator:
             item_sum_scores[restaurant_id] = sum(similarities)
             item_max_scores[restaurant_id] = max(similarities, default=0.0)
 
-        history_region_counts: Counter[str] = Counter(
-            item.region for item in query.history
-        )
-        history_length = len(query.history)
-        region_popularity_scores = {
-            restaurant_id: (
-                context.item_counts[restaurant_id]
-                * history_region_counts.get(context.item_regions[restaurant_id], 0)
-                / history_length
+        region_popularity_scores: dict[int, float] = {}
+        if self.include_region and query.history:
+            history_region_counts: Counter[str] = Counter(
+                item.region for item in query.history
             )
-            for restaurant_id in eligible
-            if history_length
-            and history_region_counts.get(context.item_regions[restaurant_id], 0) > 0
-        }
+            history_length = len(query.history)
+            region_popularity_scores = {
+                restaurant_id: (
+                    context.item_counts[restaurant_id]
+                    * history_region_counts.get(context.item_regions[restaurant_id], 0)
+                    / history_length
+                )
+                for restaurant_id in eligible
+                if history_region_counts.get(context.item_regions[restaurant_id], 0) > 0
+            }
 
         popularity_ids = _top_ids(popularity_scores, self.candidate_k)
         item_item_ids = _top_ids(
@@ -294,7 +297,6 @@ class BaselineCandidateGenerator:
             for restaurant_id in union_ids
         }
         base_quota = min(self.candidate_k, max(1, self.candidate_k // 2))
-        base_full_ids = _top_ids(base_rrf_scores, self.candidate_k)
         base_ids = _top_ids(base_rrf_scores, base_quota)
         base_id_set = set(base_ids)
         expanded_ids = _top_ids(rrf_scores, len(rrf_scores))
@@ -305,23 +307,6 @@ class BaselineCandidateGenerator:
                 for restaurant_id in expanded_ids
                 if restaurant_id not in base_id_set
             ][: self.candidate_k - len(base_ids)]
-        )
-        base_union = tuple(
-            self._candidate(
-                query,
-                restaurant_id,
-                context,
-                popularity_scores,
-                item_sum_scores,
-                item_max_scores,
-                {},
-                popularity_ranks,
-                item_item_ranks,
-                {},
-                rank,
-                rrf_score=base_rrf_scores[restaurant_id],
-            )
-            for rank, restaurant_id in enumerate(base_full_ids, start=1)
         )
         union = tuple(
             self._candidate(
@@ -346,7 +331,6 @@ class BaselineCandidateGenerator:
                 popularity=popularity,
                 item_item=item_item,
                 region_popularity=region_popularity,
-                base_union=base_union,
                 union=union,
                 eligible_catalog=frozenset(eligible),
                 target_available=query.target.restaurant_id in context.item_counts,
@@ -388,10 +372,10 @@ class BaselineCandidateGenerator:
                     ),
                     default=0.0,
                 ),
-                REGION_POPULARITY: _region_popularity_score(
-                    query,
-                    target_id,
-                    context,
+                **(
+                    {REGION_POPULARITY: _region_popularity_score(query, target_id, context)}
+                    if self.include_region
+                    else {}
                 ),
                 BASE_RRF: 0.0,
             },
@@ -447,8 +431,10 @@ class BaselineCandidateGenerator:
                 POPULARITY: popularity_scores.get(restaurant_id, 0.0),
                 ITEM_ITEM: item_sum_scores.get(restaurant_id, 0.0),
                 "item_item_max": item_max_scores.get(restaurant_id, 0.0),
-                REGION_POPULARITY: region_popularity_scores.get(
-                    restaurant_id, 0.0
+                **(
+                    {REGION_POPULARITY: region_popularity_scores.get(restaurant_id, 0.0)}
+                    if self.include_region
+                    else {}
                 ),
                 BASE_RRF: base_rrf_score if base_rrf_score is not None else 0.0,
             },

@@ -9,18 +9,20 @@ from dataclasses import asdict, dataclass
 class ExperimentConfig:
     """All choices that can change the offline baseline result."""
 
-    schema_version: str = "baseline-v2-region-shadow-candidates"
+    schema_version: str = "baseline-v5-region-ablation"
     protocol: str = "seen-user-leave-last-two-out"
     minimum_user_items: int = 3
     candidate_k: int = 100
     ranking_k: int = 10
     rrf_constant: int = 60
     random_seed: int = 42
-    promote_region_candidates: bool = False
+    region_mode: str = "with_region"
     relevance_high_threshold: float = 4.0
     relevance_low_threshold: float = 3.0
 
     def __post_init__(self) -> None:
+        if self.region_mode not in {"with_region", "without_region"}:
+            raise ValueError("region_mode must be with_region or without_region")
         if self.minimum_user_items < 3:
             raise ValueError("minimum_user_items must be at least 3")
         if self.candidate_k < 1:
@@ -31,6 +33,10 @@ class ExperimentConfig:
             raise ValueError("rrf_constant must be positive")
         if self.relevance_low_threshold >= self.relevance_high_threshold:
             raise ValueError("low relevance threshold must be below high threshold")
+
+    @property
+    def include_region(self) -> bool:
+        return self.region_mode == "with_region"
 
     def relevance(self, rating: float) -> int:
         if rating >= self.relevance_high_threshold:

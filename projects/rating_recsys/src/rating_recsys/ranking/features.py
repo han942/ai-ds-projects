@@ -28,21 +28,23 @@ FEATURE_NAMES = (
     "user_average_rating",
     "region_affinity",
 )
+NO_REGION_FEATURE_NAMES = FEATURE_NAMES[:-1]
 
 
 def feature_values(
     query: RecommendationQuery,
     candidate: Candidate,
     context: RetrievalContext,
+    *,
+    include_region: bool = True,
 ) -> dict[str, float]:
-    region_counts = Counter(item.region for item in query.history)
     history_length = len(query.history)
     average_rating = (
         sum(item.rating for item in query.history) / history_length
         if history_length
         else 0.0
     )
-    return {
+    values = {
         "popularity_score": candidate.source_scores.get(POPULARITY, 0.0),
         "item_average_rating": context.average_rating(candidate.restaurant_id),
         "item_item_sum_similarity": candidate.source_scores.get(ITEM_ITEM, 0.0),
@@ -61,18 +63,23 @@ def feature_values(
         "candidate_rank_inverse": 1.0 / candidate.candidate_rank,
         "user_history_length": float(history_length),
         "user_average_rating": average_rating,
-        "region_affinity": (
+    }
+    if include_region:
+        region_counts = Counter(item.region for item in query.history)
+        values["region_affinity"] = (
             region_counts.get(candidate.region, 0) / history_length
             if history_length
             else 0.0
-        ),
-    }
+        )
+    return values
 
 
 def build_feature_rows(
     query: RecommendationQuery,
     candidates: Iterable[Candidate],
     context: RetrievalContext,
+    *,
+    include_region: bool = True,
 ) -> tuple[FeatureRow, ...]:
     return tuple(
         FeatureRow(
@@ -88,7 +95,9 @@ def build_feature_rows(
             ),
             history_depth=query.history_depth,
             candidate=candidate,
-            features=feature_values(query, candidate, context),
+            features=feature_values(
+                query, candidate, context, include_region=include_region
+            ),
         )
         for candidate in candidates
     )

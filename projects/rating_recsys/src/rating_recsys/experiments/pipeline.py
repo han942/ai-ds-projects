@@ -1,4 +1,4 @@
-"""End-to-end E0/E3/E4 offline baseline pipeline."""
+"""End-to-end C0-C3 candidate and R1 ranking offline baseline pipeline."""
 
 from __future__ import annotations
 
@@ -45,7 +45,11 @@ from rating_recsys.experiments.snapshot import (
     write_snapshot,
 )
 from rating_recsys.observability.tracking import ExperimentTrackingSession
-from rating_recsys.ranking.features import FEATURE_NAMES, build_feature_rows
+from rating_recsys.ranking.features import (
+    FEATURE_NAMES,
+    NO_REGION_FEATURE_NAMES,
+    build_feature_rows,
+)
 from rating_recsys.ranking.lambdarank import LightGBMLambdaRanker
 from rating_recsys.retrieval.baselines import (
     BaselineCandidateGenerator,
@@ -70,7 +74,6 @@ class PhaseData:
     item_item: dict[str, tuple[Candidate, ...]]
     region_popularity: dict[str, tuple[Candidate, ...]]
     union: dict[str, tuple[Candidate, ...]]
-    ranker_candidates: dict[str, tuple[Candidate, ...]]
     feature_rows: tuple[FeatureRow, ...]
     eligible_catalog: set[int]
     target_available: dict[str, bool]
@@ -127,11 +130,13 @@ def run_baseline_experiment(
         encoding="utf-8",
     )
 
+    run_name = "C3 → R1" if config.include_region else "C0+C1 → R1 · No region"
     with ExperimentTrackingSession(
         enabled=enable_mlflow,
         artifacts_root=artifacts_root,
         run_name=(
-            f"Baseline v1 · {now.strftime('%Y-%m-%d %H:%M UTC')} · "
+            f"{run_name} · "
+            f"{now.strftime('%Y-%m-%d %H:%M UTC')} · "
             f"{dataset_id[:8]}"
         ),
         pipeline_run_id=run_id,
@@ -210,7 +215,9 @@ def _execute_pipeline(
     generator = BaselineCandidateGenerator(
         candidate_k=config.candidate_k,
         rrf_constant=config.rrf_constant,
+        include_region=config.include_region,
     )
+    feature_names = FEATURE_NAMES if config.include_region else NO_REGION_FEATURE_NAMES
     train_data = _build_traced_phase(
         tracking,
         "02_build_train_candidates",
@@ -219,7 +226,6 @@ def _execute_pipeline(
         generator,
         inject_training_targets=True,
         retain_source_candidates=False,
-        rank_expanded_candidates=config.promote_region_candidates,
     )
     validation_data = _build_traced_phase(
         tracking,
@@ -229,7 +235,6 @@ def _execute_pipeline(
         generator,
         inject_training_targets=False,
         retain_source_candidates=True,
-        rank_expanded_candidates=config.promote_region_candidates,
     )
     validation_training_data = _build_traced_phase(
         tracking,
@@ -239,7 +244,6 @@ def _execute_pipeline(
         generator,
         inject_training_targets=True,
         retain_source_candidates=False,
-        rank_expanded_candidates=config.promote_region_candidates,
     )
     test_data = _build_traced_phase(
         tracking,
@@ -249,13 +253,13 @@ def _execute_pipeline(
         generator,
         inject_training_targets=False,
         retain_source_candidates=True,
-        rank_expanded_candidates=config.promote_region_candidates,
     )
 
     factory = ranker_factory or (
         lambda seed: LightGBMLambdaRanker(
             random_seed=seed,
             ranking_k=config.ranking_k,
+            feature_names=feature_names,
         )
     )
     with tracking.span(
@@ -331,7 +335,7 @@ def _execute_pipeline(
                 config,
             ),
         }
-        test_ranker_metrics = metrics["test"]["e4_lambdarank"]
+        test_ranker_metrics = metrics["test"]["r1_lambdarank"]
         final_cutoff = max(
             int(key.removeprefix("ndcg_at_"))
             for key in test_ranker_metrics
@@ -390,7 +394,7 @@ def _execute_pipeline(
             "config": config.to_dict(),
             "snapshot": snapshot,
             "code": source,
-            "feature_schema": list(FEATURE_NAMES),
+            "feature_schema": list(feature_names),
             "primary_split": primary.summary(),
             "secondary_temporal_audit": temporal.summary(),
             "artifacts": {
@@ -464,7 +468,6 @@ def _build_traced_phase(
     *,
     inject_training_targets: bool,
     retain_source_candidates: bool,
-    rank_expanded_candidates: bool,
 ) -> PhaseData:
     with tracking.span(
         span_name,
@@ -481,7 +484,6 @@ def _build_traced_phase(
             generator,
             inject_training_targets=inject_training_targets,
             retain_source_candidates=retain_source_candidates,
-            rank_expanded_candidates=rank_expanded_candidates,
         )
         span.set_outputs(
             {
@@ -503,13 +505,11 @@ def _build_phase(
     *,
     inject_training_targets: bool,
     retain_source_candidates: bool,
-    rank_expanded_candidates: bool,
 ) -> PhaseData:
     popularity: dict[str, tuple[Candidate, ...]] = {}
     item_item: dict[str, tuple[Candidate, ...]] = {}
     region_popularity: dict[str, tuple[Candidate, ...]] = {}
     union: dict[str, tuple[Candidate, ...]] = {}
-    ranker_candidates: dict[str, tuple[Candidate, ...]] = {}
     rows_by_query: dict[str, tuple[FeatureRow, ...]] = {}
     eligible_catalog: set[int] = set()
     availability: dict[str, bool] = {}
@@ -540,17 +540,12 @@ def _build_phase(
             popularity[query.query_id] = result.popularity
             item_item[query.query_id] = result.item_item
             region_popularity[query.query_id] = result.region_popularity
-        phase_union = (
-            result.union if rank_expanded_candidates else result.base_union
-        )
+        phase_union = result.union
         if inject_training_targets and query.relevance > 0:
             phase_union = generator.inject_target(query, phase_union, context)
-        union[query.query_id] = (
-            result.union if retain_source_candidates else phase_union
-        )
-        ranker_candidates[query.query_id] = phase_union
+        union[query.query_id] = phase_union
         rows_by_query[query.query_id] = build_feature_rows(
-            query, phase_union, context
+            query, phase_union, context, include_region=generator.include_region
         )
         eligible_catalog.update(result.eligible_catalog)
         availability[query.query_id] = result.target_available
@@ -562,7 +557,6 @@ def _build_phase(
         item_item=item_item,
         region_popularity=region_popularity,
         union=union,
-        ranker_candidates=ranker_candidates,
         feature_rows=tuple(
             row
             for query in queries
@@ -619,10 +613,10 @@ def _phase_metrics(
         "ranking_latency": latency_summary(ranking_latencies_ms),
     }
     for name, candidates in (
-        ("e0_popularity", data.popularity),
-        ("item_item_only", data.item_item),
-        ("region_popularity_only", data.region_popularity),
-        ("e3_rrf_union", data.union),
+        ("c0_popularity", data.popularity),
+        ("c1_item_item", data.item_item),
+        ("c2_region_popularity", data.region_popularity),
+        ("c3_rrf_union", data.union),
     ):
         base[name] = evaluate_rankings(
             candidate_observations(data.queries, candidates),
@@ -631,11 +625,11 @@ def _phase_metrics(
             item_popularity=data.item_popularity,
             item_regions=data.item_regions,
         )
-    base["e3_rrf_union"]["source_contribution"] = source_contribution(
+    base["c3_rrf_union"]["source_contribution"] = source_contribution(
         data.queries,
         data.union,
     )
-    base["e4_lambdarank"] = evaluate_rankings(
+    base["r1_lambdarank"] = evaluate_rankings(
         ranked_observations(data.queries, ranked),
         cutoffs=ranking_cutoffs,
         catalog_ids=data.eligible_catalog,
@@ -649,7 +643,7 @@ def _training_summary(data: PhaseData) -> dict[str, int | float]:
     relevant_queries = [query for query in data.queries if query.relevance > 0]
     injected = sum(
         candidate.injected_for_training
-        for candidates in data.ranker_candidates.values()
+        for candidates in data.union.values()
         for candidate in candidates
     )
     available = sum(
@@ -659,7 +653,7 @@ def _training_summary(data: PhaseData) -> dict[str, int | float]:
         any(
             candidate.restaurant_id == query.target.restaurant_id
             and not candidate.injected_for_training
-            for candidate in data.ranker_candidates.get(query.query_id, ())
+            for candidate in data.union.get(query.query_id, ())
         )
         for query in relevant_queries
     )

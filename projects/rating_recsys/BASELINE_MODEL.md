@@ -8,17 +8,21 @@
 
 초기 비교 대상은 다음과 같다.
 
-| ID | Candidate | Ranking | 확인할 내용 |
+| ID | Component | 역할 | 확인할 내용 |
 |---|---|---|---|
-| E0 | Global popularity | Interaction count 순 | 비개인화 하한선 |
-| E3-A | Item-item co-occurrence | Similarity 순 | 개인화 candidate의 단독 기여 |
-| E3-B | Region popularity | 선호 지역 안의 popularity 순 | 지역 source의 단독 기여 |
-| E3 | Popularity + item-item + region | Quota RRF 순 | 확장 candidate source 결합 효과 |
-| E4 | 기본은 검증된 2-source candidate | LightGBM LambdaRank | Candidate promotion과 LTR을 분리 |
+| C0 | Global popularity | Candidate source | 비개인화 하한선 |
+| C1 | Item-item co-occurrence | Candidate source | 개인화 candidate의 단독 기여 |
+| C2 | Region popularity | Candidate source | 지역 source의 단독 기여 |
+| C3 | Popularity + item-item + region | Candidate fusion | 확장 candidate source 결합 효과 |
+| R0 | Candidate source/fusion 순위 | Identity ranker | Candidate 자체의 순위 품질 |
+| R1 | LightGBM LambdaRank | Learned ranker | LTR의 순수 재정렬 효과 |
 
-현재 catalog가 약 748개이므로 E0은 전체 catalog를 직접 정렬한다. 2-stage 구조는
+`C`는 Stage 1 candidate 컴포넌트, `R`은 Stage 2 ranker를 뜻한다.
+현재 catalog가 약 748개이므로 C0은 전체 catalog를 직접 정렬한다. 2-stage 구조는
 당장의 latency 최적화보다는 향후 BPR, two-tower, vector 및 generative retrieval을
 같은 ranker 아래에서 비교하기 위한 실험 골격이다.
+
+한 번의 실행에서 C0~C3 후보 품질을 각각 평가하고, C3에서 선택한 후보를 R1이 재정렬한다.
 
 ## 2. Architecture
 
@@ -31,7 +35,7 @@ flowchart TD
     Q --> POP[Global popularity]
     Q --> I2I[Item-item cosine co-occurrence]
     Q --> REG[Preferred-region popularity]
-    POP --> RRF[Quota RRF candidate union Top-100]
+    POP --> RRF[C3 quota RRF union Top-100]
     I2I --> RRF
     REG --> RRF
     RRF --> F[Cutoff-safe feature builder]
@@ -111,8 +115,7 @@ target_rating, relevance, history_depth
 ```
 
 각 run에는 config, Git commit/dirty 상태, Python/platform, 전체 package version과
-feature schema를 저장한다. 기본 실행은 dirty worktree를 거부하며 개발 중에는
-`--allow-dirty`로 diff를 함께 보존할 수 있다.
+feature schema를 저장한다. 미커밋 변경이 있으면 diff도 run artifact에 보존한다.
 
 ### Layer 1-A. Global popularity
 
@@ -149,11 +152,8 @@ Popularity와 item-item의 score scale이 다르므로 raw score를 직접 더�
 RRF(item) = sum(1 / (60 + source_rank))
 ```
 
-기존 2-source RRF 상위 50개를 보존하고, 나머지를 region을 포함한 확장 RRF로
-채운다. 기본 실행에서는 확장 후보를 shadow 평가·저장하되 LambdaRank에는 검증된
-2-source 후보를 전달한다. `--promote-region-candidates`를 지정한 실험에서만 확장
-후보로 LambdaRank를 재학습한다. 현재 데이터에서는 확장 후보 재학습이 Recall@10을
-낮췄기 때문에 기본 승격하지 않는다.
+C3는 C0+C1 RRF 상위 50개를 우선 보존하고, 나머지를 C2를 포함한 RRF로
+채운다. 선택된 C3 후보를 평가·저장하고 동일한 후보를 LambdaRank에 전달한다.
 
 Candidate output:
 
@@ -192,7 +192,7 @@ rrf_score, candidate_rank, injected_for_training
 
 ## 5. 최종 Output
 
-사용자에게 전달되는 최종 결과는 E4의 `final_rank <= 10`인 식당 목록이다.
+사용자에게 전달되는 최종 결과는 R1의 `final_rank <= 10`인 식당 목록이다.
 
 ```text
 query_id
@@ -236,7 +236,11 @@ artifacts/runs/<run_id>/
 └── final_lambdarank.txt
 ```
 
-동일 snapshot 실측 결과:
+아래 표는 이전 C0+C1→R1 정책에서 측정한 과거 처리량 기록이다. 현재 C3→R1
+baseline과 지역 제거 실험의 같은 snapshot 비교는
+[region ablation 결과](./analysis/region_ablation_2026-09-23.md)에 정리했다.
+
+동일 snapshot의 과거 실측 결과:
 
 | 항목 | 기존 | 개선 | 변화 |
 |---|---:|---:|---:|
@@ -266,7 +270,7 @@ artifact alias로만 남기고 Recall을 headline metric으로 사용한다.
 
 | Metric | 의미 | 해석 |
 |---|---|---|
-| NDCG@5/10 | Relevant target이 위에 있을수록 높은 discounted gain | E3 대비 E4 재정렬 개선의 주 지표 |
+| NDCG@5/10 | Relevant target이 위에 있을수록 높은 discounted gain | C3 순서(R0) 대비 R1 재정렬 개선 지표 |
 | Recall@5/10 | 최종 Top-K에 target이 남은 query 비율 | 사용자에게 보이는 목록의 hit 여부 |
 | MRR@10 | 첫 relevant target 순위의 역수 평균 | 정답을 얼마나 앞에 배치했는지 |
 | Coverage@10 | 최종 노출 item 범위 | LTR의 popularity 쏠림 guardrail |
@@ -296,18 +300,6 @@ rating-recsys-experiment
 rating-recsys-dashboard
 ```
 
-지역 후보를 ranker까지 승격하는 실험은 별도 flag로 실행한다.
-
-```bash
-rating-recsys-experiment --promote-region-candidates
-```
-
-개발 중 미커밋 변경을 artifact에 포함해 실행하려면 다음을 사용한다.
-
-```bash
-rating-recsys-experiment --allow-dirty
-```
-
 MLflow UI는 별도 터미널에서 실행한다.
 
 ```bash
@@ -319,15 +311,16 @@ mlflow ui \
 
 ### MLflow 관측 구조
 
-각 실행은 하나의 parent run과 네 개의 stage child run으로 기록한다.
+각 실행은 하나의 parent run과 다섯 개의 component child run으로 기록한다.
 
 | Run | UI에서 확인할 내용 |
 |---|---|
 | Parent | 핵심 validation/test metric, dataset lineage, chart, table, trace |
-| E0 Popularity | popularity candidate Recall/NDCG/MRR/Coverage@K |
-| Item-item CF | collaborative filtering candidate metric@K |
-| E3 RRF Candidate Union | candidate union metric@K와 source contribution |
-| E4 LambdaMART | 최종 top-K Recall/NDCG/MRR/Coverage |
+| C0 Popularity | popularity candidate Recall/NDCG/MRR/Coverage@K |
+| C1 Item-item CF | collaborative filtering candidate metric@K |
+| C2 Region popularity | 지역 candidate metric@K |
+| C3 RRF Candidate Union | candidate union metric@K와 source contribution |
+| R1 LambdaMART | 최종 top-K Recall/NDCG/MRR/Coverage |
 
 Parent run의 `Datasets`에는 immutable modeling snapshot의 schema, row count와
 digest가 기록된다. `tables/stage_metrics.json`은 phase·stage·cutoff별 지표를,

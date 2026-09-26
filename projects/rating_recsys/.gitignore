@@ -5,3 +5,4 @@ mlruns/
 *.pyc
 __pycache__/
 .pytest_cache/
+crawler/data/

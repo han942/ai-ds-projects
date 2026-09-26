@@ -88,7 +88,7 @@ def code_manifest(project_root: Path, *, allow_dirty: bool) -> dict[str, object]
     if dirty and not allow_dirty:
         raise RuntimeError(
             "Refusing a non-reproducible run from a dirty worktree; commit changes "
-            "or pass --allow-dirty to capture the diff as an artifact"
+            "or call the pipeline with allow_dirty=True to capture its diff"
         )
     return {
         "git_commit": commit,

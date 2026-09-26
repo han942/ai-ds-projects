@@ -90,8 +90,8 @@
             "filters": [
               "Phase: test",
               "Relevant queries only: relevance > 0",
-              "Candidate stage: E3 RRF union",
-              "Final stage: E4 LambdaMART"
+              "Candidate stage: C3 RRF union",
+              "Final stage: R1 LambdaMART"
             ],
             "caveats": [
               "K=100 is an internal candidate budget, not a user-visible recommendation-list size.",
@@ -106,14 +106,14 @@
               {
                 "kind": "validation",
                 "title": "Published metric reconciliation",
-                "detail": "Recomputed E3 Recall@20, @50, and @100 exactly match metrics.json."
+                "detail": "Recomputed C3 Recall@20, @50, and @100 exactly match metrics.json."
               }
             ]
           },
           "columns": [
             {"field": "k", "label": "K"},
-            {"field": "candidate_recall", "label": "E3 candidate recall"},
-            {"field": "final_recall", "label": "E4 final recall"}
+            {"field": "candidate_recall", "label": "C3 candidate recall"},
+            {"field": "final_recall", "label": "R1 final recall"}
           ],
           "rows": [
             {"k": 5, "candidate_recall": 0.0685106383, "final_recall": 0.0693617021},

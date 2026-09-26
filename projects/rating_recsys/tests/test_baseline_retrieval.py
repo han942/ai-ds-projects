@@ -63,6 +63,18 @@ class BaselineCandidateGeneratorTests(unittest.TestCase):
         )
         self.assertTrue(result.target_available)
 
+    def test_no_region_ablation_excludes_region_candidate_source(self) -> None:
+        result, _ = BaselineCandidateGenerator(
+            candidate_k=3, include_region=False
+        ).retrieve(self.query, self.available)
+
+        self.assertEqual(result.region_popularity, ())
+        self.assertTrue(result.union)
+        for candidate in result.union:
+            self.assertNotIn("region_popularity", candidate.candidate_sources)
+            self.assertNotIn("region_popularity", candidate.source_scores)
+            self.assertNotIn("region_popularity", candidate.source_ranks)
+
     def test_incremental_context_matches_batch_context_and_candidates(self) -> None:
         incremental = IncrementalRetrievalContext()
         for item in self.available:
@@ -83,7 +95,6 @@ class BaselineCandidateGeneratorTests(unittest.TestCase):
             batch_result.region_popularity,
             incremental_result.region_popularity,
         )
-        self.assertEqual(batch_result.base_union, incremental_result.base_union)
         self.assertEqual(batch_result.union, incremental_result.union)
 
     def test_is_deterministic_and_uses_restaurant_id_for_ties(self) -> None:

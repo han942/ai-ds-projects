@@ -9,6 +9,7 @@ from rating_recsys.config import PROJECT_ROOT
 from rating_recsys.ingestion.cli import dry_run
 from rating_recsys.ingestion.transform import (
     infer_region,
+    infer_region_from_address,
     parse_reviewed_at,
     parse_scraped_at,
     transform_row,
@@ -46,6 +47,11 @@ class DateParsingTests(unittest.TestCase):
         path = Path("diningcode_data_crawling_busan_20260321_2201.csv")
         self.assertEqual(infer_region(path), "부산")
         self.assertEqual(parse_scraped_at(path), self.scraped_at)
+        national = Path("diningcode_playwright_national_20260924_091004.csv.partial")
+        self.assertEqual(
+            parse_scraped_at(national),
+            datetime(2026, 9, 24, 9, 10, 4, tzinfo=SEOUL),
+        )
 
 
 class RowTransformTests(unittest.TestCase):
@@ -84,6 +90,23 @@ class RowTransformTests(unittest.TestCase):
         self.assertEqual(len(transformed.user_key), 64)
         self.assertNotIn("user_name", transformed.source_payload)
         self.assertNotIn("홍길동", str(transformed.source_payload))
+
+
+    def test_national_crawl_uses_row_time_and_address_region(self) -> None:
+        source = {
+            "item_name": "테스트 식당", "item_spec_area": "서울특별시 중구 테스트로 1",
+            "user_name": "테스트 사용자", "user_rating": "4.0",
+            "date": "1일 전", "crawl_timestamp": "2026-09-26T15:00:00+09:00",
+        }
+        transformed = transform_row(
+            source, source_row_number=2, source_file="national.csv",
+            region="전국", scraped_at=datetime(2026, 9, 24, tzinfo=SEOUL),
+            user_hash_salt="test-salt",
+        )
+        self.assertEqual(transformed.region, "서울")
+        self.assertEqual(transformed.reviewed_at, date(2026, 9, 25))
+        self.assertEqual(transformed.scraped_at.date(), date(2026, 9, 26))
+        self.assertEqual(infer_region_from_address("광주시 테스트로 1"), "전국")
 
 
 class LegacyDatasetSmokeTests(unittest.TestCase):

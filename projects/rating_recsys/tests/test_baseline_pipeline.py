@@ -98,10 +98,11 @@ class BaselinePipelineTests(unittest.TestCase):
                 result.manifest["artifacts"]["review_context"],
                 "review_context.jsonl",
             )
-            self.assertIn("e0_popularity", result.metrics["test"])
-            self.assertIn("e3_rrf_union", result.metrics["test"])
-            self.assertIn("region_popularity_only", result.metrics["test"])
-            self.assertIn("e4_lambdarank", result.metrics["test"])
+            self.assertIn("c0_popularity", result.metrics["test"])
+            self.assertIn("c1_item_item", result.metrics["test"])
+            self.assertIn("c2_region_popularity", result.metrics["test"])
+            self.assertIn("c3_rrf_union", result.metrics["test"])
+            self.assertIn("r1_lambdarank", result.metrics["test"])
             candidate_rows = read_parquet(
                 result.run_dir / "candidates_test.parquet"
             )
@@ -112,11 +113,15 @@ class BaselinePipelineTests(unittest.TestCase):
                     for row in candidate_rows
                 )
             )
-            self.assertFalse(
+            self.assertTrue(
                 any(
                     "region_popularity" in row["candidate_sources"]
                     for row in ranking_rows
                 )
+            )
+            self.assertEqual(
+                {(row["query_id"], row["restaurant_id"]) for row in candidate_rows},
+                {(row["query_id"], row["restaurant_id"]) for row in ranking_rows},
             )
 
             repeated = run_baseline_experiment(
@@ -143,6 +148,34 @@ class BaselinePipelineTests(unittest.TestCase):
                     (repeated.run_dir / artifact).read_bytes(),
                     artifact,
                 )
+
+    def test_no_region_run_excludes_region_model_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result = run_baseline_experiment(
+                interactions(),
+                project_root=root,
+                artifacts_root=root / "artifacts",
+                config=ExperimentConfig(
+                    candidate_k=4, ranking_k=4, region_mode="without_region"
+                ),
+                enable_mlflow=False,
+                ranker_factory=FakeRanker,
+            )
+            candidates = read_parquet(result.run_dir / "candidates_test.parquet")
+            rankings = read_parquet(result.run_dir / "rankings_test.parquet")
+            self.assertEqual(result.manifest["config"]["region_mode"], "without_region")
+            self.assertNotIn("region_affinity", result.manifest["feature_schema"])
+            self.assertTrue(candidates)
+            self.assertTrue(rankings)
+            self.assertTrue(
+                all("region_popularity" not in row["candidate_sources"] for row in candidates)
+            )
+            self.assertTrue(all("region_affinity" not in row["features"] for row in rankings))
+            self.assertEqual(
+                {(row["query_id"], row["restaurant_id"]) for row in candidates},
+                {(row["query_id"], row["restaurant_id"]) for row in rankings},
+            )
 
     @unittest.skipUnless(find_spec("lightgbm"), "experiment extra is not installed")
     def test_real_lambdarank_and_mlflow_complete_on_fixture(self) -> None:
@@ -171,7 +204,7 @@ class BaselinePipelineTests(unittest.TestCase):
             parent_run_id = result.manifest["mlflow_run_id"]
             parent = client.get_run(parent_run_id)
             self.assertEqual(parent.data.tags["run_role"], "parent")
-            self.assertIn("test/e4_lambdarank/ndcg_at_4", parent.data.metrics)
+            self.assertIn("test/r1_lambdarank/ndcg_at_4", parent.data.metrics)
             self.assertLess(len(parent.data.metrics), 40)
             self.assertEqual(len(parent.inputs.dataset_inputs), 1)
 

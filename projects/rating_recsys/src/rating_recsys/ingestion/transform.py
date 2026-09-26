@@ -126,12 +126,12 @@ def file_sha256(path: Path) -> str:
 
 
 def parse_scraped_at(path: Path) -> datetime:
-    match = re.search(r"_(\d{8})_(\d{4})(?:\D|$)", path.stem)
+    match = re.search(r"_(\d{8})_(\d{4})(\d{2})?(?:\D|$)", path.stem)
     if not match:
         raise ValueError(f"Cannot infer crawl timestamp from filename: {path.name}")
-    return datetime.strptime(
-        f"{match.group(1)}{match.group(2)}", "%Y%m%d%H%M"
-    ).replace(tzinfo=SEOUL)
+    timestamp = "".join(part for part in match.groups() if part)
+    pattern = "%Y%m%d%H%M%S" if match.group(3) else "%Y%m%d%H%M"
+    return datetime.strptime(timestamp, pattern).replace(tzinfo=SEOUL)
 
 
 def infer_region(path: Path) -> str:
@@ -140,6 +140,33 @@ def infer_region(path: Path) -> str:
         if token in filename:
             return region
     return "전국"
+
+
+ADDRESS_REGION_BY_PREFIX = {
+    "서울특별시": "서울", "서울시": "서울", "서울": "서울",
+    "경기도": "경기", "경기": "경기",
+    "부산광역시": "부산", "부산시": "부산", "부산": "부산",
+    "인천광역시": "인천", "인천시": "인천", "인천": "인천",
+    "대구광역시": "대구", "대구시": "대구", "대구": "대구",
+    "광주광역시": "광주", "광주": "광주",
+    "대전광역시": "대전", "대전시": "대전", "대전": "대전",
+    "울산광역시": "울산", "울산시": "울산", "울산": "울산",
+    "세종특별자치시": "세종", "세종시": "세종",
+    "강원특별자치도": "강원", "강원도": "강원", "강원": "강원",
+    "충청북도": "충북", "충북": "충북",
+    "충청남도": "충남", "충남": "충남",
+    "전북특별자치도": "전북", "전라북도": "전북", "전북": "전북",
+    "전라남도": "전남", "전남": "전남",
+    "경상북도": "경북", "경북": "경북",
+    "경상남도": "경남", "경남": "경남",
+    "제주특별자치도": "제주", "제주도": "제주", "제주": "제주",
+}
+
+
+def infer_region_from_address(address: str) -> str:
+    """Use unambiguous province prefixes; retain 전국 when an address is vague."""
+    first = normalize_text(address).split(" ", 1)[0]
+    return ADDRESS_REGION_BY_PREFIX.get(first, "전국")
 
 
 def parse_reviewed_at(raw_value: Any, scraped_at: datetime) -> ParsedDate:
@@ -232,7 +259,17 @@ def transform_row(
     user_key = sha256_text("diningcode", user_hash_salt, user_name)
     review_text = normalize_text(row.get("user_query")) or None
     raw_date = normalize_text(row.get("date")) or None
+    raw_crawl_timestamp = normalize_text(row.get("crawl_timestamp"))
+    if "crawl_timestamp" in row:
+        try:
+            scraped_at = datetime.fromisoformat(raw_crawl_timestamp)
+        except ValueError as exc:
+            raise RowRejected("invalid crawl_timestamp") from exc
+        if scraped_at.tzinfo is None:
+            raise RowRejected("crawl_timestamp must include timezone")
     parsed_date = parse_reviewed_at(raw_date, scraped_at)
+    if region == "전국":
+        region = infer_region_from_address(address)
 
     content_hash = sha256_text(
         "diningcode-review",

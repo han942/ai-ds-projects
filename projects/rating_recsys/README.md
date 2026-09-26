@@ -9,8 +9,8 @@
 
 현재 Supabase PostgreSQL ingestion, DB-backed modeling dataset과 실행 가능한
 2-stage baseline 골격이 구현되어 있다. 동일 split에서 global
-popularity/full-catalog(E0), popularity+item-item+region candidate(E3), LightGBM
-LambdaRank(E4)를 비교하고 immutable snapshot, MLflow와 Streamlit artifact를
+candidate component C0(popularity)~C3(RRF union)와 ranker R1(LambdaRank)을
+비교하고 immutable snapshot, MLflow와 Streamlit artifact를
 생성한다. 날짜는 초기 모델 feature로 사용하지 않고 chronological split과
 leakage 방지에만 사용하며, time-aware recommendation은 후속 연구로 둔다.
 기존의 노트북, 수집 데이터, 모델 checkpoint 및 예측 결과는 삭제하지 않고
@@ -18,10 +18,9 @@ legacy 폴더에 그대로 보존하였다.
 
 ## Two-stage baseline 실행
 
-실험 dependency를 설치한 뒤 Supabase snapshot에서 E0 popularity, E3
-quota RRF와 E4 LightGBM LambdaRank를 한 번에 실행한다. Region candidate는
-기본적으로 shadow 평가하며 validation guardrail을 통과하기 전에는 ranker에
-자동 승격하지 않는다.
+실험 dependency를 설치한 뒤 Supabase snapshot에서 C0 popularity, C1 item-item,
+C2 region popularity, C3 quota RRF와 R1 LightGBM LambdaRank를 한 번에 실행한다.
+C2를 포함한 C3에서 후보를 선택하고, R1이 그 후보를 재정렬한다.
 
 ```bash
 pip install -e '.[experiment,dev]'
@@ -44,11 +43,11 @@ mlflow ui \
 `rating-recsys-baseline` experiment에는 다음 구조가 생성된다.
 
 - Parent run: validation/test 핵심 metric, dataset input, chart, table, trace
-- `01 · E0 Popularity`: popularity candidate metric과 cutoff curve
-- `02 · Item-item CF`: item-item candidate metric과 cutoff curve
-- `03 · Region popularity`: 지역 candidate metric과 cutoff curve
-- `04 · E3 RRF Candidate Union`: fused candidate metric과 cutoff curve
-- `05 · E4 LambdaMART`: final ranking metric과 cutoff curve
+- `01 · C0 Popularity`: popularity candidate metric과 cutoff curve
+- `02 · C1 Item-item CF`: item-item candidate metric과 cutoff curve
+- `03 · C2 Region popularity`: 지역 candidate metric과 cutoff curve
+- `04 · C3 RRF Candidate Union`: fused candidate metric과 cutoff curve
+- `05 · R1 LambdaMART`: C3 후보의 final ranking metric
 - Tables: 단계별 metric 및 test 사용자별 top-K 추천 결과
 - Traces: split → candidate generation → LambdaMART → 평가 → artifact 기록
 
@@ -68,6 +67,27 @@ rating-recsys-dashboard --address 127.0.0.1
 
 자세한 architecture, layer output과 metric 정의는
 [BASELINE_MODEL.md](./BASELINE_MODEL.md)를 참고한다.
+
+지역 후보와 지역 affinity feature를 제거한 비교 실험은 같은 DB snapshot으로
+기준선과 무지역 모델을 각각 학습한다. MLflow에 데이터를 올리지 않고 로컬 artifact에
+결과를 저장한다.
+
+```bash
+python -m rating_recsys.experiments.compare_region
+```
+
+[2026-09-23 지역 제거 실험 결과](./analysis/region_ablation_2026-09-23.md)에서
+동일 test query의 추천 품질과 지역 다양성 차이를 볼 수 있다.
+
+LightGCN을 세 번째 후보 소스로 추가한 C0+C1+LightGCN RRF 실험은 분기별
+과거 그래프로 모델을 학습하고 후보 Recall@20/50/100을 로컬에서 비교한다.
+
+```bash
+python -m rating_recsys.experiments.compare_lightgcn
+```
+
+[2026-09-23 LightGCN 후보 실험 결과](./analysis/lightgcn_candidate_2026-09-23.md)에
+조건, 비교 결과, 재현 아티팩트를 기록했다.
 
 ## Supabase PostgreSQL ingestion
 
@@ -121,6 +141,20 @@ rating-recsys-ingest
 
 검증 query는 [queries/verify_ingestion.sql](./queries/verify_ingestion.sql)에
 있다.
+
+2026-09-26 전국 Playwright 크롤링의 현재 `.csv.partial` 내용은 별도 고정
+스냅샷으로 적재했다. 기존 5개 파일의 `crawl_runs.source = 'diningcode'`와
+새 수집분의 `source = 'diningcode_playwright_national'`로 리뷰를 구분한다.
+원본 수집이 완료된 것으로 간주하지 않으며, 재수집 뒤 다시 실행하면 새 스냅샷
+run으로 중복을 제외하고 추가할 수 있다.
+
+```bash
+python -m rating_recsys.ingestion.import_crawler
+```
+
+[적재 결과와 품질 확인](./analysis/crawler_import_2026-09-26.md),
+[출처별 SQL](./queries/compare_crawl_sources.sql)을 참고한다. 기본 모델링
+데이터셋 조회는 현재 두 출처를 함께 읽는다.
 
 ## DB-backed modeling dataset
 

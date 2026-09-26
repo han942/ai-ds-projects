@@ -19,13 +19,14 @@ from rating_recsys.observability.app import (
     _read_jsonl_query,
 )
 from rating_recsys.experiments.artifacts import write_parquet
+from rating_recsys.experiments.config import ExperimentConfig
 
 
 class DashboardDataTests(unittest.TestCase):
     def test_metrics_are_flattened_by_stage_and_cutoff(self) -> None:
         rows = _metric_cutoff_rows(
             {
-                "e4_lambdarank": {
+                "r1_lambdarank": {
                     "recall_at_5": 0.2,
                     "ndcg_at_5": 0.1,
                     "mrr_at_5": 0.08,
@@ -35,9 +36,19 @@ class DashboardDataTests(unittest.TestCase):
                 }
             }
         )
-        self.assertEqual(rows[0]["stage"], "E4 LambdaMART")
+        self.assertEqual(rows[0]["stage"], "R1 LambdaMART")
         self.assertEqual(rows[0]["K"], 5)
         self.assertEqual(rows[0]["recall_hit_rate"], 0.2)
+
+    def test_no_region_metrics_hide_disabled_source(self) -> None:
+        rows = _metric_cutoff_rows(
+            {
+                "c2_region_popularity": {"recall_at_5": 0.0},
+                "c3_rrf_union": {"recall_at_5": 0.2},
+            },
+            region_mode="without_region",
+        )
+        self.assertEqual([row["stage"] for row in rows], ["C0+C1 RRF Union"])
 
     def test_review_ids_support_new_and_legacy_queries(self) -> None:
         dataset = [
@@ -59,16 +70,26 @@ class DashboardDataTests(unittest.TestCase):
         }
         self.assertEqual(_query_review_ids(current, index), ([101], 201))
 
-    def test_discovery_skips_incomplete_runs(self) -> None:
+    def test_discovery_only_shows_complete_current_policy_runs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             complete = root / "runs" / "20260102"
             incomplete = root / "runs" / "20260103"
-            complete.mkdir(parents=True)
-            incomplete.mkdir()
-            for filename in ("manifest.json", "metrics.json", "queries.jsonl"):
-                (complete / filename).write_text("{}\n", encoding="utf-8")
+            old_policy = root / "runs" / "20260104"
+            for path in (complete, incomplete, old_policy):
+                path.mkdir(parents=True)
+            (complete / "manifest.json").write_text(
+                json.dumps({"config": ExperimentConfig().to_dict()}),
+                encoding="utf-8",
+            )
+            (old_policy / "manifest.json").write_text(
+                json.dumps({"config": {"schema_version": "baseline-v3-component-names"}}),
+                encoding="utf-8",
+            )
             (incomplete / "manifest.json").write_text("{}\n", encoding="utf-8")
+            for path in (complete, old_policy):
+                for filename in ("metrics.json", "queries.jsonl"):
+                    (path / filename).write_text("{}\n", encoding="utf-8")
 
             self.assertEqual(_discover_run_dirs(root), [complete])
 

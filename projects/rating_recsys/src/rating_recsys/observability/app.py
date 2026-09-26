@@ -8,16 +8,17 @@ from collections import Counter
 from pathlib import Path
 
 from rating_recsys.experiments.artifacts import read_parquet
+from rating_recsys.experiments.config import ExperimentConfig
 
 
 REQUIRED_RUN_FILES = ("manifest.json", "metrics.json", "queries.jsonl")
 
 STAGE_LABELS = {
-    "e0_popularity": "E0 Popularity",
-    "item_item_only": "Item-item CF",
-    "region_popularity_only": "Region popularity",
-    "e3_rrf_union": "E3 RRF Union",
-    "e4_lambdarank": "E4 LambdaMART",
+    "c0_popularity": "C0 Popularity",
+    "c1_item_item": "C1 Item-item CF",
+    "c2_region_popularity": "C2 Region popularity",
+    "c3_rrf_union": "C3 RRF Union",
+    "r1_lambdarank": "R1 LambdaMART",
 }
 
 METRIC_HELP = {
@@ -65,22 +66,36 @@ def _discover_run_dirs(artifacts_root: Path) -> list[Path]:
     """Return only completed-enough runs that the explorer can render."""
 
     runs_root = artifacts_root / "runs"
-    return sorted(
-        (
-            path
-            for path in runs_root.glob("*")
-            if path.is_dir()
-            and all((path / filename).exists() for filename in REQUIRED_RUN_FILES)
-        ),
-        reverse=True,
-    )
+    runs = []
+    current_schema = ExperimentConfig().schema_version
+    for path in runs_root.glob("*"):
+        if not path.is_dir() or not all(
+            (path / filename).exists() for filename in REQUIRED_RUN_FILES
+        ):
+            continue
+        try:
+            manifest = _read_json(path / "manifest.json")
+        except (OSError, ValueError):
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        config = manifest.get("config")
+        if isinstance(config, dict) and config.get("schema_version") == current_schema:
+            runs.append(path)
+    return sorted(runs, reverse=True)
 
 
-def _metric_cutoff_rows(phase_metrics: dict[str, object]) -> list[dict[str, object]]:
+def _metric_cutoff_rows(
+    phase_metrics: dict[str, object], *, region_mode: str = "with_region"
+) -> list[dict[str, object]]:
     """Flatten stage metrics to one row per stage and cutoff."""
 
     rows: list[dict[str, object]] = []
     for stage_key, stage_label in STAGE_LABELS.items():
+        if region_mode == "without_region" and stage_key == "c2_region_popularity":
+            continue
+        if region_mode == "without_region" and stage_key == "c3_rrf_union":
+            stage_label = "C0+C1 RRF Union"
         values = phase_metrics.get(stage_key)
         if not isinstance(values, dict):
             continue
@@ -246,8 +261,14 @@ def main() -> None:
         st.info("No experiment runs found. Run `rating-recsys-experiment` first.")
         return
 
-    selected_name = st.sidebar.selectbox("Run", [path.name for path in run_dirs])
-    run_dir = next(path for path in run_dirs if path.name == selected_name)
+    run_options = {}
+    for path in run_dirs:
+        run_manifest = _read_json(path / "manifest.json")
+        mode = run_manifest["config"]["region_mode"]
+        label = "No region" if mode == "without_region" else "With region"
+        run_options[f"{path.name} · {label}"] = path
+    selected_name = st.sidebar.selectbox("Run", list(run_options))
+    run_dir = run_options[selected_name]
     manifest = _read_json(run_dir / "manifest.json")
     metrics = _read_json(run_dir / "metrics.json")
 
@@ -296,7 +317,11 @@ def main() -> None:
 
     st.subheader("Metrics by purpose and cutoff")
     phase_metrics = metrics[phase]
-    cutoff_frame = pd.DataFrame(_metric_cutoff_rows(phase_metrics))
+    cutoff_frame = pd.DataFrame(
+        _metric_cutoff_rows(
+            phase_metrics, region_mode=manifest["config"]["region_mode"]
+        )
+    )
     quality_tab, discovery_tab, operations_tab = st.tabs(
         ("순위 품질", "Coverage · discovery", "평가 모수 · latency")
     )
@@ -383,7 +408,7 @@ def main() -> None:
             column.line_chart(pivot)
 
     with operations_tab:
-        final_metrics = phase_metrics["e4_lambdarank"]
+        final_metrics = phase_metrics["r1_lambdarank"]
         availability = phase_metrics["target_availability"]
         population_columns = st.columns(3)
         population_columns[0].metric(
@@ -412,7 +437,7 @@ def main() -> None:
             f"{float(phase_metrics['ranking_latency']['p95_ms']):.2f} ms",
             help=METRIC_HELP["ranking_p95"],
         )
-        source_contribution = phase_metrics.get("e3_rrf_union", {}).get(
+        source_contribution = phase_metrics["c3_rrf_union"].get(
             "source_contribution"
         )
         if source_contribution:

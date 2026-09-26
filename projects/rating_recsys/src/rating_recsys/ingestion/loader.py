@@ -113,6 +113,32 @@ ON CONFLICT (user_key) DO UPDATE SET
 """
 
 
+INSERT_RESTAURANTS_ONLY_SQL = """
+INSERT INTO recsys.restaurants (
+    restaurant_key, canonical_name, area, address, region,
+    item_avg_rating, first_seen_at, last_seen_at, source_metadata
+)
+SELECT DISTINCT ON (restaurant_key)
+    restaurant_key, canonical_name, area, address, region,
+    item_avg_rating, scraped_at, scraped_at, restaurant_metadata
+FROM ingest_buffer
+ORDER BY restaurant_key, source_row_number DESC
+ON CONFLICT (restaurant_key) DO NOTHING
+"""
+
+
+INSERT_USERS_ONLY_SQL = """
+INSERT INTO recsys.app_users (
+    user_key, source, first_seen_at, last_seen_at, source_metadata
+)
+SELECT DISTINCT ON (user_key)
+    user_key, 'diningcode', scraped_at, scraped_at, user_metadata
+FROM ingest_buffer
+ORDER BY user_key, source_row_number DESC
+ON CONFLICT (user_key) DO NOTHING
+"""
+
+
 INSERT_REVIEWS_SQL = """
 WITH inserted AS (
     INSERT INTO recsys.reviews (
@@ -162,7 +188,10 @@ def _existing_run(cursor, file_hash: str):
     return cursor.fetchone()
 
 
-def load_batch(conn, batch: FileBatch) -> LoadResult:
+def load_batch(
+    conn, batch: FileBatch, *, source: str = "diningcode",
+    preserve_existing_dimensions: bool = False,
+) -> LoadResult:
     """Load one file atomically and skip a previously successful file hash."""
 
     try:
@@ -209,10 +238,11 @@ def load_batch(conn, batch: FileBatch) -> LoadResult:
                     run_id, source, source_file, file_sha256,
                     region, scraped_at, status
                 )
-                VALUES (%s, 'diningcode', %s, %s, %s, %s, 'running')
+                VALUES (%s, %s, %s, %s, %s, %s, 'running')
                 """,
                 (
                     run_id,
+                    source,
                     batch.path.name,
                     batch.file_sha256,
                     batch.region,
@@ -254,8 +284,14 @@ def load_batch(conn, batch: FileBatch) -> LoadResult:
                             )
                         )
 
-                cur.execute(UPSERT_RESTAURANTS_SQL)
-                cur.execute(UPSERT_USERS_SQL)
+                cur.execute(
+                    INSERT_RESTAURANTS_ONLY_SQL if preserve_existing_dimensions
+                    else UPSERT_RESTAURANTS_SQL
+                )
+                cur.execute(
+                    INSERT_USERS_ONLY_SQL if preserve_existing_dimensions
+                    else UPSERT_USERS_SQL
+                )
                 cur.execute(INSERT_REVIEWS_SQL, (run_id,))
                 inserted_reviews = cur.fetchone()[0]
                 accepted_rows = len(batch.rows)

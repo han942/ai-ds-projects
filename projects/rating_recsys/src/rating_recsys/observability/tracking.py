@@ -13,20 +13,19 @@ from typing import Iterator
 
 EXPERIMENT_NAME = "rating-recsys-baseline"
 STAGE_RUNS = (
-    ("e0_popularity", "01 · E0 Popularity"),
-    ("item_item_only", "02 · Item-item CF"),
-    ("region_popularity_only", "03 · Region popularity"),
-    ("e3_rrf_union", "04 · E3 RRF Candidate Union"),
-    ("e4_lambdarank", "05 · E4 LambdaMART"),
+    ("c0_popularity", "01 · C0 Popularity"),
+    ("c1_item_item", "02 · C1 Item-item CF"),
+    ("c2_region_popularity", "03 · C2 Region popularity"),
+    ("c3_rrf_union", "04 · C3 RRF Candidate Union"),
+    ("r1_lambdarank", "05 · R1 LambdaMART"),
 )
 STAGE_DESCRIPTIONS = {
-    "e0_popularity": "Global popularity candidate baseline.",
-    "item_item_only": "Item-item collaborative filtering candidate baseline.",
-    "region_popularity_only": "Popularity restricted and weighted by the user's observed regions.",
-    "e3_rrf_union": "Popularity, item-item and region candidates fused with RRF.",
-    "e4_lambdarank": (
-        "LambdaMART reranking over the configured serving candidate policy; "
-        "region expansion stays in shadow mode by default."
+    "c0_popularity": "Global popularity candidate baseline.",
+    "c1_item_item": "Item-item collaborative filtering candidate baseline.",
+    "c2_region_popularity": "Popularity restricted and weighted by the user's observed regions.",
+    "c3_rrf_union": "Popularity, item-item and region candidates fused with RRF.",
+    "r1_lambdarank": (
+        "LambdaMART reranking over the C3 candidate union."
     ),
 }
 METRIC_AT_K = re.compile(r"^(?P<metric>.+)_at_(?P<cutoff>\d+)$")
@@ -96,10 +95,11 @@ class ExperimentTrackingSession:
                 "git_commit": self.code.get("git_commit") or "unknown",
                 "git_dirty": str(self.code.get("git_dirty", False)).lower(),
                 "protocol": self.config["protocol"],
+                "region_mode": self.config["region_mode"],
                 "feature_schema_version": self.config["schema_version"],
                 "mlflow.note.content": (
-                    "Two-stage recommendation baseline. Compare E0, item-item, "
-                    "region, E3 and E4 in the child runs; inspect Dataset inputs, Tables, "
+                    "Two-stage recommendation baseline. Compare C0-C3 candidate "
+                    "components and R1 ranking in the child runs; inspect Dataset inputs, Tables, "
                     "charts and Traces on this parent run."
                 ),
             }
@@ -216,7 +216,7 @@ def _mlflow():
         import mlflow
     except ImportError as exc:
         raise RuntimeError(
-            "MLflow is required unless --disable-mlflow is used; install "
+            "MLflow is required for experiment runs; install "
             "`pip install -e '.[experiment]'`"
         ) from exc
     return mlflow
@@ -233,21 +233,21 @@ def _headline_metrics(metrics: dict[str, object]) -> dict[str, float]:
             result[f"{phase}/{latency_name}/p50_ms"] = float(latency["p50_ms"])
             result[f"{phase}/{latency_name}/p95_ms"] = float(latency["p95_ms"])
         for stage in (
-            "e0_popularity",
-            "item_item_only",
-            "region_popularity_only",
-            "e3_rrf_union",
+            "c0_popularity",
+            "c1_item_item",
+            "c2_region_popularity",
+            "c3_rrf_union",
         ):
             values = phase_metrics[stage]
             cutoff = _maximum_cutoff(values, "recall")
             result[f"{phase}/{stage}/recall_at_{cutoff}"] = float(
                 values[f"recall_at_{cutoff}"]
             )
-        ranker = phase_metrics["e4_lambdarank"]
+        ranker = phase_metrics["r1_lambdarank"]
         cutoff = _maximum_cutoff(ranker, "recall")
         for name in ("recall", "ndcg", "mrr", "catalog_coverage"):
             key = f"{name}_at_{cutoff}"
-            result[f"{phase}/e4_lambdarank/{key}"] = float(ranker[key])
+            result[f"{phase}/r1_lambdarank/{key}"] = float(ranker[key])
     training = metrics["training"]
     result["training/train_prefix/injection_rate"] = float(
         training["train_prefix"]["injection_rate"]

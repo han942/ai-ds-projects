@@ -11,12 +11,18 @@ from rating_recsys.ranking.features import FEATURE_NAMES
 
 
 class LightGBMLambdaRanker:
-    def __init__(self, *, random_seed: int = 42, ranking_k: int = 10) -> None:
+    def __init__(
+        self,
+        *,
+        random_seed: int = 42,
+        ranking_k: int = 10,
+        feature_names: tuple[str, ...] = FEATURE_NAMES,
+    ) -> None:
         try:
             import lightgbm as lgb
         except (ImportError, OSError) as exc:
             raise RuntimeError(
-                "LightGBM is required for E4; install the experiment extra with "
+                "LightGBM is required for R1; install the experiment extra with "
                 "`pip install -e '.[experiment]'` and ensure the OpenMP runtime "
                 "(libgomp on Linux) is available"
             ) from exc
@@ -40,6 +46,7 @@ class LightGBMLambdaRanker:
             n_jobs=1,
             verbosity=-1,
         )
+        self._feature_names = feature_names
         self._fitted = False
 
     def fit(self, rows: Iterable[FeatureRow]) -> None:
@@ -53,7 +60,7 @@ class LightGBMLambdaRanker:
         if not usable:
             raise ValueError("LambdaRank requires at least one usable query group")
         flattened = [row for query_rows in usable for row in query_rows]
-        features = [_feature_vector(row) for row in flattened]
+        features = [_feature_vector(row, self._feature_names) for row in flattened]
         labels = [row.relevance for row in flattened]
         groups = [len(query_rows) for query_rows in usable]
         self._model.fit(
@@ -70,7 +77,7 @@ class LightGBMLambdaRanker:
         ranked: list[RankedCandidate] = []
         for query_rows in grouped:
             scores = self._model.predict(
-                [_feature_vector(row) for row in query_rows]
+                [_feature_vector(row, self._feature_names) for row in query_rows]
             )
             ordered = sorted(
                 zip(query_rows, scores, strict=True),
@@ -92,7 +99,7 @@ class LightGBMLambdaRanker:
         return {
             name: float(value)
             for name, value in zip(
-                FEATURE_NAMES,
+                self._feature_names,
                 self._model.feature_importances_,
                 strict=True,
             )
@@ -115,5 +122,5 @@ def _group_rows(rows: Iterable[FeatureRow]) -> list[list[FeatureRow]]:
     ]
 
 
-def _feature_vector(row: FeatureRow) -> list[float]:
-    return [float(row.features[name]) for name in FEATURE_NAMES]
+def _feature_vector(row: FeatureRow, feature_names: tuple[str, ...]) -> list[float]:
+    return [float(row.features[name]) for name in feature_names]
