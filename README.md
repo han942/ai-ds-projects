@@ -1,6 +1,6 @@
 # Data Science & AI Portfolio
 
-[Projects Overview](./projects/README.md) · [Korean](./projects/README_KOR.md) · [Hackathon](./hackerthon)
+[Projects Overview](./projects/README.md) · [Korean](./projects/README_KOR.md) · [Hackathon](./hackathon)
 
 ## Abstract
 
@@ -13,7 +13,15 @@ decisions, and final results/accomplishments.
 
 Flagship projects done through my academic - professional pathway. See [`projects/README.md`](./projects/README.md) for full write-ups.
 
-- **[Restaurant Rating RecSys](./projects/rating_recsys)** — Various approaches trying to enhance the recommnedation quality by integrating user review data, based on Selenium-crawled DiningCode data.
+- **[Restaurant RecSys](./projects/rating_recsys)** — Two-stage restaurant recommender on
+  crawled DiningCode reviews (~97K reviews in Supabase PostgreSQL). Candidate retrieval
+  (popularity, item-item CF, region popularity, RRF fusion; LightGCN experiment) followed by
+  LightGBM LambdaRank, evaluated with a leakage-free chronological split, immutable dataset
+  snapshots, and MLflow tracking. The earlier review-text rating-prediction work
+  (DeepCoNN, **19%** lower RMSE than MF) is kept under [`legacy/`](./projects/rating_recsys/legacy).
+- **[AskIntern](./projects/Multi_Agent_ibm)** — Multi-agent workplace assistant for IBM interns
+  on IBM watsonx Orchestrate: a supervisor agent routes lunch, product-documentation, and
+  meeting-note questions to specialist agents.
 - **[News Simplification for Youth](./projects/NLP_Newspaper_CUAI)** — Text-style-transfer
   via fine-tuned [Gemma 3-1B](https://huggingface.co/google/gemma-3-1b-it), with a
   GPT-4o-augmented parallel corpus. Retained **100%** factual accuracy on **75%+** of samples.
@@ -21,7 +29,7 @@ Flagship projects done through my academic - professional pathway. See [`project
 
 ## 2. Hackathon
 
-- **[Codex Community Hackathon — Seoul for Students](./hackerthon)** ([Korean](./hackerthon/README_KOR.md)) —
+- **[Codex Community Hackathon — Seoul for Students](./hackathon)** ([Korean](./hackathon/README_KOR.md)) —
   A [one-day event](https://codex-community-korea.skysplit.chatgpt.site/en/hackathon/seoul-2026)
   where **teams are formed on site** and
   projects are built from scratch that day.
@@ -57,8 +65,8 @@ Flagship projects done through my academic - professional pathway. See [`project
 
 | Folder | What's inside |
 | --- | --- |
-| [`projects/`](./projects) | Main end-to-end projects (EDA & reporting, LLM fine-tuning, recommender systems) |
-| [`hackerthon/`](./hackerthon) | Codex Community Hackathon write-up (team build, one day) |
+| [`projects/`](./projects) | Main end-to-end projects (EDA & reporting, LLM fine-tuning, recommender systems, multi-agent assistant) |
+| [`hackathon/`](./hackathon) | Codex Community Hackathon write-up (team build, one day) |
 | [`Study/`](./Study) | From-scratch implementations of recommender-system papers |
 | [`Dacon/`](./Dacon) | Dacon competition / hackathon notebooks and submissions |
 | [`SQL/`](./SQL) | Database schemas and ERDs backing the projects |

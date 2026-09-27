@@ -189,10 +189,10 @@ MySQL은 영속적인 landing zone으로 사용하며, 모델링 notebook은 현
 | [rating_extraction.ipynb](./rating_extraction.ipynb) | 다이닝코드 Selenium/BeautifulSoup crawler |
 | [sql_sending.ipynb](./sql_sending.ipynb) | 정제, MySQL schema, 지역별 bulk load |
 | [diningcode_analysis.ipynb](./diningcode_analysis.ipynb) | 전처리, MF baseline, DeepCoNN v1 |
-| [diningcode_analysis_improved.ipynb](./diningcode_analysis_improved.ipynb) | 개선 모델, MLflow 학습, 평가 |
-| [diningcode_no_norm.ipynb](./diningcode_no_norm.ipynb) | 정규화·clipping 제거 ablation |
+| [diningcode_analysis_improved.ipynb](./archive/diningcode_analysis_improved.ipynb) | 개선 모델, MLflow 학습, 평가 |
+| [diningcode_no_norm.ipynb](./archive/diningcode_no_norm.ipynb) | 정규화·clipping 제거 ablation |
 | [development.md](./development.md) | 실험 기록 |
 | [crawled_data/](./crawled_data/) | 지역별 수집 원본 |
-| `best_model.pt` | Validation RMSE 기준 최적 checkpoint |
-| [predict_result.csv](./predict_result.csv) | 실제 평점·리뷰를 결합한 test prediction |
+| `archive/best_model.pt` | Validation RMSE 기준 최적 checkpoint |
+| [predict_result.csv](./archive/predict_result.csv) | 실제 평점·리뷰를 결합한 test prediction |
 | [requirements.txt](./requirements.txt) | 프로젝트 dependency |

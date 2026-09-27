@@ -1,0 +1,3 @@
+# Local environment, fastText vectors, token caches, checkpoints and run logs
+.venv/
+.cache/

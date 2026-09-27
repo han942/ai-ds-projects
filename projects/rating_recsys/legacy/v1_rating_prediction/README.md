@@ -190,10 +190,10 @@ CSV files directly.
 | [rating_extraction.ipynb](./rating_extraction.ipynb) | DiningCode Selenium/BeautifulSoup crawler |
 | [sql_sending.ipynb](./sql_sending.ipynb) | Cleaning, MySQL schema, and regional bulk loading |
 | [diningcode_analysis.ipynb](./diningcode_analysis.ipynb) | Preprocessing, MF baseline, and DeepCoNN v1 |
-| [diningcode_analysis_improved.ipynb](./diningcode_analysis_improved.ipynb) | Improved model, MLflow training, and evaluation |
-| [diningcode_no_norm.ipynb](./diningcode_no_norm.ipynb) | Ablation without normalization and clipping |
+| [diningcode_analysis_improved.ipynb](./archive/diningcode_analysis_improved.ipynb) | Improved model, MLflow training, and evaluation |
+| [diningcode_no_norm.ipynb](./archive/diningcode_no_norm.ipynb) | Ablation without normalization and clipping |
 | [development.md](./development.md) | Experiment log |
 | [crawled_data/](./crawled_data/) | Raw regional crawl outputs |
-| `best_model.pt` | Best checkpoint by validation RMSE |
-| [predict_result.csv](./predict_result.csv) | Test predictions joined with ratings and review text |
+| `archive/best_model.pt` | Best checkpoint by validation RMSE |
+| [predict_result.csv](./archive/predict_result.csv) | Test predictions joined with ratings and review text |
 | [requirements.txt](./requirements.txt) | Project dependencies |
