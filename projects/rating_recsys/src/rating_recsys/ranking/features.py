@@ -93,7 +93,6 @@ def build_feature_rows(
                 if candidate.restaurant_id == query.target.restaurant_id
                 else 0
             ),
-            history_depth=query.history_depth,
             candidate=candidate,
             features=feature_values(
                 query, candidate, context, include_region=include_region

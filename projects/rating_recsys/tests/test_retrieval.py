@@ -142,6 +142,38 @@ class BaselineCandidateGeneratorTests(unittest.TestCase):
         popularity_ids = [item.restaurant_id for item in first.popularity]
         self.assertLess(popularity_ids.index(2), popularity_ids.index(4))
 
+    def test_base_quota_fraction_controls_c0_c1_reservation(self) -> None:
+        generator = BaselineCandidateGenerator(candidate_k=4)
+        self.assertEqual(generator.base_quota, 2)
+        self.assertEqual(
+            BaselineCandidateGenerator(candidate_k=4, base_quota_fraction=0.0).base_quota,
+            0,
+        )
+        self.assertEqual(
+            BaselineCandidateGenerator(candidate_k=4, base_quota_fraction=1.0).base_quota,
+            4,
+        )
+        with self.assertRaisesRegex(ValueError, "between 0 and 1"):
+            BaselineCandidateGenerator(base_quota_fraction=1.5)
+
+        default, _ = generator.retrieve(self.query, self.available)
+        explicit, _ = BaselineCandidateGenerator(
+            candidate_k=4, base_quota_fraction=0.5
+        ).retrieve(self.query, self.available)
+        self.assertEqual(default.union, explicit.union)
+
+        plain, _ = BaselineCandidateGenerator(
+            candidate_k=4, base_quota_fraction=0.0
+        ).retrieve(self.query, self.available)
+        expected = sorted(
+            {item.restaurant_id for item in plain.union},
+            key=lambda item: (
+                -next(c.rrf_score for c in plain.union if c.restaurant_id == item),
+                item,
+            ),
+        )
+        self.assertEqual([item.restaurant_id for item in plain.union], expected)
+
     def test_injects_available_target_only_for_training(self) -> None:
         generator = BaselineCandidateGenerator(candidate_k=1)
         target = interaction(21, 10, 4, 10)

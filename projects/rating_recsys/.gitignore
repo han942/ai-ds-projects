@@ -1,8 +1,14 @@
 .env
 .venv/
-artifacts/
-mlruns/
 *.pyc
 __pycache__/
 .pytest_cache/
 crawler/data/
+
+# Local experiment outputs. Only the folder guide and each run's report are
+# versioned; everything else under artifacts/ stays on this machine.
+artifacts/*
+!artifacts/README.md
+!artifacts/runs/
+artifacts/runs/*/*
+!artifacts/runs/*/report.md

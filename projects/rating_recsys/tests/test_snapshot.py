@@ -8,11 +8,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rating_recsys.datasets.models import Interaction
-from rating_recsys.experiments.models import RecommendationQuery
-from rating_recsys.experiments.queries import interactions_before
 from rating_recsys.experiments.snapshot import (
     code_manifest,
     dataset_digest,
+    freeze_snapshot,
+    load_snapshot,
     write_snapshot,
 )
 
@@ -61,42 +61,19 @@ class SnapshotTests(unittest.TestCase):
             code_manifest(Path("."), allow_dirty=False)
 
 
-class CutoffTests(unittest.TestCase):
-    def test_future_and_target_interactions_are_not_available(self) -> None:
-        history = interaction(1, 10, 1)
-        target = Interaction(
-            review_id=3,
-            user_id=10,
-            restaurant_id=3,
-            event_date=date(2025, 1, 3),
-            rating=5.0,
-            reviewed_at_precision="exact",
-            restaurant_name="restaurant-3",
-            region="서울",
-        )
-        future = Interaction(
-            review_id=4,
-            user_id=20,
-            restaurant_id=4,
-            event_date=date(2025, 1, 4),
-            rating=5.0,
-            reviewed_at_precision="exact",
-            restaurant_name="restaurant-4",
-            region="서울",
-        )
-        query = RecommendationQuery(
-            query_id="validation:u10:r3",
-            phase="validation",
-            user_id=10,
-            cutoff=target.event_date,
-            history=(history,),
-            target=target,
-            relevance=2,
-        )
+class FrozenSnapshotTests(unittest.TestCase):
+    def test_freeze_is_content_addressed_and_round_trips(self) -> None:
+        rows = [interaction(2, 20, 2), interaction(1, 10, 1)]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first_path, first = freeze_snapshot(rows, root)
+            second_path, _ = freeze_snapshot(reversed(rows), root)
 
-        available = interactions_before((future, target, history), query)
-
-        self.assertEqual(available, (history,))
+            self.assertEqual(first_path, second_path)
+            self.assertEqual(first_path.name, f"{first['dataset_snapshot_id'][:16]}.jsonl")
+            self.assertEqual(sorted(load_snapshot(first_path), key=lambda i: i.review_id),
+                             sorted(rows, key=lambda i: i.review_id))
+            self.assertEqual([path.name for path in root.iterdir()], [first_path.name])
 
 
 if __name__ == "__main__":

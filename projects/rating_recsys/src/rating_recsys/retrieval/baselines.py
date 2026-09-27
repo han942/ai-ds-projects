@@ -148,16 +148,39 @@ def build_context(interactions: Iterable[Interaction]) -> RetrievalContext:
 
 
 class BaselineCandidateGenerator:
-    """Generate source candidates and fuse them with reciprocal rank fusion."""
+    """Generate source candidates and fuse them with reciprocal rank fusion.
+
+    ``base_quota_fraction`` is the share of the candidate budget reserved for the
+    C0+C1 RRF order before C2-inclusive RRF fills the rest. The default 0.5 is the
+    original quota policy; 0.0 is plain three-source RRF and 1.0 ignores C2 unless
+    it overlaps with C0/C1.
+    """
 
     def __init__(
-        self, *, candidate_k: int = 100, rrf_constant: int = 60, include_region: bool = True
+        self,
+        *,
+        candidate_k: int = 100,
+        rrf_constant: int = 60,
+        include_region: bool = True,
+        base_quota_fraction: float = 0.5,
     ) -> None:
         if candidate_k < 1 or rrf_constant < 1:
             raise ValueError("candidate_k and rrf_constant must be positive")
+        if not 0.0 <= base_quota_fraction <= 1.0:
+            raise ValueError("base_quota_fraction must be between 0 and 1")
         self.candidate_k = candidate_k
         self.rrf_constant = rrf_constant
         self.include_region = include_region
+        self.base_quota_fraction = base_quota_fraction
+
+    @property
+    def base_quota(self) -> int:
+        if self.base_quota_fraction == 0.0:
+            return 0
+        return min(
+            self.candidate_k,
+            max(1, int(self.candidate_k * self.base_quota_fraction)),
+        )
 
     def retrieve(
         self,
@@ -318,8 +341,7 @@ class BaselineCandidateGenerator:
             )
             for restaurant_id in union_ids
         }
-        base_quota = min(self.candidate_k, max(1, self.candidate_k // 2))
-        base_ids = _top_ids(base_rrf_scores, base_quota)
+        base_ids = _top_ids(base_rrf_scores, self.base_quota)
         base_id_set = set(base_ids)
         expanded_ids = _top_ids(rrf_scores, len(rrf_scores))
         fused_ids = tuple(

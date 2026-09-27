@@ -6,7 +6,7 @@
 
 기존 5개 파일은 `recsys.crawl_runs.source = 'diningcode'`, 이번 파일은 **`source = 'diningcode_playwright_national'`**이다. 리뷰마다 `crawl_run_id`가 있어 출처를 조인할 수 있다. 이번 고정 스냅샷의 run ID는 `b22dcc90-6dfc-46eb-a967-05e7406373a9`이다. 식당·사용자 테이블은 공유하지만, 이번 적재는 기존 식당·사용자 행을 갱신하지 않고 새 키만 삽입했다. 겹치는 리뷰는 `content_hash`로 건너뛰므로 기존 run에 남는다.
 
-조회 SQL: [compare_crawl_sources.sql](../queries/compare_crawl_sources.sql). 기존/새 데이터만 모델에 사용하려면 `recsys.reviews`를 `recsys.crawl_runs`와 `crawl_run_id`로 조인해 `cr.source`를 필터링해야 한다. 현재 기본 데이터셋 조회는 전체 출처를 함께 읽는다.
+조회 SQL: [compare_crawl_sources.sql](../../queries/compare_crawl_sources.sql). 기존/새 데이터만 모델에 사용하려면 `recsys.reviews`를 `recsys.crawl_runs`와 `crawl_run_id`로 조인해 `cr.source`를 필터링해야 한다. 현재 기본 데이터셋 조회는 전체 출처를 함께 읽는다.
 
 ## 적재 및 품질 확인
 
@@ -46,6 +46,6 @@ CSV 82,966행은 19개 헤더와 행 구조가 모두 일치하고, `restaurant_
 ## 재현 자료
 
 - 스냅샷 SHA-256: `09d251aad43a5abacb359b5bd674d2d257faa0471913fe411bb8a2867e75c552`
-- [고정 CSV 스냅샷](../artifacts/ingestion_sources/diningcode_playwright_national_20260924_091004_snapshot_20260926T072043255137Z.csv)
-- [적재·검증 결과 JSON](../artifacts/ingestion_sources/diningcode_playwright_national_20260924_091004_snapshot_20260926T072043255137Z.import.json)
+- [고정 CSV 스냅샷](../../artifacts/ingestion_sources/diningcode_playwright_national_20260924_091004_snapshot_20260926T072043255137Z.csv)
+- [적재·검증 결과 JSON](../../artifacts/ingestion_sources/diningcode_playwright_national_20260924_091004_snapshot_20260926T072043255137Z.import.json)
 - 재실행: `python -m rating_recsys.ingestion.import_crawler`

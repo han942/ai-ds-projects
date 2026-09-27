@@ -1,5 +1,7 @@
 # LightGCN 후보 생성 실험: C0+C1+LightGCN RRF
 
+> 보관 문서 · primary leave-last-two-out 프로토콜. 현재 코드에는 이 평가 경로가 없다. 본문의 명령과 모듈은 commit `ae3f4ea` 기준이며, 재현 방법은 [보관 안내](./README.md)를 따른다.
+
 2026-09-23에 현재 DB snapshot의 동일 validation/test query로 후보 생성 방식을 비교했다. 현재 baseline C3와 달리 이 실험은 **후보 생성까지만** 평가한다. 기존 R1 LambdaRank의 학습·재정렬 결과를 이 수치로 추정하지 않는다.
 
 ## 구현과 조건
@@ -7,7 +9,7 @@
 - C0: 전체 인기, C1: cosine item co-occurrence, 새 소스: [LightGCN](https://arxiv.org/abs/2002.02126). 각 소스의 상위 100개를 `1 / (60 + source rank)`로 합산하고 Top-100을 선택한다. 새 RRF에는 지역 소스와 기존 C3의 50개 보존 quota가 없다.
 - LightGCN은 사용자–식당 이분 그래프의 정규화 인접 행렬을 2회 전파하고 0~2층 임베딩을 평균한다. 사용자–positive item–sampled negative item의 BPR 손실로 초기 임베딩을 학습한다. 차원 32, 80 epoch, Adam learning rate 0.03, L2 계수 0.0001, seed 42. 모델은 NumPy/SciPy로 구현했다.
 - 질의가 속한 **분기의 시작일보다 앞선** 참조 interaction만 LightGCN 학습에 사용한다. Validation은 train interaction만, test는 train+validation interaction만 모델과 C0/C1/C3의 참조 데이터로 사용한다. C0/C1/C3는 기존과 같이 각 질의보다 앞선 interaction으로 갱신한다. 미래 interaction은 그래프 학습에도 후보 생성에도 사용하지 않는다.
-- 원래 seen-user split 23,017건, 적격 사용자 2,396명, train/validation/test 12,504/2,396/2,396건. Test에서 relevance > 0인 query는 2,350개다. Snapshot ID는 `03a763252e30c5516dd4720c9c107e7dbfb41fbadda696caccd29afe106b9785`로 [이전 지역 제거 실험](./region_ablation_2026-09-23.md)과 같다.
+- 원래 seen-user split 23,017건, 적격 사용자 2,396명, train/validation/test 12,504/2,396/2,396건. Test에서 relevance > 0인 query는 2,350개다. Snapshot ID는 `03a763252e30c5516dd4720c9c107e7dbfb41fbadda696caccd29afe106b9785`로 [이전 지역 제거 실험](./2026-09-23_region_ablation.md)과 같다.
 - 이전 비교값을 복사하지 않고 이 실행에서 C0, C1, 지역 포함 C3 후보를 모두 다시 계산했다. C3 Test Recall@100 51.53%, C0+C1 46.72%는 이전 실행값과 일치한다. 질의별 C3 후보 순서도 이전 지역 포함 run의 validation/test 각 2,396개와 모두 일치하고, C0+C1 후보 순서는 이전 무지역 test run의 2,396개와 모두 일치한다. 모든 결과는 MLflow 전송 없이 로컬에 저장했다.
 
 ## 후보 결과
@@ -38,8 +40,8 @@ LightGCN을 세 번째 후보 소스로 구현할 수 있고, C0+C1 조합의 �
 python -m rating_recsys.experiments.compare_lightgcn
 ```
 
-- [실험 manifest](../artifacts/comparisons/lightgcn_20260923T045007231844Z-03a76325/manifest.json)
-- [설정](../artifacts/comparisons/lightgcn_20260923T045007231844Z-03a76325/config.json)
-- [Validation 상세 지표](../artifacts/comparisons/lightgcn_20260923T045007231844Z-03a76325/metrics_validation.json)
-- [Test 상세 지표](../artifacts/comparisons/lightgcn_20260923T045007231844Z-03a76325/metrics_test.json)
-- [Test 질의별 후보 목록](../artifacts/comparisons/lightgcn_20260923T045007231844Z-03a76325/candidates_test.jsonl)
+- [실험 manifest](../../../artifacts/archive/primary/comparisons/lightgcn_20260923T045007231844Z-03a76325/manifest.json)
+- [설정](../../../artifacts/archive/primary/comparisons/lightgcn_20260923T045007231844Z-03a76325/config.json)
+- [Validation 상세 지표](../../../artifacts/archive/primary/comparisons/lightgcn_20260923T045007231844Z-03a76325/metrics_validation.json)
+- [Test 상세 지표](../../../artifacts/archive/primary/comparisons/lightgcn_20260923T045007231844Z-03a76325/metrics_test.json)
+- [Test 질의별 후보 목록](../../../artifacts/archive/primary/comparisons/lightgcn_20260923T045007231844Z-03a76325/candidates_test.jsonl)

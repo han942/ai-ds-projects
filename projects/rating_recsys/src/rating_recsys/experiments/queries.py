@@ -1,13 +1,14 @@
-"""Build leakage-aware offline recommendation queries."""
+"""Leakage-aware query builders for training and evaluation."""
 
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import date
 from typing import Iterable
 
 from rating_recsys.datasets.models import Interaction
 from rating_recsys.experiments.config import ExperimentConfig
-from rating_recsys.experiments.models import RecommendationQuery
+from rating_recsys.experiments.models import RecommendationQuery, WindowQuery
 
 
 def interaction_key(item: Interaction) -> tuple[object, int, int]:
@@ -24,7 +25,7 @@ def build_prefix_queries(
     config: ExperimentConfig,
     phase: str = "train",
 ) -> tuple[RecommendationQuery, ...]:
-    """Use each non-first interaction as a target with its preceding history."""
+    """Ranker training queries: each non-first visit with its preceding history."""
 
     grouped: dict[int, list[Interaction]] = defaultdict(list)
     for item in interactions:
@@ -35,14 +36,13 @@ def build_prefix_queries(
         history = sorted(grouped[user_id], key=interaction_key)
         for index in range(1, len(history)):
             target = history[index]
-            prefix = tuple(history[:index])
             queries.append(
                 RecommendationQuery(
                     query_id=f"{phase}:u{user_id}:r{target.review_id}",
                     phase=phase,
                     user_id=user_id,
                     cutoff=target.event_date,
-                    history=prefix,
+                    history=tuple(history[:index]),
                     target=target,
                     relevance=config.relevance(target.rating),
                 )
@@ -50,55 +50,50 @@ def build_prefix_queries(
     return tuple(sorted(queries, key=lambda query: query.query_id))
 
 
-def build_holdout_queries(
+def build_window_queries(
     history_interactions: Iterable[Interaction],
-    targets: Iterable[Interaction],
+    window_interactions: Iterable[Interaction],
     *,
     config: ExperimentConfig,
     phase: str,
-) -> tuple[RecommendationQuery, ...]:
-    """Build one validation or test query for every held-out interaction."""
+    cutoff: date,
+) -> tuple[tuple[WindowQuery, ...], int]:
+    """Evaluation queries for one window: one per user with history at ``cutoff``.
 
-    grouped: dict[int, list[Interaction]] = defaultdict(list)
+    Returns the queries and the number of window users without any history
+    (new users). New users cannot be personalised and are not evaluated.
+    """
+
+    history: dict[int, list[Interaction]] = defaultdict(list)
     for item in history_interactions:
-        grouped[item.user_id].append(item)
-    for user_history in grouped.values():
-        user_history.sort(key=interaction_key)
+        if item.event_date > cutoff:
+            raise ValueError("History interaction is after the window cutoff")
+        history[item.user_id].append(item)
+    window: dict[int, list[Interaction]] = defaultdict(list)
+    for item in window_interactions:
+        if item.event_date <= cutoff:
+            raise ValueError("Window interaction is not after the cutoff")
+        window[item.user_id].append(item)
 
-    queries = [
-        RecommendationQuery(
-            query_id=f"{phase}:u{target.user_id}:r{target.review_id}",
-            phase=phase,
-            user_id=target.user_id,
-            cutoff=target.event_date,
-            history=tuple(
-                item
-                for item in grouped.get(target.user_id, ())
-                if interaction_key(item) < interaction_key(target)
-            ),
-            target=target,
-            relevance=config.relevance(target.rating),
+    queries: list[WindowQuery] = []
+    new_users = 0
+    for user_id in sorted(window):
+        user_history = tuple(sorted(history.get(user_id, ()), key=interaction_key))
+        if not user_history:
+            new_users += 1
+            continue
+        visits = tuple(sorted(window[user_id], key=interaction_key))
+        queries.append(
+            WindowQuery(
+                query_id=f"{phase}:u{user_id}",
+                phase=phase,
+                user_id=user_id,
+                cutoff=cutoff,
+                history=user_history,
+                window=visits,
+                relevance_by_item={
+                    item.restaurant_id: config.relevance(item.rating) for item in visits
+                },
+            )
         )
-        for target in targets
-    ]
-    return tuple(sorted(queries, key=lambda query: query.query_id))
-
-
-def interactions_before(
-    interactions: Iterable[Interaction],
-    query: RecommendationQuery,
-) -> tuple[Interaction, ...]:
-    """Return only interactions ordered before a query target."""
-
-    cutoff_key = global_interaction_key(query.target)
-    return tuple(
-        sorted(
-            (
-                item
-                for item in interactions
-                if global_interaction_key(item) < cutoff_key
-                and item.review_id != query.target.review_id
-            ),
-            key=global_interaction_key,
-        )
-    )
+    return tuple(queries), new_users

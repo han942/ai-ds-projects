@@ -1,5 +1,1 @@
-"""Reproducible offline experiment orchestration."""
-
-from rating_recsys.experiments.config import ExperimentConfig
-
-__all__ = ["ExperimentConfig"]
+"""Reproducible offline experiment: split, candidates, LTR, evaluation."""

@@ -1,225 +1,146 @@
 # Rating Recommender System v2
 
-이 프로젝트는 기존의 리뷰 기반 평점 예측 실험을 넘어, 실제 데이터베이스를
-사용하는 2-stage 식당 추천 시스템으로 확장한다.
+DiningCode 리뷰로 사용자가 아직 가지 않은 식당을 추천하는 2-stage 추천 시스템이다.
+v1(리뷰 텍스트로 평점 예측, [legacy/](./legacy/))을 추천 순위 문제로 바꿨다.
 
-- 전체 계획: [RECOMMENDER_V2_PLAN.md](./RECOMMENDER_V2_PLAN.md)
-- Baseline 모델: [BASELINE_MODEL.md](./BASELINE_MODEL.md)
-- 이전 버전: [legacy/v1_rating_prediction/](./legacy/v1_rating_prediction/)
-- 분석 결과 보존·삭제 기준: [analysis/README.md](./analysis/README.md)
-
-현재 Supabase PostgreSQL ingestion, DB-backed modeling dataset과 실행 가능한
-2-stage baseline 골격이 구현되어 있다. 동일 split에서 global
-candidate component C0(popularity)~C3(RRF union)와 ranker R1(LambdaRank)을
-비교하고 immutable snapshot과 로컬 artifact를 생성한다. 작은 스냅샷은
-MLflow에도 기록할 수 있다. 날짜는 초기 모델 feature로 사용하지 않고 chronological split과
-leakage 방지에만 사용하며, time-aware recommendation은 후속 연구로 둔다.
-기존의 노트북, 수집 데이터, 모델 checkpoint 및 예측 결과는 삭제하지 않고
-legacy 폴더에 그대로 보존하였다.
-
-## Two-stage baseline 실행
-
-실험 dependency를 설치한 뒤 Supabase snapshot에서 C0 popularity, C1 item-item,
-C2 region popularity, C3 quota RRF와 R1 LightGBM LambdaRank를 한 번에 실행한다.
-C2를 포함한 C3에서 후보를 선택하고, R1이 그 후보를 재정렬한다. 현재처럼
-데이터가 큰 경우 학습 행을 디스크에 저장하는 경로를 사용한다.
-
-```bash
-pip install -e '.[experiment,dev]'
-python -m rating_recsys.experiments.large_cli
+```text
+Supabase PostgreSQL ─▶ 고정 snapshot ─▶ 전역 날짜 cutoff 분할
+   ─▶ Stage 1 후보 생성 (C0 인기 · C1 item-item · C2 지역 인기 → C3 quota RRF, Top-100)
+   ─▶ Stage 2 LightGBM LambdaRank 재정렬 (Top-10)
+   ─▶ artifacts/runs/<run_id>/report.md · MLflow · Streamlit
 ```
 
-고정된 데이터로 재실행하려면 `--snapshot artifacts/runs/<run_id>/dataset.jsonl`을
-붙인다. 결과는 `artifacts/runs/<run_id>/`에 저장된다. 이 대용량 경로는
-평가에 사용하지 않는 리뷰 본문 조회와 MLflow 기록을 생략한다. 같은 split,
-후보 K, feature, LambdaRank 설정과 평가 함수를 사용한다.
-[2026-09-27 현재 데이터 기준선 결과](./analysis/baseline_2026-09-27.md)에
-스냅샷 ID, 단계별 지표와 해석 범위를 기록했다.
+- 모델과 평가 방식: [BASELINE_MODEL.md](./BASELINE_MODEL.md)
+- 전체 계획과 마일스톤: [RECOMMENDER_V2_PLAN.md](./RECOMMENDER_V2_PLAN.md)
+- 기록 문서: [analysis/](./analysis/README.md) · 로컬 산출물: [artifacts/](./artifacts/README.md)
 
-작은 스냅샷에서 MLflow 추적과 리뷰 본문 표시 artifact가 필요한 경우
-`rating-recsys-experiment`를 실행한다. MLflow에는 대용량 candidate와 ranking
-Parquet 전체를 복제하지 않고 핵심 artifact, dataset lineage, 단계별 metric,
-추천 결과 table과 pipeline trace를 기록한다.
+## 폴더 구조
 
-MLflow UI는 별도 터미널에서 실행한다.
-
-```bash
-mlflow ui \
-  --backend-store-uri sqlite:///artifacts/mlflow.db \
-  --host 127.0.0.1 \
-  --port 5000
+```text
+rating_recsys/
+├── src/rating_recsys/
+│   ├── ingestion/        CSV·크롤링 결과 → PostgreSQL 적재
+│   ├── db/               연결, migration
+│   ├── datasets/         DB 조회, 전역 날짜 cutoff 분할
+│   ├── retrieval/        Stage 1 후보 생성 (C0~C3)
+│   ├── ranking/          Stage 2 feature, LambdaRank
+│   ├── evaluation/       지표, run 보고서
+│   ├── experiments/      실험 설정, 파이프라인, CLI
+│   └── observability/    MLflow 기록, Streamlit 앱
+├── tests/
+├── migrations/           SQL schema
+├── queries/              검증·분석용 SQL
+├── crawler/              DiningCode Playwright 크롤러
+├── analysis/             데이터 점검 기록, 보관한 이전 평가 결과
+├── artifacts/            snapshot, run 결과, MLflow DB (보고서만 git에 올라감)
+└── legacy/               v1 평점 예측 프로젝트
 ```
 
-`rating-recsys-baseline` experiment에는 다음 구조가 생성된다.
-
-- Parent run: validation/test 핵심 metric, dataset input, chart, table, trace
-- `01 · C0 Popularity`: popularity candidate metric과 cutoff curve
-- `02 · C1 Item-item CF`: item-item candidate metric과 cutoff curve
-- `03 · C2 Region popularity`: 지역 candidate metric과 cutoff curve
-- `04 · C3 RRF Candidate Union`: fused candidate metric과 cutoff curve
-- `05 · R1 LambdaMART`: C3 후보의 final ranking metric
-- Tables: 단계별 metric 및 test 사용자별 top-K 추천 결과
-- Traces: split → candidate generation → LambdaMART → 평가 → artifact 기록
-
-개별 추천의 정성 평가에는 다음 로컬 UI를 사용한다. 사용자별 화면에서는 과거
-방문, held-out target, 실제 Top-K 추천, candidate 대비 최종 순위 이동과 source
-score를 확인할 수 있다. 과거 방문과 target에는 해당 방문에서 작성한 리뷰를
-함께 표시한다. 리뷰 본문은 별도 display-only artifact에 저장되며 모델 feature나
-MLflow artifact에는 포함하지 않는다. 아이템별 화면에서는 특정 식당이 어떤 사용자에게 몇
-순위로 추천됐는지, 실제 target과 일치했는지를 역조회할 수 있다. 기본 화면은
-작은 Top-K artifact만 읽으며, 전체 candidate와 feature는 해당 query에서 상세
-보기를 켰을 때만 불러온다. Metric은 순위 품질, coverage·discovery, 평가 모수·
-latency로 구분하며 stage별 @K 값과 각 지표의 도움말을 제공한다.
-
-```bash
-rating-recsys-dashboard --address 127.0.0.1
-```
-
-자세한 architecture, layer output과 metric 정의는
-[BASELINE_MODEL.md](./BASELINE_MODEL.md)를 참고한다.
-
-지역 후보와 지역 affinity feature를 제거한 비교 실험은 같은 DB snapshot으로
-기준선과 무지역 모델을 각각 학습한다. MLflow에 데이터를 올리지 않고 로컬 artifact에
-결과를 저장한다.
-
-```bash
-python -m rating_recsys.experiments.compare_region
-```
-
-[2026-09-23 지역 제거 실험 결과](./analysis/region_ablation_2026-09-23.md)에서
-동일 test query의 추천 품질과 지역 다양성 차이를 볼 수 있다.
-
-LightGCN을 세 번째 후보 소스로 추가한 C0+C1+LightGCN RRF 실험은 분기별
-과거 그래프로 모델을 학습하고 후보 Recall@20/50/100을 로컬에서 비교한다.
-
-```bash
-python -m rating_recsys.experiments.compare_lightgcn
-```
-
-[2026-09-23 LightGCN 후보 실험 결과](./analysis/lightgcn_candidate_2026-09-23.md)에
-조건, 비교 결과, 재현 아티팩트를 기록했다.
-
-## Supabase PostgreSQL ingestion
-
-현재 5개 legacy CSV를 Supabase PostgreSQL의 private `recsys` schema로 적재하는
-첫 번째 파이프라인이 구현되어 있다. 원본 사용자명은 저장하지 않고 고정된
-salt를 사용한 SHA-256 pseudonym으로 변환한다. 파일 hash와 review content
-hash를 사용하므로 같은 파일을 다시 실행해도 리뷰가 중복 삽입되지 않는다.
-
-### 1. 환경 준비
+## 설치
 
 ```bash
 cd projects/rating_recsys
 conda create --prefix ./.venv python=3.10 pip libgomp -y
 conda activate ./.venv
-pip install -e '.[dev]'
-cp .env.example .env
+pip install -e '.[experiment,dev]'
+cp .env.example .env   # DATABASE_URL, USER_HASH_SALT 설정
 ```
 
-Supabase Dashboard의 `Connect`에서 연결 문자열을 복사하여 `.env`의
-`DATABASE_URL`에 설정한다. Migration에는 direct connection이 가장 적합하지만
-로컬 네트워크가 IPv4 only라면 port 5432의 Session pooler를 사용할 수 있다.
-비밀번호의 예약 문자는 URL encoding하고 `sslmode=require`를 유지한다.
-
-`USER_HASH_SALT`는 한 번 생성한 긴 random 문자열로 설정하고 이후 변경하지
-않는다. Salt가 바뀌면 같은 source 사용자가 다른 사용자로 생성된다.
-
-### 2. DB 연결 전 검증
+## 실험 실행
 
 ```bash
-rating-recsys-ingest --dry-run
+# 현재 DB를 읽어 snapshot으로 고정한 뒤 실행
+rating-recsys-experiment
+
+# 이미 고정한 snapshot으로 재실행
+rating-recsys-experiment --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl
 ```
 
-Dry-run은 Supabase에 연결하거나 데이터를 쓰지 않고 5개 파일의 schema,
-필수값, 날짜 parsing, 중복 review hash와 entity 수를 검사한다.
+한 번 실행하면 `artifacts/runs/<run_id>/`가 생긴다. 결과는 그 안의 `report.md` 하나로
+본다. 전체 데이터(88,554 interactions) 기준 로컬 8 thread로 약 20분 걸린다.
 
-### 3. Migration과 적재
+진행 순서:
+
+1. 모든 사용자에게 같은 두 날짜 T1, T2를 적용해 train / validation / test로 나눈다.
+2. Validation window로 C3 quota를 고르고, LambdaRank 설정과 트리 수(early
+   stopping)를 고른다.
+3. 고른 설정으로 T2까지의 데이터로 다시 학습하고, test window를 한 번 평가한다.
+4. `report.md`를 쓰고 MLflow에 지표를 기록한다.
+
+### 조정할 수 있는 조건
+
+기본값과 다르게 준 조건은 보고서 2절에 모두 표시된다. 전체 목록은
+`rating-recsys-experiment --help`.
+
+| 구분 | 플래그 | 기본값 | 의미 |
+|---|---|---|---|
+| 분할 | `--train-fraction`, `--validation-fraction` | 0.8, 0.1 | T1, T2를 정하는 interaction 날짜 분위수 |
+| 정답 | `--relevance-high`, `--relevance-low` | 4.0, 3.0 | relevance 2 / 1이 되는 평점. low 미만은 정답이 아님 |
+| 후보 | `--candidate-k` | 100 | Stage 1이 넘기는 후보 수 |
+| 후보 | `--region-mode` | `with_region` | `without_region`이면 C2와 지역 feature 제거 |
+| 후보 | `--rrf-constant` | 60 | RRF 점수 1/(c + rank)의 c |
+| LTR | `--ranking-k` | 10 | 최종 추천 수, 평가 cutoff |
+| 선택 | `--quota-grid` | 0,0.25,0.5,0.75,1 | Validation에서 고를 C3 quota 후보 |
+| 선택 | `--num-leaves-grid`, `--min-child-samples-grid` | 15,31,63 / 10,100 | LambdaRank grid |
+| 선택 | `--learning-rate`, `--max-estimators`, `--early-stopping-rounds` | 0.05, 1000, 50 | 트리 수는 early stopping으로 결정 |
+| 기타 | `--seed`, `--bootstrap-samples`, `--n-jobs` | 42, 2000, 8 | |
+| 출력 | `--label`, `--no-mlflow`, `--artifacts-dir` | | run 이름표, MLflow 기록 끄기, 출력 위치 |
+
+예: 후보를 200개로 늘려 비교 → `rating-recsys-experiment --snapshot <file> --candidate-k 200 --label k200`
+
+### 결과 보기
+
+- 보고서: `artifacts/runs/<run_id>/report.md`
+- Streamlit: `rating-recsys-dashboard --address 127.0.0.1` → 사이드바에서 run과
+  phase 선택 → 보고서 · 지표 · 사용자별 추천 · 식당별 노출 탭
+- MLflow: `mlflow ui --backend-store-uri sqlite:///artifacts/mlflow.db --host 127.0.0.1 --port 5000`
+  → experiment `rating-recsys`. Run마다 후보·LTR 지표(@K는 step), validation
+  quota·ranker grid가 child run으로 있고, 여러 run을 Compare로 비교할 수 있다.
+  파일은 복사하지 않으며 `report` tag가 보고서 경로를 가리킨다.
+
+Streamlit과 MLflow UI에는 인증이 없으므로 `127.0.0.1`에서만 연다.
+
+## 데이터 적재
+
+모델링 코드는 CSV를 읽지 않고 Supabase의 `recsys` schema만 읽는다. 원본 사용자명은
+저장하지 않고 고정 salt의 SHA-256 pseudonym으로 바꾼다. 파일 hash와 review
+content hash로 중복을 막으므로 같은 파일을 다시 적재해도 안전하다.
 
 ```bash
-rating-recsys-migrate
-rating-recsys-ingest --skip-migrations
+rating-recsys-ingest --dry-run          # DB 연결 없이 schema·필수값·날짜 검사
+rating-recsys-migrate                   # schema 적용
+rating-recsys-ingest --skip-migrations  # 기존 5개 CSV 적재
+python -m rating_recsys.ingestion.import_crawler   # 전국 크롤링 결과 적재
+rating-recsys-dataset                   # 읽기 전용: 데이터 규모와 분할 크기 출력
 ```
 
-또는 migration을 포함해 한 번에 실행한다.
+`.env`의 `DATABASE_URL`은 Supabase Dashboard의 `Connect`에서 복사한다(IPv4 전용
+네트워크면 port 5432 Session pooler, `sslmode=require` 유지). `USER_HASH_SALT`는 한 번
+정하면 바꾸지 않는다. 검증 SQL은 [queries/](./queries/)에 있다.
 
-```bash
-rating-recsys-ingest
-```
-
-적재 결과는 파일별 전체·신규·중복·거부 행 수를 JSON으로 출력한다. 같은
-명령을 다시 실행하면 이미 성공한 동일 file hash는 `skipped` 상태가 된다.
-
-검증 query는 [queries/verify_ingestion.sql](./queries/verify_ingestion.sql)에
-있다.
-
-2026-09-26 전국 Playwright 크롤링의 현재 `.csv.partial` 내용은 별도 고정
-스냅샷으로 적재했다. 기존 5개 파일의 `crawl_runs.source = 'diningcode'`와
-새 수집분의 `source = 'diningcode_playwright_national'`로 리뷰를 구분한다.
-원본 수집이 완료된 것으로 간주하지 않으며, 재수집 뒤 다시 실행하면 새 스냅샷
-run으로 중복을 제외하고 추가할 수 있다.
-
-```bash
-python -m rating_recsys.ingestion.import_crawler
-```
-
-[적재 결과와 품질 확인](./analysis/crawler_import_2026-09-26.md),
-[출처별 SQL](./queries/compare_crawl_sources.sql)을 참고한다. 기본 모델링
-데이터셋 조회는 현재 두 출처를 함께 읽는다.
-
-## DB-backed modeling dataset
-
-모델링 코드는 legacy CSV를 읽지 않는다. 아래 명령은 Supabase의
-`recsys.reviews`를 직접 읽고, 동일 사용자·식당의 최초 interaction만 남긴 뒤
-두 평가 split을 생성하여 JSON audit을 출력한다. DB에는 쓰지 않는 read-only
-명령이다.
-
-```bash
-rating-recsys-dataset
-```
-
-Primary benchmark는 고유 식당 3개 이상 사용자의 마지막 interaction을 test,
-마지막에서 두 번째를 validation, 나머지를 train으로 배치한다. train 이력이
-1개 이상인 사용자는 하나의 `seen user` 집단으로 평가하며 이력 1~2개와 3개
-이상 구간은 진단 지표로만 분리한다.
-
-Secondary benchmark는 전체 interaction의 날짜 분위수로 전역 cutoff를 만들고,
-cutoff 이전 이력이 있는 `seen user`와 이력이 없는 `new user`를 별도로
-집계한다.
-
-기본 설정을 바꿔 audit할 수도 있다.
-
-```bash
-rating-recsys-dataset \
-  --minimum-user-items 3 \
-  --train-fraction 0.8 \
-  --validation-fraction 0.1
-```
-
-2026-09-27 DB 조회 기준 데이터 규모는 다음과 같다. 전국 크롤링은 미완료
-중간 스냅샷이며, 아래 수치는 모델 성능이 아니라 입력 데이터와 split의 크기다.
-이전 23,017건 스냅샷의 실험 지표를 현재 데이터 성능으로 사용하지 않는다.
-출처별 변화와 비교 기준은 [데이터 스냅샷 기록](./analysis/data_snapshot_2026-09-27.md)에 있다.
+2026-09-27 DB 기준 규모 (전국 크롤링은 미완료 중간 스냅샷):
 
 | 항목 | 값 |
 |---|---:|
 | 원본 리뷰 (기존 / 전국 수집) | 96,922 (23,207 / 73,715) |
-| 최초 user-item interaction | 88,554 |
+| 최초 사용자·식당 interaction | 88,554 |
 | 사용자 / 식당 | 14,008 / 4,587 |
-| Primary seen user (고유 식당 3개 이상) | 5,934 |
-| Primary train / validation / test | 66,669 / 5,934 / 5,934 |
-| train history 1~2개 사용자 | 1,819 |
-| train history 3개 이상 사용자 | 4,115 |
+| 분할 train / validation / test | 70,883 / 8,934 / 8,737 |
+| 구간 경계 | ~ 2025-12-19 / ~ 2026-05-04 / 이후 |
 
-### 주요 파일
+출처별 변화는 [데이터 스냅샷 기록](./analysis/data/2026-09-27_data_snapshot.md),
+적재 품질은 [크롤링 적재 기록](./analysis/data/2026-09-26_crawler_import.md)에 있다.
 
-| 경로 | 역할 |
-|---|---|
-| `migrations/001_initial_ingestion.sql` | `crawl_runs`, `restaurants`, `app_users`, `reviews` schema |
-| `src/rating_recsys/ingestion/transform.py` | CSV 정규화, 날짜 parsing, pseudonym 및 dedup hash |
-| `src/rating_recsys/ingestion/loader.py` | PostgreSQL COPY와 set-based upsert |
-| `src/rating_recsys/ingestion/cli.py` | dry-run 및 전체 ingestion command |
-| `src/rating_recsys/datasets/repository.py` | Supabase에서 최초 user-item interaction 조회 |
-| `src/rating_recsys/datasets/split.py` | seen-user 및 global temporal split 생성 |
-| `src/rating_recsys/datasets/cli.py` | DB snapshot과 split audit command |
-| `tests/test_transform.py` | 변환 규칙과 5개 CSV smoke test |
-| `tests/test_dataset_split.py` | split, 중복 방지 및 seen/new cohort test |
+## 테스트
+
+```bash
+pytest
+```
+
+분할 경계, 누수(학습 정답 날짜 ≤ cutoff, test 구간을 바꿔도 선택과 모델이 동일),
+결정성, 지표 수식, 보고서, CLI, MLflow 기록, Streamlit 화면을 검사한다.
+
+## 이전 평가 방식
+
+2026-09-27까지는 사용자별 leave-last-two-out으로 평가했다. 코드는 제거했고 결과와
+재현 방법은 [analysis/archive/primary/](./analysis/archive/primary/README.md)에 있다.

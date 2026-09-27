@@ -1,5 +1,7 @@
 # Region ablation: C3→R1 vs C0+C1→R1
 
+> 보관 문서 · primary leave-last-two-out 프로토콜. 현재 코드에는 이 평가 경로가 없다. 본문의 명령과 모듈은 commit `ae3f4ea` 기준이며, 재현 방법은 [보관 안내](./README.md)를 따른다.
+
 2026-09-23에 같은 데이터와 평가 규칙으로 두 모델을 새로 학습·평가했다. 이전 C0+C1→R1 run의 수치는 비교에 사용하지 않았다.
 
 ## 실험 조건
@@ -38,8 +40,8 @@ Validation에서는 R1 Recall@10이 10.82% → 10.23%(−0.59%p), NDCG@10이 0.0
 
 ## Artifact
 
-- [지역 포함 run](../artifacts/runs/20260923T024727601730Z-03a76325/manifest.json)
-- [무지역 run](../artifacts/runs/20260923T025110890068Z-03a76325/manifest.json)
-- [수치 비교 JSON](../artifacts/comparisons/region_ablation_20260923T024727601730Z-03a76325_vs_20260923T025110890068Z-03a76325.json)
+- [지역 포함 run](../../../artifacts/archive/primary/runs/20260923T024727601730Z-03a76325/manifest.json)
+- [무지역 run](../../../artifacts/archive/primary/runs/20260923T025110890068Z-03a76325/manifest.json)
+- [수치 비교 JSON](../../../artifacts/archive/primary/comparisons/region_ablation_20260923T024727601730Z-03a76325_vs_20260923T025110890068Z-03a76325.json)
 
 재실행: `python -m rating_recsys.experiments.compare_region` (프로젝트 디렉터리의 `.venv` 환경에서 실행).

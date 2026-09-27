@@ -119,3 +119,35 @@ def environment_manifest() -> dict[str, object]:
         "packages": sorted(packages, key=str.casefold),
         "conda_packages": conda_packages,
     }
+
+
+def load_snapshot(path: Path) -> list[Interaction]:
+    """Read a ``write_snapshot`` JSONL file back into interactions."""
+
+    from datetime import date
+
+    interactions = []
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            row = json.loads(line)
+            row["event_date"] = date.fromisoformat(row["event_date"])
+            interactions.append(Interaction(**row))
+    return interactions
+
+
+def freeze_snapshot(
+    interactions: Iterable[Interaction],
+    snapshots_dir: Path,
+) -> tuple[Path, dict[str, object]]:
+    """Store the input once as ``<snapshot_id[:16]>.jsonl`` and return its metadata.
+
+    The file content is canonical, so the same interactions always produce the
+    same file and rewriting an existing snapshot does not change it.
+    """
+
+    staging = snapshots_dir / ".staging.jsonl"
+    meta = write_snapshot(interactions, staging)
+    destination = snapshots_dir / f"{str(meta['dataset_snapshot_id'])[:16]}.jsonl"
+    staging.replace(destination)
+    meta["artifact"] = destination.name
+    return destination, meta

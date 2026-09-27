@@ -1,6 +1,6 @@
 # Rating Recommender System v2 확장 계획
 
-> 상태: M1·M2·M3 완료, M4·M5 초기 C0-C3/R1 baseline vertical slice 구현 완료
+> 상태: M1·M2·M3 완료, M4·M5 초기 C0-C3/R1 baseline 구현 완료. 2026-09-27부터 평가는 전역 날짜 cutoff 방식 하나로 통일
 > 방향: DB-backed data pipeline → Stage 1 candidate retrieval → Stage 2 learning-to-rank  
 > 비용 원칙: 로컬·오픈소스 우선, 관리형 서비스와 유료 API는 기본 구성에서 제외
 
@@ -33,7 +33,7 @@ DeepCoNN 계열 모델을 분석한 프로젝트였다. v2는 평점 회귀 실�
 ## 2. 초기 데이터 진단 (2026-09-19)
 
 아래 수치는 계획 작성 당시 보유 CSV의 프로파일이다. 2026-09-27 DB 기준
-규모와 출처 변화는 [데이터 스냅샷 비교](./analysis/data_snapshot_2026-09-27.md)에 있다.
+규모와 출처 변화는 [데이터 스냅샷 비교](./analysis/data/2026-09-27_data_snapshot.md)에 있다.
 이 절의 수치를 현재 모델 성능이나 데이터 규모로 사용하지 않는다.
 
 | 항목 | 값 |
@@ -78,22 +78,15 @@ v2는 사용자의 과거 리뷰와 식당이 기존에 받은 리뷰를 이용�
 snapshot의 전역 80/10/10 시간 분할에서는 test 사용자 1,269명 중 593명
 (46.7%)이 train에 존재하지 않았다.
 
-따라서 다음 두 평가 프로토콜을 함께 사용한다.
+처음에는 사용자별 leave-last-two-out을 주 평가로 썼다(2026-09-21 ~ 09-27,
+[보관 기록](./analysis/archive/primary/README.md)). 이 방식은 query당 정답이 1개라
+MAP·Precision·graded NDCG를 해석할 수 없고, 사용자마다 자르는 시점이 달라 최종
+ranker가 다른 사용자의 test보다 늦은 데이터로 학습되는 문제가 있었다.
 
-1. **Primary seen-user benchmark**: `(user_id, restaurant_id)`별 최초 interaction만
-   남기고, 고유 식당이 3개 이상인 사용자의 마지막 interaction을 test,
-   마지막에서 두 번째를 validation, 나머지를 train으로 배치한다. train 이력이
-   1개 이상인 사용자를 하나의 `seen user` 집단으로 평가한다.
-2. **Secondary temporal audit**: 현재 구현된 전역 time cutoff로 seen/new user
-   비율만 진단한다. rolling benchmark와 time-aware 모델 비교는 Future Work로
-   둔다.
-
-기존의 warm과 few-shot은 별도 모델 경로로 나누지 않는다. 두 집단을
-`seen user`로 합쳐 동일한 personalized pipeline을 사용하고, train history
-1~2개와 3개 이상 구간의 지표는 성능 진단용 breakdown으로만 유지한다.
-`new user`는 popularity와 content/context fallback으로 평가한다. 사용자 정보와
-과거 이력이 모두 없는 경우 collaborative personalization이 불가능하다는 점을
-명시한다.
+2026-09-27부터는 **전역 날짜 cutoff** 하나로 평가한다. 모든 사용자에게 같은 두
+날짜 T1, T2를 적용하고, window 안의 방문 전부를 정답으로 둔다. Window 시작 전
+이력이 없는 사용자(new user)는 개인화할 수 없으므로 평가하지 않고 수만 기록한다.
+세부 정의는 [BASELINE_MODEL.md](./BASELINE_MODEL.md)에 있다.
 
 날짜가 불완전한 행은 crawl 시각을 근거로 복원 여부와 신뢰도를 기록한다.
 
@@ -383,67 +376,33 @@ review-only 데이터에서 사용하는 초기 graded relevance는 다음과 �
 1. 날짜를 절대 시각으로 정규화한다.
 2. 아직 방문하지 않은 식당 추천이라는 task에 맞게 동일 사용자·식당의 반복
    리뷰는 최초 interaction 하나로 축약한다.
-3. Primary benchmark는 고유 식당이 3개 이상인 사용자에게 chronological
-   leave-last-two-out을 적용한다. 마지막 interaction은 test, 마지막에서 두 번째는
-   validation, 나머지는 train이다.
-4. Primary metric은 train 이력이 1개 이상인 `seen user` 전체를 대상으로 한다.
-   train history 1~2개와 3개 이상 결과는 별도의 diagnostic breakdown으로 함께
-   기록하되, 모델과 serving 경로를 분리하지 않는다.
-5. Secondary temporal audit는 전역 time cutoff에서 seen/new user 비율을
-   출력한다. 초기 C0-C3/R1의 성능 비교에는 사용하지 않는다.
+3. 전체 interaction 날짜의 80%, 90% 지점을 T1, T2로 두고 train(≤ T1),
+   validation window(T1, T2], test window(> T2)로 나눈다.
+4. 평가 query는 window 시작 전 이력이 있는 사용자 1명 × window 1개다. Window
+   안에서 평점 3점 이상인 방문이 모두 정답이다.
+5. Ranker 학습 query는 이력 prefix(→ 다음 방문)이고 정답 날짜가 평가 cutoff
+   이전인 것만 쓴다. 튜닝은 T1까지, 최종 재학습은 T2까지.
 6. 각 query 시점보다 늦은 interaction과 target review에서 파생된 정보는 feature
    생성에서 제외한다.
 7. 날짜 추론 방식과 dataset snapshot을 기록하여 같은 split을 재현한다.
 
 ### 8.2 평가 지표
 
-Candidate 단계:
+후보 생성 단계(C0~C3): **Recall@20/50/100**. C3 Recall@100이 Stage 2가 도달할 수
+있는 상한이다.
 
-- **Recall@20/50/100**: held-out relevant item을 후보군이 얼마나 보존하는지
-  측정하는 주 지표다.
-- **Catalog coverage@100**: 전체 식당 중 candidate로 한 번 이상 등장한 비율이다.
-- **Candidate source unique contribution@100**: 특정 source만 찾아낸 relevant
-  item과 candidate 수를 기록한다.
-- **Retrieval latency p50/p95**와 query당 candidate 수를 기록한다.
+LTR 단계(R0 = C3 순서, R1 = LambdaRank): **Recall·Precision·NDCG·MAP·MRR @5/10**과
+catalog coverage, novelty, 지역 다양성 @10. R1 − R0 차이는 paired bootstrap 95%
+신뢰구간으로 보고한다.
 
-현재 primary split은 query당 held-out item이 하나이므로 Recall@K와 HitRate@K가
-같다. 둘을 중복된 headline metric으로 보고하지 않고 HitRate는 Recall의 alias로
-artifact에만 남긴다.
-
-Ranking 단계:
-
-- **NDCG@5/10**: graded relevance와 상위 순서를 함께 반영하는 주 지표다.
-- **Recall@5/10**과 **MRR@10**: relevant item 포함 여부와 첫 relevant item의
-  위치를 보여주는 보조 지표다.
-- **Catalog coverage@10**, novelty와 intra-list diversity를 guardrail로 둔다.
-- **Ranking latency p50/p95**를 기록한다.
-
-query당 relevant item이 하나인 현재 구성에서는 AP가 reciprocal rank와 같아
-MAP@10과 MRR@10도 사실상 중복된다. MAP은 impression 로그 또는 multi-positive
-evaluation이 생긴 뒤 활성화한다.
-
-같은 이유로 leave-one-out query의 NDCG는 정답 평점의 gain보다 정답이 놓인
-순위에 주로 좌우된다. 초기 relevance 1/2는 LambdaRank 학습 가중치와 query
-포함 여부에는 사용하지만, 진정한 graded ranking 성능을 주장하지 않는다.
-여러 positive가 같은 query에 존재하는 future-window 또는 impression 기반
-evaluation을 구축한 뒤 graded NDCG를 본래 의미로 해석한다.
-
-Rating RMSE는 보조 분석 지표로만 유지하고 최종 추천 모델의 주 지표로
-사용하지 않는다.
-
-Candidate와 Ranking의 주 지표는 `seen user` 전체에서 계산한다. train history
-1~2개와 3개 이상 breakdown은 희소 이력에 따른 성능 저하를 진단하는 용도로
-함께 보고한다. `new user`에는 personalized model과 동일한 기준을 강제하지 않고
-popularity/content fallback의 HitRate, coverage 및 다양성을 별도로 기록한다.
+정답이 여러 개이므로 MAP과 평점 등급을 반영한 NDCG가 본래 의미를 갖는다. 설정은
+validation window로만 고르고 test window는 마지막에 한 번 평가한다. Rating RMSE는
+최종 추천 모델의 지표로 쓰지 않는다.
 
 ### 8.3 초기 통과 기준
 
 - Candidate Recall@100 목표: 0.95 이상
-- Ranker가 candidate retrieval score 정렬보다 NDCG@10을 개선
-- seen user 전체에서 popularity baseline보다 personalized metric을 개선
-- train history 1~2개 집단에서 성능이 급락하는지 별도 확인
-- new user fallback 결과와 해당 집단의 전체 비중을 별도 보고
-- 개선 결과에 paired bootstrap confidence interval 보고
+- Ranker가 C3 후보 순서(R0)보다 NDCG@10을 개선하고, 그 차이의 95% CI가 0보다 큼
 - 성능 개선이 coverage와 diversity의 심각한 하락을 동반하지 않을 것
 - 재실행 시 동일 데이터 snapshot과 seed에서 결과 재현
 
@@ -484,15 +443,10 @@ baseline 구현 시 아래를 완료 조건으로 추가한다.
 
 ### 8.5 시간 정보의 현재 범위와 Future Work
 
-현재 시간 정보는 **평가 순서와 leakage 방지에만** 사용한다. `reviewed_at`을
-기준으로 최초 user-item interaction을 선택하고 chronological leave-last-two-out과
-global temporal audit을 구성한다. 이는 time-aware 추천 모델이 아니라 미래
-interaction이 과거 입력에 들어가지 않도록 하는 평가 규칙이다.
-
-현재 global temporal 구현에는 test cohort도 train history만 기준으로 분류하는
-제약이 있다. validation에 처음 등장한 사용자가 test에서 다시 등장해도 new로
-남을 수 있으므로, 이 audit을 정식 benchmark로 승격하기 전 test history를
-`train + validation`으로 확장하는 수정과 회귀 테스트가 필요하다.
+현재 시간 정보는 **분할과 leakage 방지에만** 사용한다. `reviewed_at`을 기준으로
+최초 user-item interaction을 선택하고 전역 날짜 cutoff로 train·validation·test를
+나눈다. 이는 time-aware 추천 모델이 아니라 미래 interaction이 과거 입력에
+들어가지 않도록 하는 평가 규칙이다.
 
 초기 C0-C3/R1 모델에는 아래 시간 feature와 알고리즘을 넣지 않는다.
 
@@ -600,7 +554,7 @@ rating_recsys/
 ├── notebooks/
 │   └── experiments only
 ├── artifacts/
-│   └── gitignored local outputs
+│   └── 로컬 산출물 (run별 report.md만 git에 포함)
 └── legacy/
     └── v1_rating_prediction/
 ```
@@ -644,20 +598,19 @@ Notebook은 `src/`의 versioned 코드를 호출하여 결과를 탐색하고 �
 ### M3. Leakage-free dataset과 baseline
 
 - [x] DB-backed user-item 최초 interaction dataset builder
-- [x] seen-user chronological leave-last-two-out builder
-- [x] global temporal benchmark와 seen/new cohort audit
+- [x] seen-user chronological leave-last-two-out builder (2026-09-27 보관)
+- [x] 전역 날짜 cutoff 분할과 window 단위 다중 정답 평가
 - [x] immutable dataset snapshot과 digest
 - [x] experiment config, seed, code/environment manifest
 - [x] feature cutoff enforcement
 - [x] popularity baseline
 - [x] full-catalog evaluation
-- [x] seen/new user report와 history-depth diagnostic
 - [x] MLflow dataset snapshot 및 metric 기록
 
 ### M4. Candidate retrieval
 
 - [x] item-item baseline
-- [ ] BPR 또는 LightGCN
+- [ ] BPR 또는 LightGCN (LightGCN 후보 실험 1회, 코드는 보관 기록 참고)
 - [ ] Two-tower
 - [ ] content embedding 생성
 - [ ] pgvector retrieval
@@ -687,13 +640,13 @@ Notebook은 `src/`의 versioned 코드를 호출하여 결과를 탐색하고 �
 
 - [ ] 공개 데이터 TIGER 재현
 - [ ] item semantic ID 생성
-- [ ] seen-user subset 실험
+- [ ] 기존 후보 모델 대비 부분 사용자 실험
 - [ ] conventional candidate model과 동일 조건 비교
 - [ ] 데이터 확대 여부 및 HSTU 검토
 
 ### M8. Time-aware recommendation (Future Work)
 
-- [ ] temporal test cohort를 train+validation history 기준으로 수정
+- [x] 전역 cutoff 평가와 validation 전용 튜닝, test 1회 평가
 - [ ] time-decay popularity와 item-item 비교
 - [ ] rolling-window evaluation과 retraining simulation
 - [ ] 날짜 parsing quality별 metric breakdown
@@ -719,9 +672,8 @@ Candidate는 `C`, ranker는 `R`로 표시한다.
 
 현재 실행은 C0~C3 후보를 각각 평가하고, R1은 C3 후보를 재정렬한다.
 
-C0-C3/R1의 성능 비교는 같은 primary seen-user split, candidate evaluation
-protocol과 ranking label 정의를 사용한다. Secondary temporal 경로는 초기에는
-cohort audit만 수행하며 M8에서 정식 benchmark로 승격한다.
+C0-C3/R1의 성능 비교는 같은 전역 날짜 cutoff 분할, candidate 평가 방식과
+ranking label 정의를 사용한다.
 
 ## 14. 주요 위험과 대응
 
@@ -730,26 +682,23 @@ cohort audit만 수행하며 M8에서 정식 benchmark로 승격한다.
 | 불완전한 날짜 | temporal leakage | `raw_date`, `scraped_at`, parsing quality 보존 |
 | crawl 중복 | 인기·평점 왜곡 | content hash, unique constraint, reconciliation test |
 | positive-only 데이터 | noisy negative | candidate negative로 시작하고 impression 로그 도입 |
-| 짧은 사용자 이력 | sequential 모델 과적합 | seen user로 통합하되 history-depth별 진단, content·popularity fallback |
+| 짧은 사용자 이력 | sequential 모델 과적합 | 같은 파이프라인으로 평가하고 content·popularity fallback 검토 |
 | 현재 catalog가 작음 | 2-stage 이점 불명확 | full-catalog ranker를 반드시 함께 비교 |
 | 사용자명 노출 | 개인정보 위험 | source key hashing 및 원본 접근 제한 |
 | embedding 변경 | 재현 불가 | model/version/content hash 기록 |
 | GenRec 연산량 | 실험 비용 증가 | 공개 데이터 재현 후 작은 모델부터 진행 |
 
-## 15. 바로 시작할 첫 구현 단위
+## 15. 다음 실험
 
-M1과 M2가 완료되었으므로 다음 구현은 M3의 평가 dataset vertical slice다.
+[2026-09-27 run 보고서](./artifacts/runs/)에서 확인한 병목 순서대로 진행한다.
 
-1. DB에서 `(user_id, restaurant_id, reviewed_at, rating)` interaction을 읽는
-   repository 함수
-2. 동일 사용자·식당을 최초 interaction으로 축약하는 dataset builder
-3. 고유 식당 3개 이상 사용자의 chronological leave-last-two-out 생성
-4. query 시점 이후 interaction과 target-derived feature를 차단하는 leakage test
-5. seen user 전체와 history 1~2개/3개 이상 breakdown을 출력하는 evaluator
-6. global cutoff에서 seen/new user 비중을 출력하는 temporal audit
-7. popularity 및 full-catalog baseline의 Recall@K와 NDCG@K 기록
-
-이 단위가 통과한 뒤 M4 candidate 모델 구현으로 확장한다.
+1. 후보 결합: C1 단독 Recall@100이 C3보다 높다. `C1+C2`(C0 제외) 결합과 quota
+   grid 확장을 validation에서 비교한다.
+2. 후보 수: `--candidate-k 200/300`을 같은 snapshot으로 비교한다.
+3. 학습 positive injection 비율(약 70%) 완화: hard negative 또는 후보 안 positive만
+   쓰는 학습과 비교한다.
+4. Seed 반복(3~5회)으로 ranker 설정 간 차이의 안정성을 확인한다.
+5. 그다음 M4의 학습형 후보 모델(BPR/LightGCN, two-tower)로 넘어간다.
 
 ## 16. 완료 정의
 

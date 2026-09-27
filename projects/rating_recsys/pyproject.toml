@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rating-recsys"
 version = "0.1.0"
-description = "DB-backed two-stage restaurant recommender"
+description = "DB-backed two-stage restaurant recommender (candidate retrieval + LambdaRank)"
 requires-python = ">=3.10"
 dependencies = [
     "psycopg[binary]>=3.2,<4",
@@ -15,12 +15,9 @@ dependencies = [
 [project.optional-dependencies]
 experiment = [
     "lightgbm>=4.5,<5",
-    "matplotlib>=3.8,<4",
     "mlflow>=3,<4",
     "numpy>=1.26,<3",
     "pandas>=2.2,<3",
-    "pyarrow>=18,<26",
-    "scipy>=1.13,<2",
     "streamlit>=1.40,<2",
 ]
 dev = [
