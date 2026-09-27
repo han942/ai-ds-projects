@@ -97,6 +97,42 @@ class BaselineCandidateGeneratorTests(unittest.TestCase):
         )
         self.assertEqual(batch_result.union, incremental_result.union)
 
+    def test_sparse_item_scores_match_direct_similarity(self) -> None:
+        second_visit = interaction(8, 10, 4, 8)
+        query = RecommendationQuery(
+            query_id="validation:u10:r20:two-history",
+            phase="validation",
+            user_id=10,
+            cutoff=self.target.event_date,
+            history=(self.history, second_visit),
+            target=self.target,
+            relevance=2,
+        )
+        result, context = BaselineCandidateGenerator(candidate_k=4).retrieve(
+            query, (*self.available, second_visit)
+        )
+        expected_scores = {}
+        for candidate in result.popularity:
+            similarities = [
+                context.similarity(item.restaurant_id, candidate.restaurant_id)
+                for item in query.history
+            ]
+            expected_scores[candidate.restaurant_id] = sum(similarities)
+            self.assertAlmostEqual(
+                candidate.source_scores["item_item"], sum(similarities)
+            )
+            self.assertAlmostEqual(
+                candidate.source_scores["item_item_max"], max(similarities)
+            )
+        expected_order = sorted(
+            (item for item in expected_scores if expected_scores[item] > 0),
+            key=lambda item: (-expected_scores[item], item),
+        )
+        self.assertEqual(
+            [candidate.restaurant_id for candidate in result.item_item],
+            expected_order,
+        )
+
     def test_is_deterministic_and_uses_restaurant_id_for_ties(self) -> None:
         generator = BaselineCandidateGenerator(candidate_k=4)
         first, _ = generator.retrieve(self.query, self.available)

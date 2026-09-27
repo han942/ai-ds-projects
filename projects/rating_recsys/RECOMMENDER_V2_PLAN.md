@@ -30,9 +30,11 @@ DeepCoNN 계열 모델을 분석한 프로젝트였다. v2는 평점 회귀 실�
 - Graph DB를 도입하는 것 자체를 프로젝트 목표로 삼는 것
 - 별도의 학습형 pre-ranker 또는 re-ranker를 추가하여 3단계 이상으로 확장하는 것
 
-## 2. 현재 데이터 진단
+## 2. 초기 데이터 진단 (2026-09-19)
 
-현재 보유 CSV를 프로파일링한 결과는 다음과 같다.
+아래 수치는 계획 작성 당시 보유 CSV의 프로파일이다. 2026-09-27 DB 기준
+규모와 출처 변화는 [데이터 스냅샷 비교](./analysis/data_snapshot_2026-09-27.md)에 있다.
+이 절의 수치를 현재 모델 성능이나 데이터 규모로 사용하지 않는다.
 
 | 항목 | 값 |
 |---|---:|
@@ -72,7 +74,7 @@ v2는 사용자의 과거 리뷰와 식당이 기존에 받은 리뷰를 이용�
 
 사용자별 랜덤 분할은 미래 interaction이 과거 feature에 섞일 수 있으므로
 사용하지 않는다. 반면 전역 시간 분할만 사용하면 test에 처음 등장하는
-사용자가 많아 personalized model 평가가 cold-start 성능과 뒤섞인다. 현재
+사용자가 많아 personalized model 평가가 cold-start 성능과 뒤섞인다. 당시
 snapshot의 전역 80/10/10 시간 분할에서는 test 사용자 1,269명 중 593명
 (46.7%)이 train에 존재하지 않았다.
 
@@ -137,7 +139,8 @@ Stage 2. Learning-to-rank
 Recommendation / impression log
 ```
 
-현재 catalog는 약 748개이므로 전체 catalog scoring도 충분히 빠르다. 2-stage
+초기 계획 당시 catalog는 748곳이었다. 2026-09-27 DB 조회에서는 4,587곳이므로
+전체 catalog scoring의 처리 시간은 새 데이터로 재측정해야 한다. 2-stage
 구조는 당장의 latency 최적화보다는 향후 확장과 단계별 성능 분석을 위해
 도입한다. Candidate 모델은 성능을 자동으로 높이지 않으며, candidate recall이
 최종 ranker 성능의 상한이 된다.
@@ -278,8 +281,9 @@ Stage 1 평가는 C0, C1, C2, C3를 각각 남겨 source별 기여와 fusion 효
 분리한다. C3에서 선택한 후보를 평가·저장하고, 동일한 후보를 R1에 전달한다.
 
 BPR/ALS, LightGCN, two-tower와 content retrieval은 위의 비학습·근접 이웃
-baseline이 정상 동작한 뒤 비교한다. 현재 catalog가 약 748개이므로 C0은
-full-catalog로도 계산하여 2-stage 후보 절단으로 잃는 성능을 확인한다.
+baseline이 정상 동작한 뒤 비교한다. 초기 계획 당시 catalog는 748곳이었고
+2026-09-27에는 4,587곳이다. C0의 full-catalog 비교는 현재 규모의 처리
+시간과 함께 평가한다.
 
 ### 6.2 Personalized retrieval
 

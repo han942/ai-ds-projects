@@ -18,7 +18,7 @@
 | R1 | LightGBM LambdaRank | Learned ranker | LTR의 순수 재정렬 효과 |
 
 `C`는 Stage 1 candidate 컴포넌트, `R`은 Stage 2 ranker를 뜻한다.
-현재 catalog가 약 748개이므로 C0은 전체 catalog를 직접 정렬한다. 2-stage 구조는
+2026-09-27 DB 조회의 catalog는 4,587곳이며 C0은 cutoff 이전에 관측된 식당을 정렬한다. 2-stage 구조는
 당장의 latency 최적화보다는 향후 BPR, two-tower, vector 및 generative retrieval을
 같은 ranker 아래에서 비교하기 위한 실험 골격이다.
 
@@ -71,16 +71,19 @@ interaction은 포함하지 않는다. Batch context와 incremental context 및 
 조회한 최초 user-item interaction이다. Target review text와 taste/price/service는
 입력하지 않는다.
 
-현재 Supabase snapshot 기준:
+2026-09-27 Supabase DB 조회 기준 (전국 크롤링 미완료 중간 스냅샷 포함):
 
 | 항목 | 값 |
 |---|---:|
-| 최초 user-item interaction | 23,017 |
-| 식당 | 약 748 |
-| Primary seen user | 2,396 |
-| Train / validation / test | 12,504 / 2,396 / 2,396 |
-| Train history 1–2개 사용자 | 1,049 |
-| Train history 3개 이상 사용자 | 1,347 |
+| 원본 리뷰 | 96,922 |
+| 최초 user-item interaction | 88,554 |
+| 사용자 / 식당 | 14,008 / 4,587 |
+| Primary seen user | 5,934 |
+| Train / validation / test | 66,669 / 5,934 / 5,934 |
+| Train history 1–2개 사용자 | 1,819 |
+| Train history 3개 이상 사용자 | 4,115 |
+
+이전 23,017건 스냅샷의 실험 결과는 현재 데이터 성능으로 해석하지 않는다.
 
 Primary split은 고유 식당 3개 이상 사용자의 마지막 interaction을 test, 마지막에서
 두 번째를 validation, 나머지를 train으로 둔다. 각 query에서 이미 방문한 식당과
@@ -296,11 +299,15 @@ conda create --prefix ./.venv python=3.10 pip libgomp -y
 conda activate ./.venv
 pip install -e '.[experiment,dev]'
 
-rating-recsys-experiment
+python -m rating_recsys.experiments.large_cli
 rating-recsys-dashboard
 ```
 
-MLflow UI는 별도 터미널에서 실행한다.
+대용량 경로는 학습 특징 행을 디스크에 저장하고 완료 후 임시 캐시를 정리한다.
+모델 입력과 평가 함수는 같으며, MLflow와 화면 표시용 리뷰 본문은 생략한다.
+[2026-09-27 재측정 결과](./analysis/baseline_2026-09-27.md)를 참고한다.
+작은 스냅샷에서 MLflow 추적이 필요하면 `rating-recsys-experiment`를 사용한다.
+그 경우 MLflow UI는 별도 터미널에서 실행한다.
 
 ```bash
 mlflow ui \
@@ -309,7 +316,7 @@ mlflow ui \
   --port 5000
 ```
 
-### MLflow 관측 구조
+### MLflow 관측 구조 (작은 스냅샷 경로)
 
 각 실행은 하나의 parent run과 다섯 개의 component child run으로 기록한다.
 

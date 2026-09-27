@@ -37,6 +37,7 @@ class RetrievalContext:
     item_names: dict[int, str]
     item_frequencies: dict[int, int]
     cooccurrence: dict[tuple[int, int], int]
+    neighbors: dict[int, dict[int, int]]
 
     def average_rating(self, restaurant_id: int) -> float:
         count = self.item_counts.get(restaurant_id, 0)
@@ -68,6 +69,7 @@ class IncrementalRetrievalContext:
             item_names={},
             item_frequencies={},
             cooccurrence={},
+            neighbors={},
         )
         self._items_by_user: defaultdict[int, set[int]] = defaultdict(set)
 
@@ -96,7 +98,10 @@ class IncrementalRetrievalContext:
                 if restaurant_id < other_id
                 else (other_id, restaurant_id)
             )
-            context.cooccurrence[pair] = context.cooccurrence.get(pair, 0) + 1
+            count = context.cooccurrence.get(pair, 0) + 1
+            context.cooccurrence[pair] = count
+            context.neighbors.setdefault(restaurant_id, {})[other_id] = count
+            context.neighbors.setdefault(other_id, {})[restaurant_id] = count
         user_items.add(restaurant_id)
         context.item_frequencies[restaurant_id] = (
             context.item_frequencies.get(restaurant_id, 0) + 1
@@ -126,6 +131,11 @@ def build_context(interactions: Iterable[Interaction]) -> RetrievalContext:
             for right in ordered[left_index + 1 :]:
                 cooccurrence[(left, right)] += 1
 
+    neighbors: dict[int, dict[int, int]] = {}
+    for (left, right), count in cooccurrence.items():
+        neighbors.setdefault(left, {})[right] = count
+        neighbors.setdefault(right, {})[left] = count
+
     return RetrievalContext(
         item_counts=dict(item_counts),
         item_rating_sum=dict(item_rating_sum),
@@ -133,6 +143,7 @@ def build_context(interactions: Iterable[Interaction]) -> RetrievalContext:
         item_names=item_names,
         item_frequencies=dict(item_frequencies),
         cooccurrence=dict(cooccurrence),
+        neighbors=neighbors,
     )
 
 
@@ -173,13 +184,24 @@ class BaselineCandidateGenerator:
         }
         item_sum_scores: dict[int, float] = {}
         item_max_scores: dict[int, float] = {}
-        for restaurant_id in eligible:
-            similarities = [
-                context.similarity(history_item.restaurant_id, restaurant_id)
-                for history_item in query.history
-            ]
-            item_sum_scores[restaurant_id] = sum(similarities)
-            item_max_scores[restaurant_id] = max(similarities, default=0.0)
+        for history_item in query.history:
+            history_id = history_item.restaurant_id
+            history_frequency = context.item_frequencies.get(history_id, 0)
+            if not history_frequency:
+                continue
+            for restaurant_id, co_count in context.neighbors.get(history_id, {}).items():
+                if restaurant_id in seen or restaurant_id not in context.item_counts:
+                    continue
+                item_frequency = context.item_frequencies.get(restaurant_id, 0)
+                if not item_frequency:
+                    continue
+                similarity = co_count / math.sqrt(history_frequency * item_frequency)
+                item_sum_scores[restaurant_id] = (
+                    item_sum_scores.get(restaurant_id, 0.0) + similarity
+                )
+                item_max_scores[restaurant_id] = max(
+                    item_max_scores.get(restaurant_id, 0.0), similarity
+                )
 
         region_popularity_scores: dict[int, float] = {}
         if self.include_region and query.history:

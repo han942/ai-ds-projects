@@ -6,12 +6,13 @@
 - 전체 계획: [RECOMMENDER_V2_PLAN.md](./RECOMMENDER_V2_PLAN.md)
 - Baseline 모델: [BASELINE_MODEL.md](./BASELINE_MODEL.md)
 - 이전 버전: [legacy/v1_rating_prediction/](./legacy/v1_rating_prediction/)
+- 분석 결과 보존·삭제 기준: [analysis/README.md](./analysis/README.md)
 
 현재 Supabase PostgreSQL ingestion, DB-backed modeling dataset과 실행 가능한
 2-stage baseline 골격이 구현되어 있다. 동일 split에서 global
 candidate component C0(popularity)~C3(RRF union)와 ranker R1(LambdaRank)을
-비교하고 immutable snapshot, MLflow와 Streamlit artifact를
-생성한다. 날짜는 초기 모델 feature로 사용하지 않고 chronological split과
+비교하고 immutable snapshot과 로컬 artifact를 생성한다. 작은 스냅샷은
+MLflow에도 기록할 수 있다. 날짜는 초기 모델 feature로 사용하지 않고 chronological split과
 leakage 방지에만 사용하며, time-aware recommendation은 후속 연구로 둔다.
 기존의 노트북, 수집 데이터, 모델 checkpoint 및 예측 결과는 삭제하지 않고
 legacy 폴더에 그대로 보존하였다.
@@ -20,15 +21,24 @@ legacy 폴더에 그대로 보존하였다.
 
 실험 dependency를 설치한 뒤 Supabase snapshot에서 C0 popularity, C1 item-item,
 C2 region popularity, C3 quota RRF와 R1 LightGBM LambdaRank를 한 번에 실행한다.
-C2를 포함한 C3에서 후보를 선택하고, R1이 그 후보를 재정렬한다.
+C2를 포함한 C3에서 후보를 선택하고, R1이 그 후보를 재정렬한다. 현재처럼
+데이터가 큰 경우 학습 행을 디스크에 저장하는 경로를 사용한다.
 
 ```bash
 pip install -e '.[experiment,dev]'
-rating-recsys-experiment
+python -m rating_recsys.experiments.large_cli
 ```
 
-실행 결과는 `artifacts/runs/<run_id>/`에 저장된다. MLflow에는 대용량 candidate와
-ranking Parquet 전체를 복제하지 않고 핵심 artifact, dataset lineage, 단계별 metric,
+고정된 데이터로 재실행하려면 `--snapshot artifacts/runs/<run_id>/dataset.jsonl`을
+붙인다. 결과는 `artifacts/runs/<run_id>/`에 저장된다. 이 대용량 경로는
+평가에 사용하지 않는 리뷰 본문 조회와 MLflow 기록을 생략한다. 같은 split,
+후보 K, feature, LambdaRank 설정과 평가 함수를 사용한다.
+[2026-09-27 현재 데이터 기준선 결과](./analysis/baseline_2026-09-27.md)에
+스냅샷 ID, 단계별 지표와 해석 범위를 기록했다.
+
+작은 스냅샷에서 MLflow 추적과 리뷰 본문 표시 artifact가 필요한 경우
+`rating-recsys-experiment`를 실행한다. MLflow에는 대용량 candidate와 ranking
+Parquet 전체를 복제하지 않고 핵심 artifact, dataset lineage, 단계별 metric,
 추천 결과 table과 pipeline trace를 기록한다.
 
 MLflow UI는 별도 터미널에서 실행한다.
@@ -185,15 +195,20 @@ rating-recsys-dataset \
   --validation-fraction 0.1
 ```
 
-현재 DB snapshot의 기본 결과는 다음과 같다.
+2026-09-27 DB 조회 기준 데이터 규모는 다음과 같다. 전국 크롤링은 미완료
+중간 스냅샷이며, 아래 수치는 모델 성능이 아니라 입력 데이터와 split의 크기다.
+이전 23,017건 스냅샷의 실험 지표를 현재 데이터 성능으로 사용하지 않는다.
+출처별 변화와 비교 기준은 [데이터 스냅샷 기록](./analysis/data_snapshot_2026-09-27.md)에 있다.
 
 | 항목 | 값 |
 |---|---:|
-| 최초 user-item interaction | 23,017 |
-| Primary seen user | 2,396 |
-| Primary train / validation / test | 12,504 / 2,396 / 2,396 |
-| train history 1~2개 사용자 | 1,049 |
-| train history 3개 이상 사용자 | 1,347 |
+| 원본 리뷰 (기존 / 전국 수집) | 96,922 (23,207 / 73,715) |
+| 최초 user-item interaction | 88,554 |
+| 사용자 / 식당 | 14,008 / 4,587 |
+| Primary seen user (고유 식당 3개 이상) | 5,934 |
+| Primary train / validation / test | 66,669 / 5,934 / 5,934 |
+| train history 1~2개 사용자 | 1,819 |
+| train history 3개 이상 사용자 | 4,115 |
 
 ### 주요 파일
 
