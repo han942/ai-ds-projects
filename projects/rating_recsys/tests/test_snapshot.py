@@ -13,8 +13,12 @@ from rating_recsys.experiments.snapshot import (
     dataset_digest,
     freeze_snapshot,
     load_snapshot,
+    load_review_texts,
+    write_review_texts,
     write_snapshot,
 )
+
+from support import synthetic_interactions
 
 
 def interaction(review_id: int, user: int, restaurant: int) -> Interaction:
@@ -74,6 +78,21 @@ class FrozenSnapshotTests(unittest.TestCase):
             self.assertEqual(sorted(load_snapshot(first_path), key=lambda i: i.review_id),
                              sorted(rows, key=lambda i: i.review_id))
             self.assertEqual([path.name for path in root.iterdir()], [first_path.name])
+
+
+class ReviewTextFileTests(unittest.TestCase):
+    def test_round_trip_and_coverage_check(self) -> None:
+        rows = synthetic_interactions()[:5]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "s.reviews.jsonl"
+            meta = write_review_texts({3: "c", 1: None, 2: "b", 4: "", 5: "e"}, path)
+            self.assertEqual([json.loads(l)["review_id"] for l in path.read_text().splitlines()], [1, 2, 3, 4, 5])
+            texts, loaded = load_review_texts(path, rows)
+            self.assertEqual(texts[3], "c")
+            self.assertEqual(loaded["artifact_sha256"], meta["artifact_sha256"])
+            self.assertEqual(meta["non_empty"], 3)
+            with self.assertRaisesRegex(ValueError, "no text row"):
+                load_review_texts(path, synthetic_interactions()[:6])
 
 
 if __name__ == "__main__":

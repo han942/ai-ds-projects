@@ -1,7 +1,8 @@
 # analysis/
 
 실험 코드가 아닌 기록을 모아 둔다. 현재 모델의 결과는 여기 있지 않고 각 run의
-보고서(`artifacts/runs/<run_id>/report.md`)에 있다.
+보고서(`artifacts/runs/<run_id>/report.md`, 후보 비교는
+`artifacts/comparisons/<model>/<run_id>/report.md`)에 있다.
 
 ```text
 analysis/
@@ -20,6 +21,7 @@ analysis/
 | 내용 | 위치 |
 |---|---|
 | 모델 실험 결과 (현재 평가 방식) | `artifacts/runs/<run_id>/report.md`. 자동 생성되고, 6절 해석만 직접 채운다 |
+| 후보 모델 비교 (LightGCN, DeepCoNN) | `artifacts/comparisons/<model>/<run_id>/report.md`. 7절 해석만 직접 채운다 |
 | 데이터 수집·품질·규모 점검 | `analysis/data/<YYYY-MM-DD>_<주제>.md` |
 | 더 이상 쓰지 않는 평가 방식의 기록 | `analysis/archive/<방식>/` |
 

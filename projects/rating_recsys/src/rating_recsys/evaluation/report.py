@@ -11,11 +11,14 @@ from pathlib import Path
 from rating_recsys.experiments.artifacts import read_json
 
 
+STAGE1 = "c5_c1_lightgcn_rrf"
 CANDIDATE_LABELS = (
-    ("c0_popularity", "C0 전체 인기"),
+    (STAGE1, "**C5 C1+LightGCN RRF (Stage 1)**"),
     ("c1_item_item", "C1 item-item"),
-    ("c2_region_popularity", "C2 지역 인기"),
-    ("c3_rrf_union", "C3 quota RRF"),
+    ("c4_lightgcn", "C4 LightGCN"),
+    ("c0_popularity", "참고 · C0 전체 인기"),
+    ("c2_region_popularity", "참고 · C2 지역 인기"),
+    ("c3_rrf_union", "참고 · C3 quota RRF (이전 기준선)"),
 )
 KEY_CONDITIONS = (
     "candidate_k",
@@ -47,11 +50,12 @@ def render_report(manifest: dict, metrics: dict) -> str:
     test = metrics["test"]
     selection = metrics["selection"]
     boot = test.get("bootstrap_r1_minus_r0") or {}
+    stage1_boot = (test.get("bootstrap_c5_minus_c3") or {}).get(f"recall_at_{ck}")
     snapshot = manifest["snapshot"]
     code = manifest["code"]
     r0, r1 = test["r0_candidate_order"], test["r1_lambdarank"]
-    chosen_quota = selection["chosen_candidate_policy"]["base_quota_fraction"]
     final = selection["final_ranker_params"]
+    graph = metrics["lightgcn"]["config"]
 
     lines = [
         f"# 실험 보고서 · {manifest['run_id']}",
@@ -67,21 +71,25 @@ def render_report(manifest: dict, metrics: dict) -> str:
         "",
         "## 1. 요약",
         "",
-        f"- 후보 생성: C3 Recall@{ck} {_pct(test['c3_rrf_union'][f'recall_at_{ck}'])}"
-        f" (C1 단독 {_pct(test['c1_item_item'][f'recall_at_{ck}'])})",
+        f"- 후보 생성: C5 Recall@{ck} {_pct(test[STAGE1][f'recall_at_{ck}'])}"
+        f" (C1 단독 {_pct(test['c1_item_item'][f'recall_at_{ck}'])}, "
+        f"C4 LightGCN 단독 {_pct(test['c4_lightgcn'][f'recall_at_{ck}'])}; "
+        f"참고 C3 {_pct(test['c3_rrf_union'][f'recall_at_{ck}'])}, C5 − C3 "
+        f"{_ci(stage1_boot, percent=True)})",
         f"- LTR: NDCG@{k} {_num(r0[f'ndcg_at_{k}'])} → {_num(r1[f'ndcg_at_{k}'])} "
         f"({_ci(boot.get(f'ndcg_at_{k}'), percent=False)}), Recall@{k} "
         f"{_pct(r0[f'recall_at_{k}'])} → {_pct(r1[f'recall_at_{k}'])} "
         f"({_ci(boot.get(f'recall_at_{k}'), percent=True)})",
-        f"- Validation 선택: C3 quota {chosen_quota}, LambdaRank "
-        f"num_leaves {final['num_leaves']} · min_child_samples "
-        f"{final['min_child_samples']} · trees {final['n_estimators']}",
+        f"- Validation 선택: LambdaRank num_leaves {final['num_leaves']} · "
+        f"min_child_samples {final['min_child_samples']} · trees {final['n_estimators']}. "
+        f"LightGCN은 고정 설정({graph['layers']}층 · {graph['dimension']}차원 · "
+        f"L2 {graph['regularization']:g} · {graph['epochs']} epoch)",
         "",
         "## 2. 데이터와 조건",
         "",
     ]
     lines += _data_lines(manifest, metrics)
-    lines += ["", "## 3. Validation에서 고른 설정", ""]
+    lines += ["", "## 3. 설정 선택", ""]
     lines += _selection_lines(manifest, metrics)
     lines += [
         "",
@@ -91,11 +99,19 @@ def render_report(manifest: dict, metrics: dict) -> str:
         "",
     ]
     lines.append(_candidate_table(test))
+    if stage1_boot:
+        lines += [
+            "",
+            f"C5 − C3 Recall@{ck}: {_ci(stage1_boot, percent=True)} (paired bootstrap, "
+            f"C5가 나은 사용자 {stage1_boot['wins']:,}명, 나쁜 사용자 "
+            f"{stage1_boot['losses']:,}명). C0·C2·C3는 Stage 1에 결합하지 않고 비교용으로만 "
+            "남긴다. C0 순위와 C2 지역 비율은 ranker feature로 쓴다.",
+        ]
     lines += [
         "",
         f"## 5. LTR 재정렬 (test, Top-{k})",
         "",
-        "R0는 C3 후보 순서를 그대로 자른 목록, R1은 LambdaRank로 재정렬한 목록이다. "
+        "R0는 C5 후보 순서를 그대로 자른 목록, R1은 LambdaRank로 재정렬한 목록이다. "
         f"CI는 같은 사용자끼리 짝지은 paired bootstrap {boot.get('samples', 0):,}회.",
         "",
     ]
@@ -180,21 +196,42 @@ def _selection_lines(manifest: dict, metrics: dict) -> list[str]:
     k = int(config["ranking_k"])
     ck = int(config["candidate_k"])
     selection = metrics["selection"]
-    chosen_quota = selection["chosen_candidate_policy"]["base_quota_fraction"]
     chosen_ranker = selection["chosen_ranker"]
     validation = metrics["validation"]
+    graph = metrics["lightgcn"]
+    settings = graph["config"]
+    windows = graph["window_models"]
+    checkpoints = graph["training_checkpoints"]
+    training = metrics["training"]
+    scored = sum(int(part["lightgcn_scored_queries"]) for part in training.values())
+    queries = sum(int(part["queries"]) for part in training.values())
+    fitted = [row for row in checkpoints if "fit_seconds" in row]
+    groups = sum(int(part["usable_groups"]) for part in training.values())
+    relevant = sum(int(part["relevant_queries"]) for part in training.values())
+    injected = sum(int(part.get("injected_positive_queries", 0)) for part in training.values())
+    group_line = (
+        f"Ranker 학습 group은 정답이 그 query의 C5 후보 {ck}개 안에 있는 query만 쓴다"
+        f"(정답을 후보에 끼워 넣지 않음): 정답 있는 학습 query {relevant:,}개 중 "
+        f"{groups:,}개 ({_pct(groups / relevant if relevant else 0)})."
+        if not injected
+        else f"Ranker 학습 query 중 정답이 후보 밖에 있던 {injected:,}개는 정답을 끼워 넣었다"
+        " (2026-09-30 이전 run 방식)."
+    )
     return [
-        f"후보 quota: C3에서 C0+C1 순서로 먼저 채우는 후보 비율. 기준은 "
-        f"{selection['rule']['candidate_policy']}.",
+        f"C4 LightGCN: {settings['layers']}층 · {settings['dimension']}차원 · L2 "
+        f"{settings['regularization']:g} · learning rate {settings['learning_rate']:g} · "
+        f"batch {settings['batch_size']} · {settings['epochs']} epoch (config 고정값, 이 run에서 "
+        "고르지 않음). Validation window 모델은 train "
+        f"{windows['validation']['edges']:,} edges, test window 모델은 train + validation "
+        f"{windows['test']['edges']:,} edges로 학습했다.",
         "",
-        _table(
-            ["quota", f"Val C3 Recall@{ck}"],
-            [
-                [_bold(row["base_quota_fraction"], row["base_quota_fraction"] == chosen_quota),
-                 _pct(row[f"recall_at_{ck}"])]
-                for row in selection["candidate_policy_grid"]
-            ],
-        ),
+        f"Ranker 학습 query는 {graph['checkpoint_months']}개월 단위 구간 시작일 이전 "
+        f"interaction으로 다시 학습한 LightGCN을 쓴다. 모델 {len(fitted)}개 "
+        f"(학습 {sum(float(row['fit_seconds']) for row in fitted):.0f}s), LightGCN 후보가 "
+        f"있었던 학습 query {scored:,}/{queries:,} ({_pct(scored / queries if queries else 0)}). "
+        "나머지는 그 시점 그래프에 없던 사용자라 C1 순서만 쓴다.",
+        "",
+        group_line,
         "",
         f"LambdaRank: 기준은 {selection['rule']['ranker']}. `{_reference_name(selection)}`은 "
         "early stopping 없이 고정 설정으로 학습한 비교 기준이다.",
@@ -215,14 +252,14 @@ def _selection_lines(manifest: dict, metrics: dict) -> list[str]:
             ["---", "---:", "---:", "---:", "---:", "---:"],
         ),
         "",
-        f"최종 모델: {selection['rule']['final_refit']}. Validation에서 선택한 구성의 "
-        f"C3 Recall@{ck} {_pct(validation['c3_rrf_union'][f'recall_at_{ck}'])}, "
-        f"R1 NDCG@{k} {_num(validation['r1_lambdarank'][f'ndcg_at_{k}'])}.",
+        f"최종 모델: {selection['rule']['final_refit']}. Validation에서 C5 Recall@{ck} "
+        f"{_pct(validation[STAGE1][f'recall_at_{ck}'])}, R1 NDCG@{k} "
+        f"{_num(validation['r1_lambdarank'][f'ndcg_at_{k}'])}.",
     ]
 
 
 def _candidate_table(test: dict) -> str:
-    cutoffs = _cutoffs(test["c3_rrf_union"])
+    cutoffs = _cutoffs(test[STAGE1])
     return _table(
         ["후보"] + [f"Recall@{c}" for c in cutoffs],
         [
@@ -259,7 +296,7 @@ def _ltr_lines(test: dict, k: int, boot: dict) -> list[str]:
         if key in r1:
             rows.append([f"{label}@{k}", formatter(r0[key]), formatter(r1[key]), "–"])
     lines = [
-        _table(["지표", "R0 C3 순서", "R1 LambdaRank", "R1 − R0 (95% CI)"], rows,
+        _table(["지표", "R0 C5 순서", "R1 LambdaRank", "R1 − R0 (95% CI)"], rows,
                ["---", "---:", "---:", "---"])
     ]
     ndcg = boot.get(f"ndcg_at_{k}")
@@ -347,7 +384,14 @@ FLAG_NAMES = {
     "relevance_low_threshold": "--relevance-low",
     "train_fraction": "--train-fraction",
     "validation_fraction": "--validation-fraction",
-    "quota_grid": "--quota-grid",
+    "legacy_c3_quota": "--legacy-c3-quota",
+    "lightgcn_layers": "--lightgcn-layers",
+    "lightgcn_dimension": "--lightgcn-dimension",
+    "lightgcn_epochs": "--lightgcn-epochs",
+    "lightgcn_regularization": "--lightgcn-regularization",
+    "lightgcn_learning_rate": "--lightgcn-learning-rate",
+    "lightgcn_batch_size": "--lightgcn-batch-size",
+    "lightgcn_checkpoint_months": "--lightgcn-checkpoint-months",
     "num_leaves_grid": "--num-leaves-grid",
     "min_child_samples_grid": "--min-child-samples-grid",
     "learning_rate": "--learning-rate",

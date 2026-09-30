@@ -1,6 +1,6 @@
 # Rating Recommender System v2 확장 계획
 
-> 상태: M1·M2·M3 완료, M4·M5 초기 C0-C3/R1 baseline 구현 완료. 2026-09-27부터 평가는 전역 날짜 cutoff 방식 하나로 통일
+> 상태: M1·M2·M3 완료. M4 Stage 1 기준선을 2026-09-30에 C3(quota RRF)에서 C5(C1 + LightGCN RRF)로 교체하고, ranker 학습의 정답 끼워넣기를 제거했다. DeepCoNN 후보 실험은 C5보다 낮아 채택하지 않았다. 2026-09-27부터 평가는 전역 날짜 cutoff 방식 하나로 통일
 > 방향: DB-backed data pipeline → Stage 1 candidate retrieval → Stage 2 learning-to-rank  
 > 비용 원칙: 로컬·오픈소스 우선, 관리형 서비스와 유료 API는 기본 구성에서 제외
 
@@ -67,8 +67,9 @@ v1의 DeepCoNN은 작성된 리뷰 텍스트와 `taste`, `price`, `service` 평�
 v2는 사용자의 과거 리뷰와 식당이 기존에 받은 리뷰를 이용하여 아직 평가하지
 않은 식당의 순위를 계산하는 pre-interaction 추천 task다. 평가 대상 사용자와
 식당 조합의 target 리뷰 및 그 리뷰에 딸린 세부 평가는 입력에서 제외하고
-정답 label로만 사용한다. 기존 DeepCoNN도 이 조건에 맞게 user/item document를
-다시 구성하여 Stage 1 baseline으로 비교할 수 있다.
+정답 label로만 사용한다. DeepCoNN은 이 조건에 맞게 user/item document를
+cutoff 이전 리뷰로만 다시 구성하여 Stage 1 후보(C6)로 비교한다
+(`rating-recsys-compare deepconn`).
 
 #### 2.2 희소한 사용자 이력과 데이터 분할
 
@@ -266,21 +267,25 @@ CSV는 raw archive 및 초기 bootstrap 입력으로만 사용한다. DB 적재 
   데이터에서 학습 없이 개인화를 검증하기에 적합한 collaborative source다.
 - **C2 region popularity**: 사용자의 과거 방문 지역 분포와 지역별 식당
   popularity를 이용해 지역 선호 후보를 만든다.
-- **C3 quota RRF union**: C0·C1·C2의 raw score를 직접 더하지 않고 source rank
-  기반 RRF로 결합한다. 기존 C0+C1 상위 후보를 일정 수 보존한 뒤 C2를 포함한
-  확장 후보로 나머지를 채우며, 각 source score·rank·기여 여부를 보존한다.
+- **C3 quota RRF union** (2026-09-27까지 Stage 1, 지금은 참고 기록): C0·C1·C2의
+  source rank를 RRF로 결합한다. C0+C1 상위 후보를 일정 수 보존한 뒤 C2를 포함한
+  확장 후보로 나머지를 채운다.
+- **C4 LightGCN**: 사용자–식당 이분 그래프의 학습형 collaborative source.
+- **C5 C1 + C4 RRF** (현재 Stage 1): C1과 C4의 Top-100을 quota 없이 RRF로 결합한다.
 
-Stage 1 평가는 C0, C1, C2, C3를 각각 남겨 source별 기여와 fusion 효과를
-분리한다. C3에서 선택한 후보를 평가·저장하고, 동일한 후보를 R1에 전달한다.
+2026-09-28 LightGCN 비교에서 LightGCN 단독과 C0/C1/C2 결합 조합 중 C1+C4가
+validation Recall@100이 가장 높았고, test에서도 C3보다 +3.50%p
+[+2.30, +4.70] 높았다. C0·C2를 결합에 넣으면 오히려 낮아졌다. 그래서 C0·C2·C3는
+결합하지 않고 비교용 표와 ranker feature로만 남긴다.
 
-BPR/ALS, LightGCN, two-tower와 content retrieval은 위의 비학습·근접 이웃
-baseline이 정상 동작한 뒤 비교한다. 초기 계획 당시 catalog는 748곳이었고
-2026-09-27에는 4,587곳이다. C0의 full-catalog 비교는 현재 규모의 처리
-시간과 함께 평가한다.
+Stage 1 평가는 C0~C5를 각각 남겨 source별 기여와 fusion 효과를 분리한다. C5
+후보를 평가·저장하고, 동일한 후보를 R1에 전달한다. 초기 계획 당시 catalog는
+748곳이었고 2026-09-27에는 4,587곳이다.
 
 ### 6.2 Personalized retrieval
 
-- LightGCN
+- LightGCN (C4, 구현 완료)
+- DeepCoNN 리뷰 텍스트 CNN (C6, 후보 실험)
 - Two-tower user/item encoder
 - in-batch negative와 hard negative 비교
 - 전체 catalog exact retrieval과 ANN 결과 비교
@@ -331,7 +336,7 @@ candidate_model_version
 사용한다.
 
 **R0**는 candidate source 또는 fusion 순서를 그대로 사용하는 identity ranker다.
-초기 learned ranker인 **R1**은 C3에서 선택한 후보를 입력으로 받아 source
+초기 learned ranker인 **R1**은 Stage 1(현재 C5) 후보를 입력으로 받아 source
 score와 rank, cutoff 이전 popularity, item-item similarity, 사용자 history 길이
 같은 표형 feature로 재정렬한다. 이는 복잡한 neural ranker를 도입하기 전에
 candidate 개선과 ranking 개선을 분리해 측정할 수 있고, feature importance를
@@ -388,10 +393,10 @@ review-only 데이터에서 사용하는 초기 graded relevance는 다음과 �
 
 ### 8.2 평가 지표
 
-후보 생성 단계(C0~C3): **Recall@20/50/100**. C3 Recall@100이 Stage 2가 도달할 수
+후보 생성 단계(C0~C6): **Recall@20/50/100**. Stage 1(C5) Recall@100이 Stage 2가 도달할 수
 있는 상한이다.
 
-LTR 단계(R0 = C3 순서, R1 = LambdaRank): **Recall·Precision·NDCG·MAP·MRR @5/10**과
+LTR 단계(R0 = Stage 1 순서, R1 = LambdaRank): **Recall·Precision·NDCG·MAP·MRR @5/10**과
 catalog coverage, novelty, 지역 다양성 @10. R1 − R0 차이는 paired bootstrap 95%
 신뢰구간으로 보고한다.
 
@@ -402,7 +407,8 @@ validation window로만 고르고 test window는 마지막에 한 번 평가한�
 ### 8.3 초기 통과 기준
 
 - Candidate Recall@100 목표: 0.95 이상
-- Ranker가 C3 후보 순서(R0)보다 NDCG@10을 개선하고, 그 차이의 95% CI가 0보다 큼
+- Ranker가 Stage 1 후보 순서(R0)보다 NDCG@10을 개선하고, 그 차이의 95% CI가 0보다 큼
+  (C3 후보에서는 통과, C5 후보에서는 2026-09-30 run 기준 미통과)
 - 성능 개선이 coverage와 diversity의 심각한 하락을 동반하지 않을 것
 - 재실행 시 동일 데이터 snapshot과 seed에서 결과 재현
 
@@ -448,7 +454,7 @@ baseline 구현 시 아래를 완료 조건으로 추가한다.
 나눈다. 이는 time-aware 추천 모델이 아니라 미래 interaction이 과거 입력에
 들어가지 않도록 하는 평가 규칙이다.
 
-초기 C0-C3/R1 모델에는 아래 시간 feature와 알고리즘을 넣지 않는다.
+현재 C0~C5/R1 모델에는 아래 시간 feature와 알고리즘을 넣지 않는다.
 
 - 최근 interaction에 더 큰 가중치를 주는 recency feature
 - time-decay 또는 trend-aware popularity
@@ -610,7 +616,8 @@ Notebook은 `src/`의 versioned 코드를 호출하여 결과를 탐색하고 �
 ### M4. Candidate retrieval
 
 - [x] item-item baseline
-- [ ] BPR 또는 LightGCN (LightGCN 후보 실험 1회, 코드는 보관 기록 참고)
+- [x] LightGCN 후보 실험과 Stage 1 교체 (C5 = C1 + LightGCN RRF)
+- [x] DeepCoNN 리뷰 텍스트 후보 실험
 - [ ] Two-tower
 - [ ] content embedding 생성
 - [ ] pgvector retrieval
@@ -662,18 +669,23 @@ Candidate는 `C`, ranker는 `R`로 표시한다.
 | C0 | global popularity/full catalog | Candidate | 비개인화 최소 baseline |
 | C1 | item-item co-occurrence | Candidate | 근접 이웃 개인화 기준 |
 | C2 | region popularity | Candidate | 지역 선호 source의 단독 기여 측정 |
-| C3 | C0+C1+C2 quota RRF union | Candidate fusion | 확장 candidate recall 측정 |
-| C4 | BPR/LightGCN | Candidate | 학습형 collaborative retrieval 비교 |
-| C5 | Two-tower | Candidate | dense retrieval 기준 |
-| C6 | content vector | Candidate | 리뷰·메뉴 정보 기여 측정 |
-| C7 | TIGER-style GenRec | Candidate | generative retrieval 기여 측정 |
+| C3 | C0+C1+C2 quota RRF union | Candidate fusion | 이전 Stage 1 (참고 기록) |
+| C4 | LightGCN | Candidate | 학습형 collaborative retrieval |
+| C5 | C1+C4 RRF | Candidate fusion | **현재 Stage 1** |
+| C6 | DeepCoNN | Candidate | 리뷰 텍스트 기여 측정 (별도 실험) |
+| C7 | Two-tower | Candidate | dense retrieval 기준 |
+| C8 | content vector | Candidate | 리뷰·메뉴 정보 기여 측정 |
+| C9 | TIGER-style GenRec | Candidate | generative retrieval 기여 측정 |
 | R0 | source/fusion score sort | Ranker | candidate 순서를 그대로 쓰는 기준선 |
 | R1 | LightGBM LambdaRank | Ranker | LTR의 순수 재정렬 효과 측정 |
 
-현재 실행은 C0~C3 후보를 각각 평가하고, R1은 C3 후보를 재정렬한다.
+현재 파이프라인은 C0~C5 후보를 각각 평가하고, R1은 C5 후보를 재정렬한다. 새 후보
+모델(C6 DeepCoNN 등)은 `rating-recsys-compare <model>`로 같은 split에서 C5와 따로
+비교한다. 모델마다 `experiments/candidate_models.py`에 설정 하나를 추가하고, 실행
+절차·CLI·보고서는 공통 코드를 쓴다.
 
-C0-C3/R1의 성능 비교는 같은 전역 날짜 cutoff 분할, candidate 평가 방식과
-ranking label 정의를 사용한다.
+모든 성능 비교는 같은 전역 날짜 cutoff 분할, candidate 평가 방식과 ranking label
+정의를 사용한다.
 
 ## 14. 주요 위험과 대응
 
@@ -690,15 +702,18 @@ ranking label 정의를 사용한다.
 
 ## 15. 다음 실험
 
-[2026-09-27 run 보고서](./artifacts/runs/)에서 확인한 병목 순서대로 진행한다.
+[2026-09-30 C5 기준선 보고서](./artifacts/runs/20260930T135424227862Z-e7896add/report.md)에서
+C5 후보는 C3보다 Recall@100이 높지만 R1이 R0(C5 순서)를 넘지 못했다. 학습 정답
+끼워넣기(injection)는 R1이 후보 위치를 학습하게 만들어 같은 날 제거했고, 그 뒤 R1은
+트리 1개에서 멈춘다. 병목 순서대로 진행한다.
 
-1. 후보 결합: C1 단독 Recall@100이 C3보다 높다. `C1+C2`(C0 제외) 결합과 quota
-   grid 확장을 validation에서 비교한다.
-2. 후보 수: `--candidate-k 200/300`을 같은 snapshot으로 비교한다.
-3. 학습 positive injection 비율(약 70%) 완화: hard negative 또는 후보 안 positive만
-   쓰는 학습과 비교한다.
-4. Seed 반복(3~5회)으로 ranker 설정 간 차이의 안정성을 확인한다.
-5. 그다음 M4의 학습형 후보 모델(BPR/LightGCN, two-tower)로 넘어간다.
+1. R1 동점 처리와 fallback: ranker 점수가 같으면 C5 순위로 정렬하고, validation 선택
+   후보에 R0(재정렬 없음)를 넣어 R1이 R0보다 못하면 R0를 쓰는 규칙.
+2. C5 순서에 없는 정보를 주는 feature(리뷰 텍스트 유사도 등)와 정답 여러 개의 window형
+   학습 query. 학습 query용 LightGCN checkpoint 간격 1개월도 함께 본다.
+3. 리뷰 기반 경험 라벨(좋음/무난/나쁨)과 나쁜 경험 guardrail 지표 도입.
+4. 후보 수: `--candidate-k 200/300`.
+5. Seed 반복(3~5회)으로 ranker 설정 간 차이의 안정성 확인.
 
 ## 16. 완료 정의
 

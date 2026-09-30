@@ -1,79 +1,73 @@
-# Data Science & AI Portfolio
+# Anthony Han — AI & Data Science Portfolio
 
-[Projects Overview](./projects/README.md) · [Korean](./projects/README_KOR.md) · [Hackathon](./hackathon)
+[Projects Overview](./projects/README.md) · [Korean Project Index](./projects/README_KOR.md) · [Hackathon](./hackathon)
 
-## Abstract
+## Featured Projects
 
-A working repository for my data science / AI works, which span through end-to-end projects, team hackathons, and others.
+| Project | What I built | Stack | Result |
+| --- | --- | --- | --- |
+| **[Restaurant RecSys](./projects/rating_recsys)** | A two-stage restaurant recommender using crawled DiningCode reviews: candidate retrieval (item-item CF and a NumPy LightGCN fused with RRF; popularity and region baselines kept for reference; DeepCoNN review-text CNN experiment) followed by LightGBM LambdaRank reranking | Python, NumPy/SciPy, PyTorch, LightGBM, PostgreSQL, Supabase, MLflow, Streamlit | Leakage-free chronological evaluation over an immutable snapshot of **88,554 eligible interactions**; switching retrieval to item-item + LightGCN raised test Recall@100 from **16.7% to 20.2%**. The earlier review-text rating model is preserved under [`legacy/`](./projects/rating_recsys/legacy) |
+| **[News Simplification for Youth](./projects/NLP_Newspaper_CUAI)** | A Korean text-style-transfer pipeline with a GPT-4o-augmented parallel corpus and QLoRA fine-tuning of **[Gemma 3-1B](https://huggingface.co/google/gemma-3-1b-it)** | Python, PyTorch, Hugging Face, TRL, QLoRA | Evaluated on **2,340** test sentences. Preserving numerical data perfectly,  translating hard chinese character based korean words and  * |
+| **[AskIntern](./projects/Multi_Agent_ibm)** | A multi-agent workplace assistant whose supervisor routes lunch, IBM product-documentation, and meeting-note questions to specialist agents | IBM watsonx Orchestrate, Astra DB, Granite embeddings, MCP, Langfuse | Prototype demonstrates specialist routing, hybrid/RAG retrieval, role-based controls, safe abstention, and observable agent workflows |
+| **[Global Supermarket Analysis](./projects/Global_Supermarket_Analysis)** | End-to-end retail EDA, loss analysis, SQL normalization, business reporting, and a self-contained interactive dashboard | Python, Pandas, NumPy, Seaborn, SciPy, MySQL, JavaScript | Analyzed **51,290** transactions and found that discounts above 40% occurred in **13.6%** of transactions but accounted for **68.2%** of total losses |
 
-Each flagship project ships with its own write-up covering the goal, the data,  modelling
-decisions, and final results/accomplishments.
+## Hackathon
 
-## 1. Projects
+### [Campus Mate](./hackathon)
 
-Flagship projects done through my academic - professional pathway. See [`projects/README.md`](./projects/README.md) for full write-ups.
+**Codex Community Hackathon — Seoul for Students** · 2026.08.16 · Team 10 · [Korean](./hackathon/README_KOR.md)
 
-- **[Restaurant RecSys](./projects/rating_recsys)** — Two-stage restaurant recommender on
-  crawled DiningCode reviews (~97K reviews in Supabase PostgreSQL). Candidate retrieval
-  (popularity, item-item CF, region popularity, RRF fusion; LightGCN experiment) followed by
-  LightGBM LambdaRank, evaluated with a leakage-free chronological split, immutable dataset
-  snapshots, and MLflow tracking. The earlier review-text rating-prediction work
-  (DeepCoNN, **19%** lower RMSE than MF) is kept under [`legacy/`](./projects/rating_recsys/legacy).
-- **[AskIntern](./projects/Multi_Agent_ibm)** — Multi-agent workplace assistant for IBM interns
-  on IBM watsonx Orchestrate: a supervisor agent routes lunch, product-documentation, and
-  meeting-note questions to specialist agents.
-- **[News Simplification for Youth](./projects/NLP_Newspaper_CUAI)** — Text-style-transfer
-  via fine-tuned [Gemma 3-1B](https://huggingface.co/google/gemma-3-1b-it), with a
-  GPT-4o-augmented parallel corpus. Retained **100%** factual accuracy on **75%+** of samples.
-- Others: **[Global Supermarket Analysis](./projects/Global_Supermarket_Analysis)** | **[Target E-commerce Analysis](./projects/Target_Ecommerce)**
+A campus lunch-mate matcher that turns class timetables into a matching signal. Four teammates who met on the morning of the event took the project from feature definition to deployment and presentation in one day.
 
-## 2. Hackathon
+- Finds overlapping lunch-hour gaps and ranks eligible students using shared interests and natural-language preferences.
+- Uses deterministic availability and conflict rules; AI only adjusts the order of already eligible matches.
+- **Stack:** React, TypeScript, Node.js, Express, PostgreSQL, Supabase, Docker Compose, OpenAI API
+- **Links:** [Live site](https://campusmate.site) · [Demo video](https://github.com/han942/codex-hackerthon/blob/main/campusmate_demo.mov) · [Source code](https://github.com/han942/codex-hackerthon) · [Event page](https://codex-community-korea.skysplit.chatgpt.site/en/hackathon/seoul-2026)
 
-- **[Codex Community Hackathon — Seoul for Students](./hackathon)** ([Korean](./hackathon/README_KOR.md)) —
-  A [one-day event](https://codex-community-korea.skysplit.chatgpt.site/en/hackathon/seoul-2026)
-  where **teams are formed on site** and
-  projects are built from scratch that day.
-  -  **[Campus Mate](https://campusmate.site)**: a campus lunch-mate matcher that turns class
-    timetables into a matching signal.
-  - Tech stack: React, Node.js | Express, PostgreSQL, Supabase | Docker Compose
+## Studies & Competitions
 
-## 3. RecSys Study (`Study/RecSys/`)
+### RecSys Study (`Study/RecSys/`)
 
-- Goal: Reimplement core recommendation models from scratch to understand their mechanics.
-- Tech stack: Python, PyTorch, NumPy
-- Dataset: MovieLens 100K (`datafile/Recsys/ml-100k`)
-- Implementations (each with `preprocessing.py` / model / `main.py`):
+- **Goal:** Reimplement core recommendation models from scratch to understand their mechanics.
+- **Stack:** Python, PyTorch, NumPy
+- **Dataset:** MovieLens 100K (`datafile/Recsys/ml-100k`)
+- **Implementations:**
   - `matrixfactorization/` — biased matrix factorization
   - `SVD/` — SVD-based collaborative filtering
   - `multvae/` — Mult-VAE for implicit feedback
-  - `deepCONN/` — DeepCoNN, review-text CNN towers for rating prediction
+  - `deepCONN/` — DeepCoNN review-text CNN towers for rating prediction
 
-## 4. Competitions (`Dacon/`)
+### Dacon Competitions (`Dacon/`)
 
-- Goal: Tabular modelling practice under a leaderboard metric — feature engineering,
-  imputation strategy, and model selection.
-- Tech stack: Python, Pandas, Scikit-learn, XGBoost, LightGBM
-- Notebooks:
-  - `Toss_CTR_prediction/` — click-through-rate (CTR) prediction
-  - `부동산 허위매물 분류 해커톤/` — fake real-estate listing classification (LightGBM)
-  - `스트레스 지수 예측 해커톤/` — stress-index regression (XGBoost, imputation ablations)
-  - `전기차 가격 예측 해커톤/` — EV price prediction (+ [retrospective](./Dacon/전기차%20가격%20예측%20해커톤/회고록.md))
+- **Goal:** Practice tabular modelling under leaderboard metrics through feature engineering, imputation strategy, and model selection.
+- **Stack:** Python, Pandas, Scikit-learn, XGBoost, LightGBM
+- **Notebooks:**
+  - `Toss_CTR_prediction/` — click-through-rate prediction
+  - `부동산 허위매물 분류 해커톤/` — fake real-estate listing classification
+  - `스트레스 지수 예측 해커톤/` — stress-index regression and imputation ablations
+  - `전기차 가격 예측 해커톤/` — EV price prediction ([retrospective](./Dacon/전기차%20가격%20예측%20해커톤/회고록.md))
   - `스마트 창고 출고 지연 해커톤/` — warehouse shipping-delay prediction
   - `흡연 여부 예측 해커톤/` — smoking-status classification
+
+## More Projects
+
+- **[Target E-commerce Analysis](./projects/Target_Ecommerce)** — exploratory analysis of Brazilian e-commerce orders.
 
 ## Repository Map
 
 | Folder | What's inside |
 | --- | --- |
-| [`projects/`](./projects) | Main end-to-end projects (EDA & reporting, LLM fine-tuning, recommender systems, multi-agent assistant) |
-| [`hackathon/`](./hackathon) | Codex Community Hackathon write-up (team build, one day) |
+| [`projects/`](./projects) | Main end-to-end projects: EDA and reporting, LLM fine-tuning, recommender systems, and a multi-agent assistant |
+| [`hackathon/`](./hackathon) | Codex Community Hackathon write-up for a one-day team build |
 | [`Study/`](./Study) | From-scratch implementations of recommender-system papers |
-| [`Dacon/`](./Dacon) | Dacon competition / hackathon notebooks and submissions |
+| [`Dacon/`](./Dacon) | Dacon competition and hackathon notebooks and submissions |
 | [`SQL/`](./SQL) | Database schemas and ERDs backing the projects |
 | [`datafile/`](./datafile) | Shared raw datasets referenced by the notebooks above |
+
 ---
+
 ## Contact
 
 Anthony Han — [@han942](https://github.com/han942)
 
-Repository: https://github.com/han942/ai-ds-projects
+Repository: <https://github.com/han942/ai-ds-projects>

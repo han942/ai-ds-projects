@@ -2,8 +2,8 @@
 
 Experiment ``rating-recsys``::
 
-    C3→R1 · <date> · <snapshot>        run: params, candidate + LTR metrics
-    ├── quota=<value>                   validation C3 Recall@K for one quota
+    C5→R1 · <date> · <snapshot>        run: params, candidate + LTR metrics
+    ├── quota=<value>                   only runs before 2026-09-30 (C3 Stage 1)
     └── ranker · <name>                 validation metrics + NDCG curve per tree
 
 Only metrics, params and tags are logged. No files are copied, so
@@ -28,9 +28,15 @@ STAGES = (
     "c1_item_item",
     "c2_region_popularity",
     "c3_rrf_union",
+    "c4_lightgcn",
+    "c5_c1_lightgcn_rrf",
     "r0_candidate_order",
     "r1_lambdarank",
 )
+BOOTSTRAPS = {
+    "bootstrap_r1_minus_r0": "r1_minus_r0",
+    "bootstrap_c5_minus_c3": "c5_minus_c3",
+}
 
 
 def tracking_uri(artifacts_root: Path) -> str:
@@ -99,8 +105,9 @@ def log_run(run_dir: Path, *, artifacts_root: Path) -> dict[str, object]:
             artifact_location=(artifacts_root / "mlflow_unused").resolve().as_uri(),
         )
     )
+    stage1 = "C5" if "c5_c1_lightgcn_rrf" in metrics["test"] else "C3"
     run_name = (
-        f"C3→R1 · {manifest['created_at'][:10]} · {snapshot_id[:8]}"
+        f"{stage1}→R1 · {manifest['created_at'][:10]} · {snapshot_id[:8]}"
         + (f" · {manifest['label']}" if manifest.get("label") else "")
     )
     report = (run_dir / "report.md").resolve()
@@ -123,10 +130,13 @@ def log_run(run_dir: Path, *, artifacts_root: Path) -> dict[str, object]:
             }
         )
         mlflow.log_params({key: _param(value) for key, value in config.items()})
+        chosen = selection.get("chosen_candidate_policy")
         mlflow.log_params(
             {
-                "chosen_quota": _param(
-                    selection["chosen_candidate_policy"]["base_quota_fraction"]
+                **(
+                    {"chosen_quota": _param(chosen["base_quota_fraction"])}
+                    if chosen
+                    else {}
                 ),
                 "chosen_ranker": selection["chosen_ranker"],
                 **{
@@ -138,21 +148,23 @@ def log_run(run_dir: Path, *, artifacts_root: Path) -> dict[str, object]:
         buffer = _MetricBuffer()
         for phase in ("validation", "test"):
             for stage in STAGES:
-                buffer.add_stage(phase, stage, metrics[phase][stage])
+                if stage in metrics[phase]:
+                    buffer.add_stage(phase, stage, metrics[phase][stage])
             buffer.add(
                 f"{phase}/positive_availability",
                 metrics[phase]["positive_availability"]["rate"],
             )
-        for key, values in (metrics["test"].get("bootstrap_r1_minus_r0") or {}).items():
-            if isinstance(values, dict):
-                prefix = f"test/r1_minus_r0/{key}"
-                buffer.add(f"{prefix}/delta", values["delta"])
-                buffer.add(f"{prefix}/ci95_low", values["ci95"][0])
-                buffer.add(f"{prefix}/ci95_high", values["ci95"][1])
+        for source, name in BOOTSTRAPS.items():
+            for key, values in (metrics["test"].get(source) or {}).items():
+                if isinstance(values, dict):
+                    prefix = f"test/{name}/{key}"
+                    buffer.add(f"{prefix}/delta", values["delta"])
+                    buffer.add(f"{prefix}/ci95_low", values["ci95"][0])
+                    buffer.add(f"{prefix}/ci95_high", values["ci95"][1])
         buffer.flush(client, parent.info.run_id)
 
-        chosen_quota = selection["chosen_candidate_policy"]["base_quota_fraction"]
-        for row in selection["candidate_policy_grid"]:
+        chosen_quota = chosen["base_quota_fraction"] if chosen else None
+        for row in selection.get("candidate_policy_grid", []):
             with mlflow.start_run(
                 experiment_id=experiment_id,
                 run_name=f"quota={row['base_quota_fraction']}",

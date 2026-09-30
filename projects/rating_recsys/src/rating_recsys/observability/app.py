@@ -15,14 +15,18 @@ from rating_recsys.experiments.artifacts import read_json, read_jsonl
 
 
 REQUIRED_RUN_FILES = ("manifest.json", "metrics.json", "report.md")
+# Runs before 2026-09-30 have C0-C3 only (Stage 1 was C3); stages missing from
+# a run are skipped.
 CANDIDATE_STAGES = {
-    "c0_popularity": "C0 전체 인기",
+    "c5_c1_lightgcn_rrf": "C5 C1+LightGCN RRF (Stage 1)",
     "c1_item_item": "C1 item-item",
-    "c2_region_popularity": "C2 지역 인기",
-    "c3_rrf_union": "C3 quota RRF",
+    "c4_lightgcn": "C4 LightGCN",
+    "c0_popularity": "참고 · C0 전체 인기",
+    "c2_region_popularity": "참고 · C2 지역 인기",
+    "c3_rrf_union": "참고 · C3 quota RRF",
 }
 RANKING_STAGES = {
-    "r0_candidate_order": "R0 C3 순서",
+    "r0_candidate_order": "R0 Stage 1 후보 순서",
     "r1_lambdarank": "R1 LambdaRank",
 }
 METRIC_HELP = {
@@ -283,8 +287,14 @@ def main() -> None:
         selection = metrics["selection"]
         st.subheader("Validation 선택")
         left, right = st.columns(2)
-        left.caption(selection["rule"]["candidate_policy"])
-        left.dataframe(pd.DataFrame(selection["candidate_policy_grid"]), hide_index=True)
+        if "candidate_policy_grid" in selection:  # runs with C3 as Stage 1
+            left.caption(selection["rule"]["candidate_policy"])
+            left.dataframe(pd.DataFrame(selection["candidate_policy_grid"]), hide_index=True)
+        elif "lightgcn" in metrics:
+            left.caption("C4 LightGCN 학습 query용 checkpoint (고정 설정)")
+            left.dataframe(
+                pd.DataFrame(metrics["lightgcn"]["training_checkpoints"]), hide_index=True
+            )
         right.caption(selection["rule"]["ranker"])
         right.dataframe(
             pd.DataFrame(

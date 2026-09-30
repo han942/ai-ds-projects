@@ -18,7 +18,7 @@ from rating_recsys.observability.app import (
     RANKING_STAGES,
 )
 
-from test_pipeline import SMALL, run_small, synthetic_interactions
+from support import SMALL, run_small, synthetic_interactions
 
 
 class _Run:
@@ -128,12 +128,13 @@ class TrackingTests(unittest.TestCase):
             runs = client.search_runs([experiment.experiment_id])
             parent = client.get_run(logged["run_id"])
 
-            grid = len(SMALL.quota_grid) + 1 + len(SMALL.num_leaves_grid) * len(
-                SMALL.min_child_samples_grid
-            )
+            grid = 1 + len(SMALL.num_leaves_grid) * len(SMALL.min_child_samples_grid)
             self.assertEqual(len(runs), 1 + grid)
             self.assertIn("test/r1_lambdarank/ndcg_at_5", parent.data.metrics)
             self.assertIn("test/r1_minus_r0/ndcg_at_5/ci95_low", parent.data.metrics)
+            self.assertIn("test/c5_c1_lightgcn_rrf/recall_at_10", parent.data.metrics)
+            self.assertIn("test/c5_minus_c3/recall_at_10/delta", parent.data.metrics)
+            self.assertTrue(parent.data.tags["mlflow.runName"].startswith("C5→R1"))
             self.assertEqual(
                 Path(parent.data.tags["report"]), (run.result.run_dir / "report.md").resolve()
             )

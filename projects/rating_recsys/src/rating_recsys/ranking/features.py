@@ -1,4 +1,4 @@
-"""Cutoff-safe feature construction for the baseline ranker."""
+"""Cutoff-safe feature construction for the Stage 2 ranker."""
 
 from __future__ import annotations
 
@@ -13,6 +13,14 @@ from rating_recsys.retrieval.baselines import (
 )
 
 
+# Same value as ``retrieval.lightgcn.LIGHTGCN`` (not imported to keep this
+# module free of NumPy/SciPy for config validation).
+LIGHTGCN = "lightgcn"
+# LightGCN score standardised over one query's Stage 1 candidates. Raw dot
+# products are not comparable across models refit for different periods.
+LIGHTGCN_Z = "lightgcn_z"
+
+# ``region_affinity`` must stay last: NO_REGION_FEATURE_NAMES drops it.
 FEATURE_NAMES = (
     "popularity_score",
     "item_average_rating",
@@ -22,6 +30,9 @@ FEATURE_NAMES = (
     "item_item_source_present",
     "inverse_popularity_rank",
     "inverse_item_item_rank",
+    "lightgcn_score_z",
+    "lightgcn_source_present",
+    "inverse_lightgcn_rank",
     "rrf_score",
     "candidate_rank_inverse",
     "user_history_length",
@@ -38,12 +49,20 @@ def feature_values(
     *,
     include_region: bool = True,
 ) -> dict[str, float]:
+    """Features of one candidate, all from data before the query.
+
+    ``*_source_present`` and ``inverse_*_rank`` describe the candidate's
+    position in each source's Top-k list (C0 popularity, C1 item-item, C4
+    LightGCN), whether or not that source is fused into the Stage 1 output.
+    """
+
     history_length = len(query.history)
     average_rating = (
         sum(item.rating for item in query.history) / history_length
         if history_length
         else 0.0
     )
+    ranks = candidate.source_ranks
     values = {
         "popularity_score": candidate.source_scores.get(POPULARITY, 0.0),
         "item_average_rating": context.average_rating(candidate.restaurant_id),
@@ -51,14 +70,13 @@ def feature_values(
         "item_item_max_similarity": candidate.source_scores.get(
             "item_item_max", 0.0
         ),
-        "popularity_source_present": float(POPULARITY in candidate.candidate_sources),
-        "item_item_source_present": float(ITEM_ITEM in candidate.candidate_sources),
-        "inverse_popularity_rank": _inverse_rank(
-            candidate.source_ranks.get(POPULARITY)
-        ),
-        "inverse_item_item_rank": _inverse_rank(
-            candidate.source_ranks.get(ITEM_ITEM)
-        ),
+        "popularity_source_present": float(POPULARITY in ranks),
+        "item_item_source_present": float(ITEM_ITEM in ranks),
+        "inverse_popularity_rank": _inverse_rank(ranks.get(POPULARITY)),
+        "inverse_item_item_rank": _inverse_rank(ranks.get(ITEM_ITEM)),
+        "lightgcn_score_z": candidate.source_scores.get(LIGHTGCN_Z, 0.0),
+        "lightgcn_source_present": float(LIGHTGCN in ranks),
+        "inverse_lightgcn_rank": _inverse_rank(ranks.get(LIGHTGCN)),
         "rrf_score": candidate.rrf_score,
         "candidate_rank_inverse": 1.0 / candidate.candidate_rank,
         "user_history_length": float(history_length),

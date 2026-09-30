@@ -1,69 +1,21 @@
 from __future__ import annotations
 
 import json
-import random
 import tempfile
 import unittest
 from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 
-from rating_recsys.datasets.models import Interaction
 from rating_recsys.datasets.split import build_global_temporal_split
 from rating_recsys.evaluation.report import write_report
 from rating_recsys.experiments.cli import build_parser, config_from_args
 from rating_recsys.experiments.config import ExperimentConfig
-from rating_recsys.experiments.pipeline import run_experiment
 from rating_recsys.experiments.queries import build_window_queries
 
-
-def _interaction(review_id: int, user: int, item: int, day: int, rating: float = 5.0):
-    return Interaction(
-        review_id=review_id,
-        user_id=user,
-        restaurant_id=item,
-        event_date=date(2025, 1, 1) + timedelta(days=day),
-        rating=rating,
-        reviewed_at_precision="exact",
-        restaurant_name=f"restaurant-{item}",
-        region="서울" if item <= 15 else "부산",
-    )
+from support import SMALL, _interaction, _without_timing, run_small, synthetic_interactions
 
 
-def synthetic_interactions() -> list[Interaction]:
-    """Three taste clusters, staggered starts, and a few late-joining users."""
-
-    rng = random.Random(7)
-    clusters = {0: range(1, 11), 1: range(11, 21), 2: range(21, 31)}
-    rows: list[Interaction] = []
-    review_id = 1
-    for user in range(1, 67):
-        items = rng.sample(list(clusters[user % 3]), 6) + rng.sample(range(1, 31), 2)
-        items = list(dict.fromkeys(items))
-        day = rng.randint(0, 40) if user <= 60 else rng.randint(85, 95)
-        for item in items:
-            rows.append(
-                _interaction(review_id, user, item, day, rng.choice([5, 5, 4, 4, 3, 2]))
-            )
-            review_id += 1
-            day += rng.randint(3, 8)
-    return rows
-
-
-SMALL = ExperimentConfig(
-    candidate_k=10,
-    ranking_k=5,
-    quota_grid=(0.0, 0.5),
-    num_leaves_grid=(4,),
-    min_child_samples_grid=(1, 5),
-    max_estimators=30,
-    early_stopping_rounds=5,
-    reference_estimators=10,
-    reference_num_leaves=4,
-    reference_min_child_samples=1,
-    bootstrap_samples=50,
-    n_jobs=1,
-)
 RUN_FILES = (
     "manifest.json",
     "metrics.json",
@@ -74,30 +26,6 @@ RUN_FILES = (
     "recommendations_validation.jsonl",
     "recommendations_test.jsonl",
 )
-
-
-def run_small(rows, root: Path, **kwargs):
-    root.mkdir(parents=True, exist_ok=True)
-    return run_experiment(
-        rows,
-        project_root=root,
-        artifacts_root=root / "artifacts",
-        config=kwargs.pop("config", SMALL),
-        log=lambda _: None,
-        **kwargs,
-    )
-
-
-def _without_timing(value):
-    if isinstance(value, dict):
-        return {
-            key: _without_timing(item)
-            for key, item in value.items()
-            if not key.endswith("_seconds")
-        }
-    if isinstance(value, list):
-        return [_without_timing(item) for item in value]
-    return value
 
 
 class WindowQueryTests(unittest.TestCase):
@@ -158,25 +86,59 @@ class PipelineTests(unittest.TestCase):
             for phase in ("validation", "test"):
                 for stage in (
                     "c0_popularity", "c1_item_item", "c2_region_popularity",
-                    "c3_rrf_union", "r0_candidate_order", "r1_lambdarank",
+                    "c3_rrf_union", "c4_lightgcn", "c5_c1_lightgcn_rrf",
+                    "r0_candidate_order", "r1_lambdarank",
                 ):
                     self.assertGreater(metrics[phase][stage]["evaluated_queries"], 0)
                 self.assertIn("map_at_5", metrics[phase]["r1_lambdarank"])
             self.assertIn("ndcg_at_5", metrics["test"]["bootstrap_r1_minus_r0"])
+            self.assertIn("recall_at_10", metrics["test"]["bootstrap_c5_minus_c3"])
+
+            # LightGCN graphs never include the window they score, and each
+            # training checkpoint only sees interactions before its block.
+            rows = sorted(synthetic_interactions(), key=lambda item: item.event_date)
+            graph = metrics["lightgcn"]
+            self.assertEqual(graph["window_models"]["validation"]["edges"], len(
+                [item for item in rows if item.event_date <= t1]))
+            self.assertEqual(graph["window_models"]["test"]["edges"], len(
+                [item for item in rows if item.event_date <= t2]))
+            checkpoints = graph["training_checkpoints"]
+            self.assertGreater(len(checkpoints), 1)
+            for checkpoint in checkpoints:
+                start = date.fromisoformat(checkpoint["checkpoint"])
+                self.assertEqual(start.day, 1)
+                self.assertLessEqual(start, t2)
+                self.assertEqual(
+                    checkpoint["edges"], len([i for i in rows if i.event_date < start])
+                )
+            self.assertEqual(
+                sum(c["queries"] for c in checkpoints),
+                training["train_prefix"]["queries"]
+                + training["refit_validation_window_prefix"]["queries"],
+            )
+            self.assertGreater(training["train_prefix"]["lightgcn_scored_queries"], 0)
+            self.assertLess(
+                training["train_prefix"]["lightgcn_scored_queries"],
+                training["train_prefix"]["queries"],
+            )
             self.assertEqual(
                 len(metrics["selection"]["ranker_grid"]),
                 1 + len(SMALL.num_leaves_grid) * len(SMALL.min_child_samples_grid),
             )
+            self.assertNotIn("candidate_policy_grid", metrics["selection"])
 
             report = (result.run_dir / "report.md").read_text(encoding="utf-8")
             for heading in (
-                "## 1. 요약", "## 2. 데이터와 조건", "## 3. Validation에서 고른 설정",
+                "## 1. 요약", "## 2. 데이터와 조건", "## 3. 설정 선택",
                 "## 4. 후보 생성 (test)", "## 5. LTR 재정렬 (test, Top-5)",
                 "## 6. 해석 (작성자 기입)", "## 7. 재현",
             ):
                 self.assertIn(heading, report)
             self.assertIn("`candidate_k` 10 (기본 100)", report)
             self.assertIn("--candidate-k 10", report)
+            self.assertIn("--lightgcn-checkpoint-months 1", report)
+            self.assertIn("C5 C1+LightGCN RRF (Stage 1)", report)
+            self.assertIn("참고 · C3 quota RRF (이전 기준선)", report)
             with self.assertRaises(FileExistsError):
                 write_report(result.run_dir)
 
@@ -231,6 +193,78 @@ class PipelineTests(unittest.TestCase):
             )
 
 
+    def test_training_groups_only_hold_real_candidates(self) -> None:
+        """No positive is added outside the Stage 1 list (the old injection shortcut)."""
+
+        from rating_recsys.experiments.pipeline import (
+            CheckpointedLightGCN,
+            _generator,
+            prefix_training_arrays,
+        )
+        from rating_recsys.experiments.queries import build_prefix_queries
+
+        rows = synthetic_interactions()
+        train = build_global_temporal_split(rows).train
+        queries = build_prefix_queries(train, config=SMALL, phase="train")
+        arrays = prefix_training_arrays(
+            queries, train, _generator(SMALL),
+            CheckpointedLightGCN(SMALL.lightgcn_config, months=1),
+            feature_names=SMALL.feature_names,
+        )
+        summary = arrays.summary
+        self.assertGreater(summary["usable_groups"], 0)
+        self.assertLess(summary["retrieved_positive_queries"], summary["relevant_queries"])
+        self.assertLessEqual(summary["usable_groups"], summary["retrieved_positive_queries"])
+        self.assertNotIn("injection_rate", summary)
+        rank = arrays.features[:, SMALL.feature_names.index("candidate_rank_inverse")]
+        self.assertGreaterEqual(float(rank.min()), 1 / SMALL.candidate_k - 1e-6)
+        offset = 0
+        for size in arrays.groups:
+            self.assertLessEqual(size, SMALL.candidate_k)
+            self.assertEqual(int((arrays.labels[offset : offset + size] > 0).sum()), 1)
+            offset += size
+        self.assertEqual(offset, len(arrays.labels))
+
+    def test_source_diff_includes_untracked_code(self) -> None:
+        import subprocess
+
+        from rating_recsys.experiments.snapshot import code_manifest
+
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            project = repo / "project"
+            (project / "src").mkdir(parents=True)
+            (project / "artifacts").mkdir()
+            (repo / ".gitignore").write_text("*.log\n")
+            (project / "src" / "old.py").write_text("x = 1\n")
+
+            def git(*args: str) -> None:
+                subprocess.run(
+                    ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                    cwd=repo, check=True, capture_output=True,
+                )
+
+            git("init", "-q")
+            git("add", ".")
+            git("commit", "-q", "-m", "init")
+            (project / "src" / "old.py").write_text("x = 2\n")
+            (project / "src" / "new.py").write_text("y = 1\n")
+            (project / "artifacts" / "report.md").write_text("result\n")
+            (project / "run.log").write_text("ignored\n")
+
+            diff = code_manifest(project, allow_dirty=True)["git_diff"]
+            self.assertIn("diff --git a/project/src/old.py", diff)
+            self.assertIn("diff --git a/project/src/new.py b/project/src/new.py", diff)
+            self.assertIn("+y = 1", diff)
+            self.assertNotIn("artifacts/report.md", diff)
+            self.assertNotIn("run.log", diff)
+            check = subprocess.run(
+                ["git", "apply", "--check", "-R", "-"], cwd=repo, input=diff,
+                text=True, capture_output=True,
+            )
+            self.assertEqual(check.returncode, 0, check.stderr)
+
+
 class CliTests(unittest.TestCase):
     def test_flags_map_to_config_and_are_validated(self) -> None:
         args = build_parser().parse_args(
@@ -238,7 +272,9 @@ class CliTests(unittest.TestCase):
                 "--candidate-k", "50",
                 "--ranking-k", "5",
                 "--region-mode", "without_region",
-                "--quota-grid", "0.5,1",
+                "--legacy-c3-quota", "0.5",
+                "--lightgcn-layers", "2",
+                "--lightgcn-checkpoint-months", "6",
                 "--num-leaves-grid", "7,15",
                 "--relevance-low", "3.5",
             ]
@@ -246,11 +282,15 @@ class CliTests(unittest.TestCase):
         config = config_from_args(args)
         self.assertEqual(config.candidate_k, 50)
         self.assertEqual(config.region_mode, "without_region")
-        self.assertEqual(config.quota_grid, (0.5, 1.0))
+        self.assertEqual(config.legacy_c3_quota, 0.5)
+        self.assertEqual(config.lightgcn_config.layers, 2)
+        self.assertEqual(config.lightgcn_checkpoint_months, 6)
         self.assertEqual(config.num_leaves_grid, (7, 15))
         self.assertEqual(config.relevance(3.4), 0)
         with self.assertRaises(ValueError):
-            config_from_args(build_parser().parse_args(["--quota-grid", "2"]))
+            config_from_args(build_parser().parse_args(["--legacy-c3-quota", "2"]))
+        with self.assertRaises(ValueError):
+            config_from_args(build_parser().parse_args(["--lightgcn-checkpoint-months", "5"]))
 
     def test_cli_writes_one_run_folder(self) -> None:
         from rating_recsys.experiments import cli
@@ -266,7 +306,8 @@ class CliTests(unittest.TestCase):
                     "--artifacts-dir", str(artifacts),
                     "--candidate-k", "10",
                     "--ranking-k", "5",
-                    "--quota-grid", "0,0.5",
+                    "--lightgcn-dimension", "8",
+                    "--lightgcn-epochs", "2",
                     "--num-leaves-grid", "4",
                     "--min-child-samples-grid", "1",
                     "--max-estimators", "20",
@@ -283,6 +324,38 @@ class CliTests(unittest.TestCase):
                 sorted(path.name for path in artifacts.iterdir()),
                 ["input.jsonl", "runs", "snapshots"],
             )
+
+    def test_console_scripts_exit_zero(self) -> None:
+        import re
+        import subprocess
+        import sys
+
+        from rating_recsys.experiments.snapshot import write_snapshot
+
+        project = Path(__file__).resolve().parents[1]
+        text = (project / "pyproject.toml").read_text()
+        scripts = dict(re.findall(r'^(rating-recsys-[\w-]+) = "([^"]+)"$', text, re.M))
+        # Entry points that return a summary dict would make sys.exit print it and exit 1.
+        self.assertEqual(scripts["rating-recsys-experiment"], "rating_recsys.experiments.cli:console_main")
+        self.assertEqual(scripts["rating-recsys-compare"], "rating_recsys.experiments.compare_cli:console_main")
+        with tempfile.TemporaryDirectory() as directory:
+            artifacts = Path(directory)
+            snapshot = artifacts / "input.jsonl"
+            write_snapshot(synthetic_interactions(), snapshot)
+            code = (
+                "import sys; from rating_recsys.experiments.cli import console_main; "
+                "sys.exit(console_main())"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", code, "--snapshot", str(snapshot),
+                 "--artifacts-dir", str(artifacts), "--candidate-k", "10", "--ranking-k", "5",
+                 "--lightgcn-dimension", "8", "--lightgcn-epochs", "1", "--num-leaves-grid", "4",
+                 "--min-child-samples-grid", "1", "--max-estimators", "5",
+                 "--bootstrap-samples", "10", "--n-jobs", "1", "--no-mlflow"],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+            self.assertNotIn("{'run_id'", result.stderr)
 
 
 if __name__ == "__main__":

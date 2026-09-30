@@ -90,12 +90,49 @@ def code_manifest(project_root: Path, *, allow_dirty: bool) -> dict[str, object]
             "Refusing a non-reproducible run from a dirty worktree; commit changes "
             "or call the pipeline with allow_dirty=True to capture its diff"
         )
+    diff = ""
+    if dirty:
+        diff = (_git_output(project_root, "diff", "--binary") or "") + _untracked_diff(
+            project_root
+        )
     return {
         "git_commit": commit,
         "git_dirty": dirty,
         "git_status": status or "",
-        "git_diff": _git_output(project_root, "diff", "--binary") if dirty else "",
+        "git_diff": diff,
     }
+
+
+def _untracked_diff(project_root: Path) -> str:
+    """``git diff`` of new, not ignored files under the project, outside artifacts/.
+
+    ``git diff`` alone skips untracked files, so a run using a new module would
+    record a diff that cannot rebuild its code. Paths are relative to the
+    repository root, like the tracked part of the diff.
+    """
+
+    top = _git_output(project_root, "rev-parse", "--show-toplevel")
+    listed = _git_output(
+        project_root, "ls-files", "--others", "--exclude-standard", "--full-name"
+    )
+    if not top or not listed:
+        return ""
+    prefix = _git_output(project_root, "rev-parse", "--show-prefix") or ""
+    parts = []
+    for path in sorted(listed.splitlines()):
+        if path.removeprefix(prefix).startswith("artifacts/"):
+            continue
+        # --no-index exits 1 when the files differ, which is always the case here.
+        result = subprocess.run(
+            ["git", "diff", "--no-index", "--binary", "--", "/dev/null", path],
+            cwd=top,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode in (0, 1) and result.stdout:
+            parts.append(result.stdout if result.stdout.endswith("\n") else result.stdout + "\n")
+    return ("\n" if parts else "") + "".join(parts)
 
 
 def environment_manifest() -> dict[str, object]:
@@ -151,3 +188,65 @@ def freeze_snapshot(
     staging.replace(destination)
     meta["artifact"] = destination.name
     return destination, meta
+
+
+# ---------------------------------------------------------------------------
+# Review text side file (DeepCoNN)
+# ---------------------------------------------------------------------------
+
+REVIEW_TEXT_SCHEMA_VERSION = "review-text-v1"
+
+
+def review_texts_path(snapshot_path: Path) -> Path:
+    """``<snapshot>.reviews.jsonl`` next to the interaction snapshot."""
+
+    return snapshot_path.with_name(f"{snapshot_path.stem}.reviews.jsonl")
+
+
+def write_review_texts(
+    texts: dict[int, str | None], destination: Path
+) -> dict[str, object]:
+    """Store review text by review id, sorted, so the file is canonical.
+
+    Interactions stay text-free. The text is only read by models that build
+    documents from reviews dated up to their own cutoff.
+    """
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
+    staging = destination.with_name(destination.name + ".staging")
+    with staging.open("w", encoding="utf-8", newline="\n") as handle:
+        for review_id in sorted(texts):
+            line = canonical_json({"review_id": review_id, "review_text": texts[review_id]}) + "\n"
+            handle.write(line)
+            digest.update(line.encode("utf-8"))
+    staging.replace(destination)
+    return _review_texts_meta(destination.name, texts, digest.hexdigest())
+
+
+def load_review_texts(
+    path: Path, interactions: Iterable[Interaction]
+) -> tuple[dict[int, str | None], dict[str, object]]:
+    """Read the side file and check it covers every interaction's review."""
+
+    digest = hashlib.sha256()
+    texts: dict[int, str | None] = {}
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            digest.update(line.encode("utf-8"))
+            row = json.loads(line)
+            texts[int(row["review_id"])] = row["review_text"]
+    missing = {item.review_id for item in interactions} - set(texts)
+    if missing:
+        raise ValueError(f"{path} has no text row for {len(missing)} reviews, e.g. {sorted(missing)[:3]}")
+    return texts, _review_texts_meta(path.name, texts, digest.hexdigest())
+
+
+def _review_texts_meta(name: str, texts: dict[int, str | None], sha256: str) -> dict[str, object]:
+    return {
+        "schema_version": REVIEW_TEXT_SCHEMA_VERSION,
+        "artifact": name,
+        "artifact_sha256": sha256,
+        "reviews": len(texts),
+        "non_empty": sum(bool((text or "").strip()) for text in texts.values()),
+    }

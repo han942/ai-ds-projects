@@ -67,7 +67,6 @@ class Candidate:
     source_ranks: dict[str, int]
     rrf_score: float
     candidate_rank: int
-    injected_for_training: bool = False
 
 
 @dataclass(frozen=True, slots=True)

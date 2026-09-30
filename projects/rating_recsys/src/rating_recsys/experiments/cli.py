@@ -74,12 +74,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=default.region_mode,
     )
     model.add_argument("--seed", type=int, default=default.random_seed)
-
-    tuning = parser.add_argument_group("Validation 선택 grid")
-    tuning.add_argument(
-        "--quota-grid", type=_floats, default=default.quota_grid,
-        help="C3 quota 후보 (쉼표 구분, 0~1)",
+    model.add_argument(
+        "--legacy-c3-quota", type=float, default=default.legacy_c3_quota,
+        help="참고용 C3(이전 기준선)의 quota. Stage 1 결과에는 영향 없음",
     )
+
+    graph = parser.add_argument_group("C4 LightGCN (고정 설정)")
+    graph.add_argument("--lightgcn-layers", type=int, default=default.lightgcn_layers)
+    graph.add_argument("--lightgcn-dimension", type=int, default=default.lightgcn_dimension)
+    graph.add_argument("--lightgcn-epochs", type=int, default=default.lightgcn_epochs)
+    graph.add_argument(
+        "--lightgcn-regularization", type=float, default=default.lightgcn_regularization
+    )
+    graph.add_argument(
+        "--lightgcn-learning-rate", type=float, default=default.lightgcn_learning_rate
+    )
+    graph.add_argument("--lightgcn-batch-size", type=int, default=default.lightgcn_batch_size)
+    graph.add_argument(
+        "--lightgcn-checkpoint-months", type=int,
+        default=default.lightgcn_checkpoint_months,
+        help="Ranker 학습 query용 LightGCN을 다시 학습하는 간격(개월, 12의 약수)",
+    )
+
+    tuning = parser.add_argument_group("Validation 선택 grid (LambdaRank)")
     tuning.add_argument("--num-leaves-grid", type=_ints, default=default.num_leaves_grid)
     tuning.add_argument(
         "--min-child-samples-grid", type=_ints, default=default.min_child_samples_grid
@@ -107,7 +124,14 @@ def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
         region_mode=args.region_mode,
         relevance_high_threshold=args.relevance_high,
         relevance_low_threshold=args.relevance_low,
-        quota_grid=tuple(args.quota_grid),
+        legacy_c3_quota=args.legacy_c3_quota,
+        lightgcn_layers=args.lightgcn_layers,
+        lightgcn_dimension=args.lightgcn_dimension,
+        lightgcn_epochs=args.lightgcn_epochs,
+        lightgcn_regularization=args.lightgcn_regularization,
+        lightgcn_learning_rate=args.lightgcn_learning_rate,
+        lightgcn_batch_size=args.lightgcn_batch_size,
+        lightgcn_checkpoint_months=args.lightgcn_checkpoint_months,
         num_leaves_grid=tuple(args.num_leaves_grid),
         min_child_samples_grid=tuple(args.min_child_samples_grid),
         learning_rate=args.learning_rate,
@@ -160,6 +184,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
     test = result.metrics["test"]
     k, ck = config.ranking_k, config.candidate_k
     summary["test"] = {
+        f"c5_recall_at_{ck}": test["c5_c1_lightgcn_rrf"][f"recall_at_{ck}"],
         f"c3_recall_at_{ck}": test["c3_rrf_union"][f"recall_at_{ck}"],
         f"r0_ndcg_at_{k}": test["r0_candidate_order"][f"ndcg_at_{k}"],
         f"r1_ndcg_at_{k}": test["r1_lambdarank"][f"ndcg_at_{k}"],
@@ -170,5 +195,13 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
     return summary
 
 
-if __name__ == "__main__":
+def console_main() -> int:
+    """Console-script entry point. ``sys.exit(main())`` would treat the summary
+    dict as an error message and exit with status 1."""
+
     main()
+    return 0
+
+
+if __name__ == "__main__":
+    console_main()

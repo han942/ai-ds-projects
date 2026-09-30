@@ -91,7 +91,11 @@ class InteractionRepository:
             ]
 
     def fetch_review_texts(self, review_ids: list[int]) -> dict[int, str | None]:
-        """Fetch display-only review text without adding it to model interactions."""
+        """Fetch review text by id, separately from the text-free interactions.
+
+        Models that read text (DeepCoNN) must only use reviews dated up to
+        their own cutoff; the caller is responsible for that filter.
+        """
 
         ordered_ids = sorted(set(review_ids))
         if not ordered_ids:

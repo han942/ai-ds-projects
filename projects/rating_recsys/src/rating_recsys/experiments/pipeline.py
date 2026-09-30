@@ -8,20 +8,28 @@ Protocol
    visit of that user up to the window start and its positives are every
    window visit with relevance > 0. Users without history are counted but not
    evaluated.
-3. Ranker training queries are single-positive prefix queries whose target is
+3. Stage 1 is C5 = RRF(C1 item-item, C4 LightGCN). For a window, LightGCN is
+   fitted on every interaction up to the window start. C0, C2 and the previous
+   C3 quota union are built from the same context and reported for reference.
+4. Ranker training queries are single-positive prefix queries whose target is
    on or before the evaluation cutoff: <= T1 while tuning, <= T2 for the final
    refit. Candidates and features for every query use only interactions
-   ordered before that query.
-4. Tuning reads only the validation window: first the C3 quota by candidate
-   Recall@candidate_k, then a LightGBM grid with early stopping selected by
-   NDCG@ranking_k.
-5. The test window is evaluated exactly once, after every choice is fixed.
+   ordered before that query; its LightGCN model is the one refit at the start
+   of the query's calendar block (``lightgcn_checkpoint_months``) on
+   interactions dated before that start. Only queries whose positive is among
+   their own Stage 1 candidates become training groups; positives are never
+   added to a candidate list.
+5. Tuning reads only the validation window: a LightGBM grid with early
+   stopping selected by NDCG@ranking_k. LightGCN settings are fixed in the
+   config (chosen earlier on the validation window).
+6. The test window is evaluated exactly once, after every choice is fixed.
 
 Each run writes ``artifacts/runs/<run_id>/`` including ``report.md``.
 """
 
 from __future__ import annotations
 
+import bisect
 import gc
 import resource
 import sys
@@ -29,7 +37,7 @@ import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Sequence
 
 import numpy as np
 
@@ -57,17 +65,21 @@ from rating_recsys.experiments.snapshot import (
 from rating_recsys.ranking.features import build_feature_rows, feature_values
 from rating_recsys.ranking.lambdarank import LightGBMLambdaRanker
 from rating_recsys.retrieval.baselines import (
-    BaselineCandidateGenerator,
     IncrementalRetrievalContext,
     RetrievalContext,
 )
+from rating_recsys.retrieval.hybrid import HybridCandidateGenerator
+from rating_recsys.retrieval.lightgcn import LightGCN, LightGCNConfig
 
 
+STAGE1 = "c5_c1_lightgcn_rrf"
 CANDIDATE_STAGES = (
     "c0_popularity",
     "c1_item_item",
     "c2_region_popularity",
     "c3_rrf_union",
+    "c4_lightgcn",
+    STAGE1,
 )
 RANKING_STAGES = ("r0_candidate_order", "r1_lambdarank")
 REFERENCE_NAME = "reference_untuned"
@@ -116,10 +128,94 @@ def build_context(interactions: Iterable[Interaction]) -> RetrievalContext:
     return builder.context
 
 
+def checkpoint_start(day: date, months: int) -> date:
+    """First day of the calendar block (``months`` long, from January) of ``day``."""
+
+    return date(day.year, (day.month - 1) // months * months + 1, 1)
+
+
+def fit_lightgcn(
+    interactions: Sequence[Interaction], config: LightGCNConfig
+) -> tuple[LightGCN | None, dict[str, object]]:
+    """Fit on ``interactions``; ``None`` when the graph is too small to train."""
+
+    started = time.perf_counter()
+    try:
+        model = LightGCN(config).fit(interactions)
+    except ValueError as error:
+        return None, {"edges": len(interactions), "skipped": str(error)}
+    model.final_embeddings  # propagate once; later lookups reuse it
+    return model, {
+        "edges": model.edge_count,
+        "users": len(model.user_ids),
+        "restaurants": len(model.item_ids),
+        "final_bpr_loss": model.history[-1].bpr_loss if model.history else None,
+        "fit_seconds": round(time.perf_counter() - started, 3),
+    }
+
+
+class CheckpointedLightGCN:
+    """LightGCN models for ranker training queries, refit at block starts.
+
+    A training query dated ``d`` uses the model fitted on the interactions
+    dated strictly before the start of ``d``'s calendar block, so its target
+    and anything later are outside the graph. Only the latest block's model is
+    held; requesting an earlier block again refits it (deterministically) and
+    checks that it saw the same edges.
+    """
+
+    def __init__(
+        self,
+        config: LightGCNConfig,
+        *,
+        months: int,
+        log: Callable[[str], None] = lambda _: None,
+    ) -> None:
+        self.config = config
+        self.months = months
+        self.log = log
+        self.summary: dict[str, dict[str, object]] = {}
+        self._block: date | None = None
+        self._model: LightGCN | None = None
+
+    def model_for(
+        self,
+        day: date,
+        ordered_reference: Sequence[Interaction],
+        reference_dates: Sequence[date],
+    ) -> LightGCN | None:
+        block = checkpoint_start(day, self.months)
+        key = block.isoformat()
+        edge_count = bisect.bisect_left(reference_dates, block)
+        previous = self.summary.get(key)
+        if previous is not None and previous["edges"] != edge_count:
+            raise RuntimeError(
+                f"Checkpoint {key} was fitted on {previous['edges']} edges, now {edge_count}"
+            )
+        if block == self._block:
+            return self._model
+        self._model, info = fit_lightgcn(ordered_reference[:edge_count], self.config)
+        self._block = block
+        if previous is None:
+            self.summary[key] = {"checkpoint": key, "queries": 0, **info}
+        self.log(
+            f"lightgcn checkpoint {key}: {info['edges']} edges, "
+            f"{info.get('fit_seconds', 0)}s"
+        )
+        return self._model
+
+    def count_query(self, day: date) -> None:
+        self.summary[checkpoint_start(day, self.months).isoformat()]["queries"] += 1
+
+    def rows(self) -> list[dict[str, object]]:
+        return [self.summary[key] for key in sorted(self.summary)]
+
+
 def prefix_training_arrays(
     queries: tuple[RecommendationQuery, ...],
     reference_interactions: tuple[Interaction, ...],
-    generator: BaselineCandidateGenerator,
+    generator: HybridCandidateGenerator,
+    graphs: CheckpointedLightGCN,
     *,
     feature_names: tuple[str, ...],
     log: Callable[[str], None] = lambda _: None,
@@ -129,11 +225,16 @@ def prefix_training_arrays(
 
     Queries are processed in global chronological order while the retrieval
     context grows, so each query sees only interactions ordered before its
-    target. A missing but available positive is injected for training only.
-    Rows inside a group are ordered by restaurant id for determinism.
+    target. LightGCN comes from ``graphs`` (fitted before the query's block).
+    A query becomes a training group only when its positive is among its own
+    Stage 1 candidates, exactly as at evaluation. Positives are never added to
+    the candidate list: an added row could only sit outside the real list
+    (rank ``candidate_k + 1``), and the ranker would learn that position
+    instead of the features. Rows inside a group are ordered by restaurant id
+    for determinism.
     """
 
-    capacity_per_query = generator.candidate_k + 1
+    capacity_per_query = generator.candidate_k
     features = np.empty(
         (len(queries) * capacity_per_query, len(feature_names)), dtype=np.float32
     )
@@ -141,10 +242,11 @@ def prefix_training_arrays(
     groups: list[int] = []
     ordered_queries = sorted(queries, key=lambda q: global_interaction_key(q.target))
     ordered_reference = sorted(reference_interactions, key=global_interaction_key)
+    reference_dates = [item.event_date for item in ordered_reference]
     builder = IncrementalRetrievalContext()
     index = 0
     offset = 0
-    relevant = available = retrieved = injected = 0
+    relevant = available = retrieved = graph_queries = 0
     for processed, query in enumerate(ordered_queries, start=1):
         if processed % 10000 == 0:
             log(
@@ -158,26 +260,36 @@ def prefix_training_arrays(
         ):
             builder.add(ordered_reference[index])
             index += 1
-        result, context = generator.retrieve_from_context(query, builder.context)
-        candidates = result.union
-        if query.relevance > 0:
-            relevant += 1
-            available += int(result.target_available)
-            retrieved += int(
-                any(c.restaurant_id == query.target.restaurant_id for c in candidates)
-            )
-            candidates = generator.inject_target(query, candidates, context)
-            injected += int(any(c.injected_for_training for c in candidates))
+        model = graphs.model_for(query.target.event_date, ordered_reference, reference_dates)
+        graphs.count_query(query.target.event_date)
+        ranked = (
+            model.top_k(
+                [query.user_id],
+                [[item.restaurant_id for item in query.history]],
+                generator.candidate_k,
+            )[0]
+            if model is not None
+            else ()
+        )
+        graph_queries += int(bool(ranked))
+        context = builder.context
+        result = generator.retrieve(query, context, graph_ranked=ranked, scorer=model)
+        if query.relevance <= 0:
+            continue
+        relevant += 1
+        available += int(result.reference.target_available)
+        if not any(
+            c.restaurant_id == query.target.restaurant_id for c in result.union
+        ):
+            continue
+        retrieved += 1
         rows = sorted(
             build_feature_rows(
-                query, candidates, context, include_region=generator.include_region
+                query, result.union, context, include_region=generator.include_region
             ),
             key=lambda row: row.restaurant_id,
         )
-        if not (
-            any(row.relevance > 0 for row in rows)
-            and any(row.relevance == 0 for row in rows)
-        ):
+        if not any(row.relevance == 0 for row in rows):
             continue
         for row in rows:
             features[offset] = [row.features[name] for name in feature_names]
@@ -196,8 +308,9 @@ def prefix_training_arrays(
             "relevant_queries": relevant,
             "available_positive_queries": available,
             "retrieved_positive_queries": retrieved,
-            "injected_positive_queries": injected,
-            "injection_rate": injected / relevant if relevant else 0.0,
+            "retrieved_positive_rate": retrieved / relevant if relevant else 0.0,
+            "lightgcn_scored_queries": graph_queries,
+            "lightgcn_scored_rate": graph_queries / len(queries) if queries else 0.0,
             "latest_target_date": (
                 max(q.target.event_date for q in queries).isoformat()
                 if queries
@@ -210,15 +323,29 @@ def prefix_training_arrays(
 def window_candidates(
     queries: tuple[WindowQuery, ...],
     context: RetrievalContext,
-    generator: BaselineCandidateGenerator,
+    generator: HybridCandidateGenerator,
     *,
+    graph: LightGCN | None = None,
     feature_names: tuple[str, ...] | None,
 ) -> WindowCandidates:
-    """Candidates (and optionally ranker features) for fixed-cutoff queries."""
+    """Candidates (and optionally ranker features) for fixed-cutoff queries.
+
+    ``graph`` must be fitted on interactions up to the window start. Without
+    it, C4 is empty and C5 equals C1.
+    """
 
     ordered: dict[str, dict[str, tuple[int, ...]]] = {
         stage: {} for stage in CANDIDATE_STAGES
     }
+    graph_ranked = (
+        graph.recommend(
+            [q.user_id for q in queries],
+            {q.user_id: [item.restaurant_id for item in q.history] for q in queries},
+            generator.candidate_k,
+        )
+        if graph is not None
+        else {}
+    )
     feature_blocks: list[np.ndarray] = []
     label_blocks: list[np.ndarray] = []
     id_blocks: list[np.ndarray] = []
@@ -227,15 +354,23 @@ def window_candidates(
     positives = available_positives = 0
     for query in queries:
         retrieval_query = query.retrieval_query()
-        result, _ = generator.retrieve_from_context(retrieval_query, context)
-        for stage, candidates in (
-            ("c0_popularity", result.popularity),
-            ("c1_item_item", result.item_item),
-            ("c2_region_popularity", result.region_popularity),
-            ("c3_rrf_union", result.union),
+        result = generator.retrieve(
+            retrieval_query,
+            context,
+            graph_ranked=graph_ranked.get(query.user_id, ()),
+            scorer=graph,
+        )
+        reference = result.reference
+        for stage, ids in (
+            ("c0_popularity", [c.restaurant_id for c in reference.popularity]),
+            ("c1_item_item", [c.restaurant_id for c in reference.item_item]),
+            ("c2_region_popularity", [c.restaurant_id for c in reference.region_popularity]),
+            ("c3_rrf_union", [c.restaurant_id for c in reference.union]),
+            ("c4_lightgcn", result.lightgcn),
+            (STAGE1, [c.restaurant_id for c in result.union]),
         ):
-            ordered[stage][query.query_id] = tuple(c.restaurant_id for c in candidates)
-        catalog.update(result.eligible_catalog)
+            ordered[stage][query.query_id] = tuple(ids)
+        catalog.update(reference.eligible_catalog)
         for restaurant_id, relevance in query.relevance_by_item.items():
             if relevance > 0:
                 positives += 1
@@ -369,7 +504,7 @@ def stage_metrics(
     ranked: dict[str, tuple[tuple[int, float], ...]],
     config: ExperimentConfig,
 ) -> dict[str, object]:
-    """Candidate stages C0-C3 at candidate cutoffs; R0/R1 at ranking cutoffs."""
+    """C0-C5 at candidate cutoffs; R0 (C5 order) and R1 at ranking cutoffs."""
 
     common = {
         "catalog_ids": candidates.catalog,
@@ -386,7 +521,7 @@ def stage_metrics(
             **common,
         )
     metrics["r0_candidate_order"] = evaluate_rankings(
-        observations(queries, candidates.ordered["c3_rrf_union"]),
+        observations(queries, candidates.ordered[STAGE1]),
         cutoffs=config.ranking_cutoffs,
         **common,
     )
@@ -436,18 +571,6 @@ def paired_bootstrap(
             "ties": int((t == b).sum()),
         }
     return result
-
-
-def select_candidate_policy(
-    rows: list[dict[str, object]], config: ExperimentConfig
-) -> dict[str, object]:
-    """Highest validation C3 Recall@candidate_k; ties by NDCG then grid order."""
-
-    k = config.candidate_k
-    return max(
-        enumerate(rows),
-        key=lambda pair: (pair[1][f"recall_at_{k}"], pair[1][f"ndcg_at_{k}"], -pair[0]),
-    )[1]
 
 
 def select_ranker(
@@ -538,49 +661,28 @@ def run_experiment(
     feature_names = config.feature_names
     lap("01_split_and_window_queries")
 
-    # ---- Step A: candidate policy on validation ---------------------------
-    validation_context = build_context(split.train)
-    policy_rows: list[dict[str, object]] = []
-    for fraction in config.quota_grid:
-        generator = _generator(config, fraction)
-        candidates = window_candidates(
-            validation_queries, validation_context, generator, feature_names=None
-        )
-        c3 = evaluate_rankings(
-            observations(validation_queries, candidates.ordered["c3_rrf_union"]),
-            cutoffs=config.candidate_cutoffs,
-            catalog_ids=candidates.catalog,
-        )
-        policy_rows.append(
-            {
-                "base_quota_fraction": fraction,
-                "base_quota": generator.base_quota,
-                **{
-                    key: value
-                    for key, value in c3.items()
-                    if key.startswith(("recall_at_", "ndcg_at_"))
-                },
-            }
-        )
-        emit(
-            f"quota={fraction}: val C3 recall@{config.candidate_k}="
-            f"{c3[f'recall_at_{config.candidate_k}']:.4f}"
-        )
-    chosen_policy = select_candidate_policy(policy_rows, config)
-    generator = _generator(config, float(chosen_policy["base_quota_fraction"]))
-    lap("02_select_candidate_policy")
+    # ---- Step A: validation-window LightGCN (edges <= T1) -----------------
+    generator = _generator(config)
+    graph_config = config.lightgcn_config
+    validation_graph, validation_graph_info = fit_lightgcn(split.train, graph_config)
+    lap("02_fit_validation_lightgcn")
 
     # ---- Step B: tuning-phase training rows (targets <= T1) ---------------
+    checkpoints = CheckpointedLightGCN(
+        graph_config, months=config.lightgcn_checkpoint_months, log=emit
+    )
     train_queries = build_prefix_queries(split.train, config=config, phase="train")
     _assert_targets_through(train_queries, t1)
     train_arrays = prefix_training_arrays(
-        train_queries, split.train, generator,
+        train_queries, split.train, generator, checkpoints,
         feature_names=feature_names, log=emit, label="train_prefix",
     )
     lap("03_build_train_prefix_rows")
 
+    validation_context = build_context(split.train)
     validation_candidates = window_candidates(
-        validation_queries, validation_context, generator, feature_names=feature_names
+        validation_queries, validation_context, generator,
+        graph=validation_graph, feature_names=feature_names,
     )
     eval_set = positive_eval_set(validation_candidates)
     lap("04_build_validation_rows")
@@ -641,6 +743,7 @@ def run_experiment(
         validation_candidates, config,
     )
     del eval_set, validation_candidates, validation_context, validation_ranker
+    del validation_graph
     gc.collect()
     lap("05_tune_lightgbm_on_validation")
 
@@ -652,7 +755,7 @@ def run_experiment(
     )
     _assert_targets_through(refit_queries, t2)
     refit_arrays = prefix_training_arrays(
-        refit_queries, test_history, generator,
+        refit_queries, test_history, generator, checkpoints,
         feature_names=feature_names, log=emit, label="refit_prefix",
     )
     final_features = np.concatenate([train_arrays.features, refit_arrays.features])
@@ -678,17 +781,29 @@ def run_experiment(
     lap("06_final_refit")
 
     # ---- Step E: the single test evaluation --------------------------------
+    test_graph, test_graph_info = fit_lightgcn(test_history, graph_config)
     test_context = build_context(test_history)
     test_candidates = window_candidates(
-        test_queries, test_context, generator, feature_names=feature_names
+        test_queries, test_context, generator,
+        graph=test_graph, feature_names=feature_names,
     )
+    del test_graph
     test_ranked = rank_window(final_ranker, test_queries, test_candidates)
     test_metrics = stage_metrics(test_queries, test_candidates, test_ranked, config)
     test_metrics["bootstrap_r1_minus_r0"] = paired_bootstrap(
         test_queries,
         ranked_ids(test_ranked),
-        test_candidates.ordered["c3_rrf_union"],
+        test_candidates.ordered[STAGE1],
         cutoff=config.ranking_k,
+        samples=config.bootstrap_samples,
+        seed=config.random_seed,
+    )
+    # Evidence for the Stage 1 switch: C5 against the previous C3 union.
+    test_metrics["bootstrap_c5_minus_c3"] = paired_bootstrap(
+        test_queries,
+        test_candidates.ordered[STAGE1],
+        test_candidates.ordered["c3_rrf_union"],
+        cutoff=config.candidate_k,
         samples=config.bootstrap_samples,
         seed=config.random_seed,
     )
@@ -702,10 +817,6 @@ def run_experiment(
         "test": test_metrics,
         "selection": {
             "rule": {
-                "candidate_policy": (
-                    f"validation C3 Recall@{config.candidate_k} 최대 "
-                    f"(동률이면 NDCG@{config.candidate_k}, 그다음 grid 순서)"
-                ),
                 "ranker": (
                     f"validation R1 NDCG@{config.ranking_k} 최대 "
                     f"(동률이면 Recall@{config.ranking_k}, 그다음 grid 순서)"
@@ -715,13 +826,20 @@ def run_experiment(
                     "train + validation window prefix query로 재학습"
                 ),
             },
-            "candidate_policy_grid": policy_rows,
-            "chosen_candidate_policy": chosen_policy,
             "ranker_grid": ranker_rows,
             "chosen_ranker": chosen_ranker["name"],
             "final_ranker_params": final_params,
         },
         "training": training_summary,
+        "lightgcn": {
+            "config": graph_config.to_dict(),
+            "checkpoint_months": config.lightgcn_checkpoint_months,
+            "window_models": {
+                "validation": validation_graph_info,
+                "test": test_graph_info,
+            },
+            "training_checkpoints": checkpoints.rows(),
+        },
         "feature_importance": feature_importance,
     }
     environment = environment_manifest()
@@ -744,8 +862,18 @@ def run_experiment(
             "test": _window_summary(test_queries, test_new, t2),
         },
         "leakage_checks": {
+            "lightgcn_validation_graph_through": t1.isoformat(),
+            "lightgcn_test_graph_through": t2.isoformat(),
+            "lightgcn_training_query_graph": (
+                "interactions dated before the start of the query's "
+                f"{config.lightgcn_checkpoint_months}-month calendar block"
+            ),
             "tuning_training_targets_through": t1.isoformat(),
             "refit_training_targets_through": t2.isoformat(),
+            "ranker_training_groups": (
+                "prefix queries whose positive is among their own Stage 1 "
+                "candidates; no positive is added to a candidate list"
+            ),
             "validation_context_through": t1.isoformat(),
             "test_context_through": t2.isoformat(),
             "test_evaluations": 1,
@@ -780,12 +908,12 @@ def _ranker_grid(config: ExperimentConfig) -> list[dict[str, object]]:
     ]
 
 
-def _generator(config: ExperimentConfig, fraction: float) -> BaselineCandidateGenerator:
-    return BaselineCandidateGenerator(
+def _generator(config: ExperimentConfig) -> HybridCandidateGenerator:
+    return HybridCandidateGenerator(
         candidate_k=config.candidate_k,
         rrf_constant=config.rrf_constant,
         include_region=config.include_region,
-        base_quota_fraction=fraction,
+        legacy_c3_quota=config.legacy_c3_quota,
     )
 
 
@@ -844,7 +972,7 @@ def _write_window_artifacts(
 ) -> None:
     candidate_rank = {
         query_id: {restaurant_id: rank for rank, restaurant_id in enumerate(ids, 1)}
-        for query_id, ids in candidates.ordered["c3_rrf_union"].items()
+        for query_id, ids in candidates.ordered[STAGE1].items()
     }
     write_jsonl(
         run_dir / f"queries_{phase}.jsonl",

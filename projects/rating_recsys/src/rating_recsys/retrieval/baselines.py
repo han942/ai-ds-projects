@@ -27,6 +27,9 @@ class RetrievalResult:
     eligible_catalog: frozenset[int]
     target_available: bool
     latency_ms: float
+    # Per-restaurant raw scores behind the source lists, keyed by source name
+    # (``item_item_max`` included). Other fusions reuse them for features.
+    score_maps: dict[str, dict[int, float]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +151,10 @@ def build_context(interactions: Iterable[Interaction]) -> RetrievalContext:
 
 
 class BaselineCandidateGenerator:
-    """Generate source candidates and fuse them with reciprocal rank fusion.
+    """Generate the C0-C2 source lists and the C3 quota RRF union.
+
+    Since 2026-09-30 the Stage 1 output is C5 (C1 + LightGCN RRF, see
+    ``retrieval.hybrid``); C0, C2 and C3 remain as reference lists and features.
 
     ``base_quota_fraction`` is the share of the candidate budget reserved for the
     C0+C1 RRF order before C2-inclusive RRF fills the rest. The default 0.5 is the
@@ -379,56 +385,15 @@ class BaselineCandidateGenerator:
                 eligible_catalog=frozenset(eligible),
                 target_available=query.target.restaurant_id in context.item_counts,
                 latency_ms=(time.perf_counter() - started) * 1000,
+                score_maps={
+                    POPULARITY: popularity_scores,
+                    ITEM_ITEM: item_sum_scores,
+                    "item_item_max": item_max_scores,
+                    REGION_POPULARITY: region_popularity_scores,
+                },
             ),
             context,
         )
-
-    def inject_target(
-        self,
-        query: RecommendationQuery,
-        candidates: tuple[Candidate, ...],
-        context: RetrievalContext,
-    ) -> tuple[Candidate, ...]:
-        """Inject an available positive into training rows, never evaluation."""
-
-        target_id = query.target.restaurant_id
-        if any(item.restaurant_id == target_id for item in candidates):
-            return candidates
-        if target_id not in context.item_counts:
-            return candidates
-        injected = Candidate(
-            query_id=query.query_id,
-            user_id=query.user_id,
-            restaurant_id=target_id,
-            restaurant_name=context.item_names[target_id],
-            region=context.item_regions[target_id],
-            candidate_sources=(),
-            source_scores={
-                POPULARITY: float(context.item_counts[target_id]),
-                ITEM_ITEM: sum(
-                    context.similarity(item.restaurant_id, target_id)
-                    for item in query.history
-                ),
-                "item_item_max": max(
-                    (
-                        context.similarity(item.restaurant_id, target_id)
-                        for item in query.history
-                    ),
-                    default=0.0,
-                ),
-                **(
-                    {REGION_POPULARITY: _region_popularity_score(query, target_id, context)}
-                    if self.include_region
-                    else {}
-                ),
-                BASE_RRF: 0.0,
-            },
-            source_ranks={},
-            rrf_score=0.0,
-            candidate_rank=len(candidates) + 1,
-            injected_for_training=True,
-        )
-        return candidates + (injected,)
 
     def _candidate(
         self,
@@ -495,16 +460,3 @@ def _top_ids(scores: dict[int, float], limit: int) -> tuple[int, ...]:
             scores.items(), key=lambda pair: (-pair[1], pair[0])
         )[:limit]
     )
-
-
-def _region_popularity_score(
-    query: RecommendationQuery,
-    restaurant_id: int,
-    context: RetrievalContext,
-) -> float:
-    if not query.history:
-        return 0.0
-    preferred = sum(
-        item.region == context.item_regions[restaurant_id] for item in query.history
-    ) / len(query.history)
-    return context.item_counts[restaurant_id] * preferred

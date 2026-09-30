@@ -12,11 +12,14 @@ class ExperimentConfig:
     """All choices that can change the offline result.
 
     The split uses one global date cutoff pair from interaction quantiles.
-    Grid fields are the options tried on the validation window; the test
-    window is evaluated once with the selected options.
+    Stage 1 is C5 = RRF(C1 item-item, C4 LightGCN). The LightGCN settings are
+    fixed here; they were chosen on the validation window of the LightGCN
+    comparison run (3 layers, L2 1e-4, 20 epochs; see BASELINE_MODEL.md).
+    Grid fields are the ranker options tried on the validation window; the
+    test window is evaluated once with the selected options.
     """
 
-    schema_version: str = "global-cutoff-v1"
+    schema_version: str = "global-cutoff-v2"
     protocol: str = "global-temporal-multi-positive"
     train_fraction: float = 0.8
     validation_fraction: float = 0.1
@@ -27,7 +30,18 @@ class ExperimentConfig:
     region_mode: str = "with_region"
     relevance_high_threshold: float = 4.0
     relevance_low_threshold: float = 3.0
-    quota_grid: tuple[float, ...] = (0.0, 0.25, 0.5, 0.75, 1.0)
+    # C4 LightGCN. Training queries use models refit every
+    # ``lightgcn_checkpoint_months`` (calendar aligned) on earlier interactions.
+    lightgcn_dimension: int = 64
+    lightgcn_layers: int = 3
+    lightgcn_epochs: int = 20
+    lightgcn_learning_rate: float = 0.005
+    lightgcn_regularization: float = 1e-4
+    lightgcn_batch_size: int = 2048
+    lightgcn_checkpoint_months: int = 3
+    # Reference only: the previous C3 quota union, with the quota the
+    # 2026-09-27 run chose on validation. Not fused into Stage 1.
+    legacy_c3_quota: float = 0.75
     num_leaves_grid: tuple[int, ...] = (15, 31, 63)
     min_child_samples_grid: tuple[int, ...] = (10, 100)
     learning_rate: float = 0.05
@@ -53,12 +67,15 @@ class ExperimentConfig:
             raise ValueError("ranking_k must be between 1 and candidate_k")
         if self.rrf_constant < 1:
             raise ValueError("rrf_constant must be positive")
-        if not self.quota_grid or any(not 0 <= q <= 1 for q in self.quota_grid):
-            raise ValueError("quota_grid values must be between 0 and 1")
+        if not 0 <= self.legacy_c3_quota <= 1:
+            raise ValueError("legacy_c3_quota must be between 0 and 1")
+        if self.lightgcn_checkpoint_months not in {1, 2, 3, 4, 6, 12}:
+            raise ValueError("lightgcn_checkpoint_months must divide 12")
         if not self.num_leaves_grid or not self.min_child_samples_grid:
             raise ValueError("LightGBM grids must not be empty")
         if self.relevance_low_threshold >= self.relevance_high_threshold:
             raise ValueError("low relevance threshold must be below high threshold")
+        self.lightgcn_config  # validates the LightGCN fields
 
     @property
     def include_region(self) -> bool:
@@ -67,6 +84,20 @@ class ExperimentConfig:
     @property
     def feature_names(self) -> tuple[str, ...]:
         return FEATURE_NAMES if self.include_region else NO_REGION_FEATURE_NAMES
+
+    @property
+    def lightgcn_config(self):
+        from rating_recsys.retrieval.lightgcn import LightGCNConfig
+
+        return LightGCNConfig(
+            dimension=self.lightgcn_dimension,
+            layers=self.lightgcn_layers,
+            epochs=self.lightgcn_epochs,
+            batch_size=self.lightgcn_batch_size,
+            learning_rate=self.lightgcn_learning_rate,
+            regularization=self.lightgcn_regularization,
+            seed=self.random_seed,
+        )
 
     @property
     def candidate_cutoffs(self) -> tuple[int, ...]:
