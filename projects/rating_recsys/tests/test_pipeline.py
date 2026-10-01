@@ -58,6 +58,46 @@ class WindowQueryTests(unittest.TestCase):
             )
 
 
+class RankWindowTests(unittest.TestCase):
+    def test_preserves_each_querys_c5_order_only_for_exact_score_ties(self) -> None:
+        """Ties retain retrieval evidence; unequal scores still control the order."""
+
+        import numpy as np
+        from unittest.mock import Mock
+
+        from rating_recsys.experiments.pipeline import STAGE1, WindowCandidates, rank_window
+
+        history = [_interaction(1, 1, 101, 1), _interaction(2, 2, 102, 1)]
+        window = [_interaction(3, 1, 90, 2), _interaction(4, 2, 10, 2)]
+        queries, _ = build_window_queries(
+            history, window, config=SMALL, phase="validation", cutoff=history[0].event_date
+        )
+        candidates = WindowCandidates(
+            ordered={STAGE1: {
+                queries[0].query_id: (90, 10, 20, 30),
+                queries[1].query_id: (10, 90, 20),
+            }},
+            features=np.zeros((7, 1)),
+            labels=np.zeros(7, dtype=np.int32),
+            # Feature rows may be rearranged; C5 ranks belong to each query.
+            row_restaurant_ids=np.array([10, 30, 90, 20, 20, 90, 10]),
+            group_sizes=[4, 3],
+            catalog={10, 20, 30, 90},
+            item_popularity={}, item_regions={}, item_names={}, positive_availability={},
+        )
+        ranker = Mock()
+        ranker.predict.return_value = np.array([0.2, 0.200000000001, 0.2, 0.4, 0.2, 0.2, 0.2])
+
+        ranked = rank_window(ranker, queries, candidates)
+
+        # A tiny genuine score difference wins; only the exact 0.2 tie uses C5.
+        self.assertEqual(ranked[queries[0].query_id], (
+            (20, 0.4), (30, 0.200000000001), (90, 0.2), (10, 0.2),
+        ))
+        # With every score equal, the complete C5 order is restored.
+        self.assertEqual(ranked[queries[1].query_id], ((10, 0.2), (90, 0.2), (20, 0.2)))
+
+
 class PipelineTests(unittest.TestCase):
     def test_run_folder_leakage_boundaries_and_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

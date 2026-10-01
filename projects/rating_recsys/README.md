@@ -22,6 +22,8 @@ LightGCN)로 바꿨다. C0 인기, C2 지역 인기, C3는 결합하지 않고 �
 나아지지 않는다(보고서 6절). 같은 날 앞선 run은 학습 정답을 후보 밖에 끼워 넣어 R1이
 그 위치를 학습했기 때문에 대체했다.
 
+2026-10-01부터 R1 점수가 같으면 C5 순위를 유지한다. 위 지표는 이 변경 전 실행 결과다.
+
 - 모델과 평가 방식: [BASELINE_MODEL.md](./BASELINE_MODEL.md)
 - 전체 계획과 마일스톤: [RECOMMENDER_V2_PLAN.md](./RECOMMENDER_V2_PLAN.md)
 - 기록 문서: [analysis/](./analysis/README.md) · 로컬 산출물: [artifacts/](./artifacts/README.md)

@@ -437,8 +437,9 @@ baseline 구현 시 아래를 완료 조건으로 추가한다.
    RRF 상수와 random seed 42를 하나의 versioned experiment config로 저장한다.
 3. Python 및 모든 transitive dependency를 lock file로 고정하고 실제 실행 환경의
    package 목록과 OS 정보를 manifest에 기록한다.
-4. 모든 score tie는 `restaurant_id`로 결정하고 LightGBM seed와 deterministic
-   option을 고정한다. 병렬 실행에서도 순서가 달라지지 않게 테스트한다.
+4. 후보 source의 score tie는 `restaurant_id`, R1의 score tie는 해당 query의 C5 순위로
+   결정한다. LightGBM seed와 deterministic option을 고정하고 병렬 실행에서도
+   순서가 달라지지 않게 테스트한다.
 5. Git commit과 feature schema version을 기록하고, 기본 strict mode에서는 dirty
    worktree 실행을 거부한다. 예외 허용 시 diff를 artifact로 함께 저장한다.
 6. query, candidate, ranking 결과와 모델을 같은 MLflow run에 저장하고 dataset
@@ -707,8 +708,8 @@ C5 후보는 C3보다 Recall@100이 높지만 R1이 R0(C5 순서)를 넘지 못�
 끼워넣기(injection)는 R1이 후보 위치를 학습하게 만들어 같은 날 제거했고, 그 뒤 R1은
 트리 1개에서 멈춘다. 병목 순서대로 진행한다.
 
-1. R1 동점 처리와 fallback: ranker 점수가 같으면 C5 순위로 정렬하고, validation 선택
-   후보에 R0(재정렬 없음)를 넣어 R1이 R0보다 못하면 R0를 쓰는 규칙.
+1. R1 동점 처리는 2026-10-01 반영: ranker 점수가 같으면 C5 순위를 보존한다. 다음은
+   validation 선택 후보에 R0(재정렬 없음)를 넣어 R1이 R0보다 못하면 R0를 쓰는 규칙.
 2. C5 순서에 없는 정보를 주는 feature(리뷰 텍스트 유사도 등)와 정답 여러 개의 window형
    학습 query. 학습 query용 LightGCN checkpoint 간격 1개월도 함께 본다.
 3. 리뷰 기반 경험 라벨(좋음/무난/나쁨)과 나쁜 경험 guardrail 지표 도입.

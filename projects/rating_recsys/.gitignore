@@ -4,6 +4,7 @@
 __pycache__/
 .pytest_cache/
 crawler/data/
+mlruns/
 
 # Local experiment outputs. Only the folder guide and each run's report are
 # versioned; everything else under artifacts/ stays on this machine.

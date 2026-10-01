@@ -439,7 +439,7 @@ def rank_window(
     queries: tuple[WindowQuery, ...],
     candidates: WindowCandidates,
 ) -> dict[str, tuple[tuple[int, float], ...]]:
-    """Order every query's candidates by ranker score, ties by restaurant id."""
+    """Order by ranker score, preserving each query's C5 order for exact ties."""
 
     if candidates.features is None or candidates.row_restaurant_ids is None:
         raise ValueError("Window candidates were built without features")
@@ -451,10 +451,14 @@ def rank_window(
     for query, size in zip(queries, candidates.group_sizes, strict=True):
         ids = candidates.row_restaurant_ids[offset : offset + size]
         values = scores[offset : offset + size]
+        c5_ranks = {
+            restaurant_id: rank
+            for rank, restaurant_id in enumerate(candidates.ordered[STAGE1][query.query_id])
+        }
         ranked[query.query_id] = tuple(
             sorted(
                 ((int(i), float(s)) for i, s in zip(ids, values, strict=True)),
-                key=lambda pair: (-pair[1], pair[0]),
+                key=lambda pair: (-pair[1], c5_ranks[pair[0]], pair[0]),
             )
         )
         offset += size
