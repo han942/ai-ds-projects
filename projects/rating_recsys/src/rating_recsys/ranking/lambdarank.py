@@ -23,6 +23,7 @@ class LightGBMLambdaRanker:
         min_child_samples: int = 10,
         reg_lambda: float = 1.0,
         n_jobs: int = 1,
+        label_gain: tuple[float, ...] = (0.0, 1.0, 3.0),
     ) -> None:
         try:
             import lightgbm as lgb
@@ -39,8 +40,9 @@ class LightGBMLambdaRanker:
         self._fitted = False
         self._model = lgb.LGBMRanker(
             objective="lambdarank",
-            metric="ndcg",
-            label_gain=[0, 1, 3],
+            # Validation gain must not change with the training label_gain.
+            metric="None",
+            label_gain=list(label_gain),
             lambdarank_truncation_level=ranking_k + 3,
             n_estimators=n_estimators,
             learning_rate=learning_rate,
@@ -78,12 +80,37 @@ class LightGBMLambdaRanker:
         kwargs: dict[str, object] = {}
         if eval_set is not None:
             eval_features, eval_labels, eval_groups = eval_set
+            import numpy as np
+
+            width = max(eval_groups)
+            gains = np.zeros((len(eval_groups), width), dtype=np.float64)
+            valid = np.zeros_like(gains, dtype=bool)
+            offset = 0
+            for index, size in enumerate(eval_groups):
+                group_labels = np.asarray(eval_labels[offset:offset + size], dtype=int)
+                if np.any((group_labels < 0) | (group_labels > 2)):
+                    raise ValueError("Validation labels must use the common relevance 0/1/2")
+                gains[index, :size] = np.asarray([0.0, 1.0, 3.0])[group_labels]
+                valid[index, :size] = True
+                offset += size
+            k = min(self._ranking_k, width)
+            discount = 1 / np.log2(np.arange(k) + 2)
+            ideal = (np.sort(gains, axis=1)[:, ::-1][:, :k] * discount).sum(axis=1)
+
+            def common_ndcg(y_true, predictions):
+                scores = np.full_like(gains, -np.inf)
+                scores[valid] = predictions
+                order = np.argsort(-scores, axis=1, kind="stable")[:, :k]
+                dcg = (np.take_along_axis(gains, order, axis=1) * discount).sum(axis=1)
+                values = np.divide(dcg, ideal, out=np.zeros_like(dcg), where=ideal > 0)
+                return f"ndcg@{self._ranking_k}", float(values.mean()), True
             # LightGBM 4.7 deprecates eval_set in favour of eval_X/eval_y.
             if "eval_X" in inspect.signature(self._model.fit).parameters:
                 kwargs = {"eval_X": (eval_features,), "eval_y": (eval_labels,)}
             else:
                 kwargs = {"eval_set": [(eval_features, eval_labels)]}
             kwargs.update({"eval_group": [eval_groups], "eval_at": (self._ranking_k,)})
+            kwargs["eval_metric"] = common_ndcg
             if early_stopping_rounds:
                 kwargs["callbacks"] = [
                     self._lgb.early_stopping(

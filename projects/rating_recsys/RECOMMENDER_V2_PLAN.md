@@ -1,8 +1,15 @@
 # Rating Recommender System v2 확장 계획
 
-> 상태: M1·M2·M3 완료. M4 Stage 1 기준선을 2026-09-30에 C3(quota RRF)에서 C5(C1 + LightGCN RRF)로 교체하고, ranker 학습의 정답 끼워넣기를 제거했다. DeepCoNN 후보 실험은 C5보다 낮아 채택하지 않았다. 2026-09-27부터 평가는 전역 날짜 cutoff 방식 하나로 통일
+> 상태 (2026-10-01 코드 확인): M1·M2의 DB·적재 핵심과 M3 오프라인 실험 구현 완료. DB integration test는 남아 있다. M4는 C5(C1 + LightGCN RRF) 기준선과 DeepCoNN 비교까지, M5는 LambdaRank·지표·실험 UI까지 구현했다. Ranker 학습의 정답 끼워넣기는 제거했고 점수 동점은 C5 순위를 보존한다. 마지막 전체 실행 결과는 이 동점 처리 변경 전인 2026-09-30 run이다. M6~M8의 서비스·새 모델·시간 feature는 후속 과제다.
 > 방향: DB-backed data pipeline → Stage 1 candidate retrieval → Stage 2 learning-to-rank  
 > 비용 원칙: 로컬·오픈소스 우선, 관리형 서비스와 유료 API는 기본 구성에서 제외
+
+2026-10-02 후속 결정: LTR은 여러 관측 식당을 한 window group으로 비교하고, 기존
+등급 label과 원래 평점 gain을 따로 비교한다. 리뷰 텍스트는 후보 생성에서 평점 모델의
+별도 feature로 결합한다. MF·사용자/식당 bias는 v1에도 있던 기본 구성이다.
+현재 기준선과 비교용 구현, 아직 실행하지 않은 리뷰 모델 설계는
+[모델 점검·실험 문서](./MODEL_REVIEW_AND_EXPERIMENTS.md)에 구분했다.
+Sentence Transformers와 그 사전학습 모델의 사용은 보류한다(사용자 요청, 2026-10-02).
 
 ## 1. 프로젝트 전환 목표
 
@@ -15,8 +22,8 @@ DeepCoNN 계열 모델을 분석한 프로젝트였다. v2는 평점 회귀 실�
 1. CSV가 아닌 PostgreSQL을 모델링 데이터의 기준 저장소로 사용한다.
 2. 데이터 수집부터 학습 데이터 생성까지 재실행 가능하고 중복에 안전한
    파이프라인을 만든다.
-3. 사용자별 chronological split과 전역 temporal benchmark를 함께 사용하여
-   leakage-free 평가 프로토콜을 확립한다.
+3. 전역 날짜 cutoff와 window 단위 다중 정답으로 평가하고, 학습 query의 시점별
+   입력을 제한한다. 이전 사용자별 leave-last-two-out은 보관 기록으로만 남긴다.
 4. Stage 1 candidate retrieval과 Stage 2 learning-to-rank를 분리하여 각 단계의
    성능을 측정한다.
 5. 리뷰·메뉴·지역 정보를 활용한 vector retrieval을 추가한다.
@@ -101,6 +108,11 @@ ranker가 다른 사용자의 test보다 늦은 데이터로 학습되는 문제
 
 ## 3. 목표 아키텍처
 
+현재 동작하는 경로는 PostgreSQL(`recsys`) → interaction snapshot(JSONL) → 전역
+날짜 분할 → C5(C1 + LightGCN RRF) → R1(LambdaRank) → 보고서·MLflow·Streamlit이다.
+아래 그림의 application event, pgvector, PostGIS, content vector, recommendation
+log는 확장 목표이며 현재 실행에 필요하지 않다.
+
 ```text
 Crawler / Application events
             │
@@ -144,30 +156,48 @@ Stage 2의 출력에 적용하는 결정적 규칙이다. 별도 학습 모델�
 stage 수에는 포함하지 않는다. 사용자는 중간 candidate를 보지 않고 Stage 2의
 최종 Top-K만 받는다.
 
+현재 구현한 hard filter는 이미 방문한 식당 제외다. 지역은 선호 feature와 참고
+후보로 쓰며, 지역·영업 상태의 강제 필터와 사용자용 추천 API는 아직 없다.
+
 ## 4. 기술 스택과 비용 원칙
 
-| 영역 | 기본 선택 | 비용 |
-|---|---|---:|
-| 관계형 DB | PostgreSQL | 로컬 무료 |
-| Vector 검색 | pgvector | 무료 |
-| 공간 검색 | PostGIS | 무료 |
-| DB migration | Ordered SQL migration runner | 무료 |
-| ORM / SQL | SQLAlchemy | 무료 |
-| 모델링 | PyTorch, LightGBM | 무료 |
-| 실험 관리 | 로컬 MLflow | 무료 |
-| API | FastAPI | 무료 |
-| Container | Linux Docker Engine / Compose | 무료 |
-| Embedding | 로컬 multilingual encoder | 무료 |
+| 영역 | 현재 구현 | 후속 계획 |
+|---|---|---|
+| 관계형 DB | Supabase PostgreSQL, private `recsys` schema | 필요하면 로컬 PostgreSQL |
+| SQL / migration | psycopg 직접 SQL, ordered SQL migration runner | ORM은 사용하지 않음 |
+| 후보 모델 | NumPy/SciPy item-item·LightGCN, 별도 실험 PyTorch DeepCoNN | Two-tower·content vector·GenRec |
+| 재정렬 | LightGBM LambdaRank | feature·학습 query 개선, 이후 neural ranker 비교 |
+| 실험 관리·탐색 | 로컬 MLflow(SQLite)·Streamlit | 서비스 monitoring |
+| Vector·공간 검색 | 미구현 | pgvector·PostGIS |
+| API·배포 | 미구현 | FastAPI·Docker/Compose |
+| Content embedding | 미구현 | 로컬 multilingual encoder |
 
-관리형 PostgreSQL, 클라우드 GPU, 외부 embedding/LLM API, 지도 API의 무료
-한도 초과, 유료 proxy 또는 관리형 Vector DB를 선택할 때만 외부 비용이
-발생한다. v2의 기본 구현은 이 서비스들에 의존하지 않는다.
+로컬 학습·평가에는 유료 API가 필요하지 않다. 현재 DB는 관리형 Supabase를 쓰며
+DB 연결이 없는 실행은 보존된 snapshot으로 가능하다. 새 DB 적재나 snapshot 생성에는
+PostgreSQL 연결이 필요하다. 클라우드 GPU나 외부 embedding/LLM API 등은 선택 사항이다.
 
 ## 5. 데이터베이스 설계
 
 지역별 테이블을 만들지 않고 하나의 정규화된 스키마에 모든 지역을 저장한다.
 
 ### 5.1 핵심 테이블
+
+현재 migration이 생성하는 테이블은 `crawl_runs`, `restaurants`, `app_users`,
+`reviews`이고, migration runner가 `schema_migrations`를 추가한다. 실제 이름과
+constraint의 기준은 [001_initial_ingestion.sql](./migrations/001_initial_ingestion.sql)이다.
+
+| 실제 테이블 | 주요 필드와 식별 규칙 |
+|---|---|
+| `recsys.crawl_runs` | `run_id`, `source`, `source_file`, unique `file_sha256`, 적재 상태·행 수 |
+| `recsys.restaurants` | `restaurant_id`, unique `restaurant_key`, `canonical_name`, `address`, `region`, 출처 metadata |
+| `recsys.app_users` | `user_id`, unique `user_key`(salted SHA-256), `source`, 최초·최근 수집 시각 |
+| `recsys.reviews` | `review_id`, unique `content_hash`, 사용자·식당·crawl FK, 평점·본문·세부 점수, `reviewed_at`, `reviewed_at_precision`, `scraped_at`, `raw_date`, `source_payload` |
+| `recsys.schema_migrations` | 적용한 SQL 파일 이름 `version`, `applied_at` |
+
+모델링 interaction은 별도 테이블이 아니라 `InteractionRepository`의 SQL 조회로
+사용자·식당 쌍의 최초 리뷰를 선택한 결과다. 날짜가 없으면 서울 시간대의 수집일을
+사용하며, 두 날짜도 없으면 제외한다. 아래 단수형 이름과 필드 목록은 초기 목표
+설계다. 좌표·embedding·event·recommendation log는 아직 migration에 없다.
 
 #### `crawl_run`
 
@@ -276,7 +306,8 @@ CSV는 raw archive 및 초기 bootstrap 입력으로만 사용한다. DB 적재 
 2026-09-28 LightGCN 비교에서 LightGCN 단독과 C0/C1/C2 결합 조합 중 C1+C4가
 validation Recall@100이 가장 높았고, test에서도 C3보다 +3.50%p
 [+2.30, +4.70] 높았다. C0·C2를 결합에 넣으면 오히려 낮아졌다. 그래서 C0·C2·C3는
-결합하지 않고 비교용 표와 ranker feature로만 남긴다.
+비교용 표에 남긴다. Ranker에는 C0 인기 정보와 과거 방문 대비 지역 비율을 쓰며,
+C3 quota 결합 점수는 feature로 쓰지 않는다.
 
 Stage 1 평가는 C0~C5를 각각 남겨 source별 기여와 fusion 효과를 분리한다. C5
 후보를 평가·저장하고, 동일한 후보를 R1에 전달한다. 초기 계획 당시 catalog는
@@ -301,7 +332,13 @@ index를 추가한다.
 
 ### 6.4 Candidate union
 
-각 source의 후보를 합치고 source별 score를 그대로 보존한다.
+현재는 C1 Top-100과 C4 Top-100을 RRF로 결합해 최대 100개를 R1에 넘긴다.
+`Candidate`에는 `sources`, `source_scores`, `source_ranks`, `rrf_score`,
+`candidate_rank`가 있다. 실행 시점과 코드 버전은 run manifest에 기록하며
+모든 후보의 별도 영속 테이블은 만들지 않는다.
+
+아래 후보 수와 출력 contract는 content source 등을 추가할 때의 확장안이다.
+각 source의 후보를 합치고 source별 score를 보존한다.
 
 ```text
 popularity candidates       20
@@ -327,8 +364,8 @@ retrieved_at
 candidate_model_version
 ```
 
-초기값은 `N=100`으로 두고, candidate recall이 부족하면 150 또는 200으로
-확장한다.
+현재 `N=100`이다. 후보 수 확대는 설정 K를 평가 cutoff에 포함하도록 CLI·지표를
+수정한 뒤 진행한다([README의 제약](./README.md#조정할-수-있는-조건)).
 
 ## 7. Stage 2: Learning-to-rank 계획
 
@@ -344,10 +381,10 @@ candidate 개선과 ranking 개선을 분리해 측정할 수 있고, feature im
 
 ### 입력 feature
 
-초기 R1에서는 candidate source별 score·rank·source 존재 여부, 식당 popularity,
-item-item similarity, 사용자 history 길이와 사용자의 과거 지역 분포 대비
-candidate 지역 affinity만 사용한다. 모두 query cutoff 이전 interaction에서
-집계한다.
+현재 R1은 C0·C1·C4의 score·rank·source 존재 여부, C5의 RRF 점수·역순위,
+식당 popularity·평균 평점, item-item similarity, 사용자 history 길이·평균 평점,
+과거 방문 대비 후보 지역 비율을 사용한다. 기본 16개 feature이며 지역 feature를
+제외하면 15개다. 모두 query 시점 이전 interaction에서 집계한다.
 
 user/item embedding similarity, 거리, recency, 카테고리·가격·맛·서비스 선호,
 신규 식당 여부와 review/menu content similarity는 각 데이터·모델이 추가될 때
@@ -356,10 +393,11 @@ baseline에서 제외하고 8.5절의 Future Work로 관리한다.
 
 ### Ranking group과 label
 
-- group: `(user_id, recommendation_cutoff_at)`
-- positive: 해당 cutoff 이후 관측된 held-out interaction
+- group: query 1개. 학습은 사용자별 이력 prefix, 평가는 사용자 1명 × window 1개
+- 학습 positive: 다음 방문 1개(relevance > 0)가 해당 query의 C5 후보에 있을 때만 사용
+- 평가 positive: window 안의 relevance > 0인 모든 방문 (후보 밖 정답도 분모에 포함)
 - explicit low rating: 낮은 relevance
-- unobserved item: sampling된 약한 negative
+- unobserved item: C5가 반환한 나머지 후보를 약한 negative로 사용 (별도 sampling 없음)
 - impression 이후 무반응: impression 로그가 쌓인 이후 negative 후보
 
 review-only 데이터에서 사용하는 초기 graded relevance는 다음과 같이 고정한다.
@@ -368,17 +406,19 @@ review-only 데이터에서 사용하는 초기 graded relevance는 다음과 �
 |---|---:|
 | 평점 4.0 이상 | 2 |
 | 평점 3.0 이상 4.0 미만 | 1 |
-| 평점 3.0 미만 또는 sampled unobserved item | 0 |
+| 평점 3.0 미만 또는 미관측 후보 | 0 |
 
 서로 다른 이벤트를 하나의 label로 합칠 때에는 이벤트 정의와 가중치를
 실험별로 versioning한다. relevance가 모두 0인 query는 ranking metric에서
-제외하고 그 수와 비율을 별도 data-quality metric으로 기록한다.
+제외한다. 현재는 전체 `queries`와 `evaluated_queries`를 기록하므로 제외 수·비율은
+두 값으로 계산한다. Coverage·novelty·지역 다양성에는 해당 query도 포함한다.
 
 ## 8. 평가 계획
 
 ### 8.1 데이터 분할
 
-1. 날짜를 절대 시각으로 정규화한다.
+1. 날짜를 절대 날짜(`date`)로 정규화한다. 시각이 없는 리뷰는 같은 날짜 안에서
+   사용자·리뷰·식당 ID 순으로 결정적 순서를 부여하며, 실제 방문 시각 순서는 알 수 없다.
 2. 아직 방문하지 않은 식당 추천이라는 task에 맞게 동일 사용자·식당의 반복
    리뷰는 최초 interaction 하나로 축약한다.
 3. 전체 interaction 날짜의 80%, 90% 지점을 T1, T2로 두고 train(≤ T1),
@@ -393,8 +433,8 @@ review-only 데이터에서 사용하는 초기 graded relevance는 다음과 �
 
 ### 8.2 평가 지표
 
-후보 생성 단계(C0~C6): **Recall@20/50/100**. Stage 1(C5) Recall@100이 Stage 2가 도달할 수
-있는 상한이다.
+후보 생성 단계(C0~C5, C6는 별도 비교): **Recall@20/50/100**. Stage 1(C5)
+Recall@100은 같은 query에서 Stage 2의 Recall이 도달할 수 있는 상한이다.
 
 LTR 단계(R0 = Stage 1 순서, R1 = LambdaRank): **Recall·Precision·NDCG·MAP·MRR @5/10**과
 catalog coverage, novelty, 지역 다양성 @10. R1 − R0 차이는 paired bootstrap 95%
@@ -408,7 +448,8 @@ validation window로만 고르고 test window는 마지막에 한 번 평가한�
 
 - Candidate Recall@100 목표: 0.95 이상
 - Ranker가 Stage 1 후보 순서(R0)보다 NDCG@10을 개선하고, 그 차이의 95% CI가 0보다 큼
-  (C3 후보에서는 통과, C5 후보에서는 2026-09-30 run 기준 미통과)
+  (C5 후보에서는 2026-09-30 run 기준 미통과. 이전 C3 run의 개선에는 학습 정답
+  끼워넣기 효과가 섞여 있어 통과 근거로 사용하지 않음)
 - 성능 개선이 coverage와 diversity의 심각한 하락을 동반하지 않을 것
 - 재실행 시 동일 데이터 snapshot과 seed에서 결과 재현
 
@@ -418,35 +459,26 @@ validation window로만 고르고 test window는 마지막에 한 번 평가한�
 
 현재 구현된 장치는 다음과 같다.
 
-- PostgreSQL을 모델링 데이터의 단일 source로 사용한다.
-- ingestion file SHA-256, review content hash와 idempotent upsert가 구현되어 있다.
-- interaction 정렬과 split tie-break가 결정적이며 split unit test가 존재한다.
+- PostgreSQL에서 최초 interaction을 조회한 뒤 canonical JSONL로 고정한다.
+  `dataset_snapshot_id`는 schema version과 정렬된 행의 SHA-256이고, 파일 자체의
+  SHA-256도 별도로 기록한다. Parquet은 사용하지 않는다.
+- `rating-recsys-experiment --snapshot <file>`로 DB를 읽지 않고 같은 입력을 재사용한다.
+  `rating-recsys-dataset`은 최신 DB 규모를 점검하는 별도의 읽기 전용 CLI다.
+- `ExperimentConfig`의 split·relevance·candidate K·seed와 feature 이름 목록,
+  Git commit·dirty 여부, Python·OS·설치 package 버전을 `manifest.json`에 기록한다.
+- CLI는 dirty worktree 실행을 허용하고 차이가 있으면 `source.diff`를 남긴다.
+  Python API의 `allow_dirty=False`로 변경된 작업 디렉터리의 실행을 거부할 수 있다.
+- query·최종 추천·모델·지표는 로컬 run 폴더에 저장한다. MLflow에는 지표·파라미터·tag와
+  snapshot digest를 기록하고 파일은 복사하지 않는다. `report` tag가 보고서 경로다.
+- ingestion의 file hash·content hash와 upsert, split·query 순서의 결정성,
+  같은 입력 재실행 결과, test 구간 변경이 validation 선택·최종 모델에 영향을
+  주지 않는지를 자동화 테스트로 검사한다.
 
-다만 현재 `rating-recsys-dataset`은 DB의 최신 상태를 매번 다시 읽고 요약 JSON만
-출력한다. 따라서 DB가 변경되면 과거 실험 입력을 완전히 복원할 수 없으며,
-seed, dependency version, Git commit, feature schema, 학습 artifact와 MLflow run도
-아직 연결되어 있지 않다. 즉 ingestion과 split의 반복 가능성은 확보했지만
-모델 실험의 완전한 재현성은 아직 확보되지 않았다.
-
-baseline 구현 시 아래를 완료 조건으로 추가한다.
-
-1. 정렬된 canonical row와 schema version으로 SHA-256 `dataset_snapshot_id`를
-   만들고, 실제 interaction snapshot도 immutable artifact로 보존한다. Parquet
-   파일 checksum은 row digest와 별도로 기록한다.
-2. repository query version, split configuration, relevance mapping, candidate K,
-   RRF 상수와 random seed 42를 하나의 versioned experiment config로 저장한다.
-3. Python 및 모든 transitive dependency를 lock file로 고정하고 실제 실행 환경의
-   package 목록과 OS 정보를 manifest에 기록한다.
-4. 후보 source의 score tie는 `restaurant_id`, R1의 score tie는 해당 query의 C5 순위로
-   결정한다. LightGBM seed와 deterministic option을 고정하고 병렬 실행에서도
-   순서가 달라지지 않게 테스트한다.
-5. Git commit과 feature schema version을 기록하고, 기본 strict mode에서는 dirty
-   worktree 실행을 거부한다. 예외 허용 시 diff를 artifact로 함께 저장한다.
-6. query, candidate, ranking 결과와 모델을 같은 MLflow run에 저장하고 dataset
-   digest를 input metadata로 연결한다. digest만 남기지 않고 실제 snapshot을
-   반드시 함께 보존한다.
-7. 동일 snapshot·config·code commit에서 candidate 순서와 metric이 같은지
-   end-to-end deterministic test로 검증한다.
+남은 재현성 과제는 dependency lock file, 실제 DB integration test, 전체 데이터에서의
+seed 반복 및 2026-10-01 동점 처리 변경 후 전체 재실행이다. 지금의 `pyproject.toml`은
+버전 범위를 지정하고 실행 manifest는 설치 버전을 기록하지만 환경을 lock하지 않는다.
+Git에 포함되는 것은 보고서 중심이므로 다른 컴퓨터에서 재현하려면 보고서가 가리키는
+로컬 snapshot·리뷰 본문 파일과 run artifact도 별도로 보존해야 한다.
 
 ### 8.5 시간 정보의 현재 범위와 Future Work
 
@@ -577,7 +609,7 @@ Notebook은 `src/`의 versioned 코드를 호출하여 결과를 탐색하고 �
 - [x] 기존 코드·데이터·모델을 `legacy/v1_rating_prediction/`에 보존
 - [x] v2 계획 문서 작성
 - [ ] legacy 파일 checksum 및 inventory 생성
-- [ ] 기존 결과를 historical result로 명시
+- [x] 기존 결과를 historical result로 명시하고 수정된 MF·DeepCoNN·Hybrid 비교 연결
 
 ### M1. DB 기반 구축
 
@@ -641,7 +673,7 @@ Notebook은 `src/`의 versioned 코드를 호출하여 결과를 탐색하고 �
 - [ ] recommendation request log
 - [ ] impression/click/save event schema
 - [ ] model version과 feature snapshot 기록
-- [ ] already-seen filtering
+- [ ] serving 경로의 already-seen filtering (오프라인 후보에서는 구현됨)
 - [ ] 기본 monitoring
 
 ### M7. Generative retrieval
@@ -713,7 +745,7 @@ C5 후보는 C3보다 Recall@100이 높지만 R1이 R0(C5 순서)를 넘지 못�
 2. C5 순서에 없는 정보를 주는 feature(리뷰 텍스트 유사도 등)와 정답 여러 개의 window형
    학습 query. 학습 query용 LightGCN checkpoint 간격 1개월도 함께 본다.
 3. 리뷰 기반 경험 라벨(좋음/무난/나쁨)과 나쁜 경험 guardrail 지표 도입.
-4. 후보 수: `--candidate-k 200/300`.
+4. 후보 수: 설정 K를 평가 cutoff에 포함하는 CLI·지표 수정 후 `--candidate-k 200/300`.
 5. Seed 반복(3~5회)으로 ranker 설정 간 차이의 안정성 확인.
 
 ## 16. 완료 정의

@@ -28,6 +28,9 @@ class ExperimentConfig:
     rrf_constant: int = 60
     random_seed: int = 42
     region_mode: str = "with_region"
+    # Historical baseline defaults remain available for controlled comparisons.
+    ranker_training_mode: str = "prefix"
+    ranker_label_mode: str = "relevance"
     relevance_high_threshold: float = 4.0
     relevance_low_threshold: float = 3.0
     # C4 LightGCN. Training queries use models refit every
@@ -57,6 +60,10 @@ class ExperimentConfig:
     n_jobs: int = 8
 
     def __post_init__(self) -> None:
+        if self.ranker_training_mode not in {"prefix", "window"}:
+            raise ValueError("ranker_training_mode must be prefix or window")
+        if self.ranker_label_mode not in {"relevance", "rating"}:
+            raise ValueError("ranker_label_mode must be relevance or rating")
         if self.region_mode not in {"with_region", "without_region"}:
             raise ValueError("region_mode must be with_region or without_region")
         if not 0 < self.train_fraction < 1 or not 0 < self.validation_fraction < 1:
@@ -115,6 +122,25 @@ class ExperimentConfig:
         if rating >= self.relevance_low_threshold:
             return 1
         return 0
+
+    def training_label(self, rating: float) -> int:
+        """Half-star rating indexes preserve ratings without three-bin grading.
+
+        Zero is reserved for an unobserved candidate, not a measured zero-star
+        rating. Evaluation relevance remains unchanged in both training modes.
+        """
+        if self.ranker_label_mode == "relevance":
+            return self.relevance(rating)
+        label = round(rating * 2)
+        if not 1 <= rating <= 5 or abs(label / 2 - rating) > 1e-8:
+            raise ValueError("rating labels require ratings from 1 to 5 in half-star steps")
+        return label
+
+    @property
+    def label_gain(self) -> tuple[float, ...]:
+        if self.ranker_label_mode == "rating":
+            return tuple(index / 2 for index in range(11))
+        return (0.0, 1.0, 3.0)
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

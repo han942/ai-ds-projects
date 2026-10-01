@@ -66,6 +66,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     model = parser.add_argument_group("후보 생성과 LTR")
+    model.add_argument(
+        "--ranker-training-mode", choices=("prefix", "window"),
+        default=default.ranker_training_mode,
+        help="prefix: 정답 1개, window: 사용자별 기간 안의 여러 방문을 함께 학습",
+    )
+    model.add_argument(
+        "--ranker-label-mode", choices=("relevance", "rating"),
+        default=default.ranker_label_mode,
+        help="학습 label만 변경: relevance 0/1/2 또는 원래 평점의 선형 gain. 평가 기준은 동일",
+    )
     model.add_argument("--candidate-k", type=int, default=default.candidate_k)
     model.add_argument("--ranking-k", type=int, default=default.ranking_k)
     model.add_argument("--rrf-constant", type=int, default=default.rrf_constant)
@@ -115,6 +125,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
     return ExperimentConfig(
+        ranker_training_mode=args.ranker_training_mode,
+        ranker_label_mode=args.ranker_label_mode,
         train_fraction=args.train_fraction,
         validation_fraction=args.validation_fraction,
         candidate_k=args.candidate_k,

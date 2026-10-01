@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from typing import Iterable
 
 from rating_recsys.datasets.models import Interaction
@@ -97,3 +97,43 @@ def build_window_queries(
             )
         )
     return tuple(queries), new_users
+
+
+def build_training_windows(
+    interactions: Iterable[Interaction],
+    *,
+    config: ExperimentConfig,
+    through: date,
+    phase: str = "train",
+) -> tuple[tuple[date, tuple[WindowQuery, ...]], ...]:
+    """Non-overlapping calendar windows with frozen history before each start.
+
+    The final partial window stops at ``through``. A final refit must rebuild
+    these windows through T2 instead of appending a second copy of the partial
+    T1 window. Targets never enter their own retrieval context or features.
+    """
+    months = config.lightgcn_checkpoint_months
+    rows = sorted((row for row in interactions if row.event_date <= through), key=global_interaction_key)
+    if not rows:
+        return ()
+    first = rows[0].event_date
+    start = date(first.year, (first.month - 1) // months * months + 1, 1)
+    history: list[Interaction] = []
+    result = []
+    index = 0
+    while start <= through:
+        next_month = start.year * 12 + start.month - 1 + months
+        next_start = date(next_month // 12, next_month % 12 + 1, 1)
+        visits = []
+        while index < len(rows) and rows[index].event_date < next_start:
+            visits.append(rows[index])
+            index += 1
+        queries, _ = build_window_queries(
+            history, visits, config=config,
+            phase=f"{phase}:{start.isoformat()}", cutoff=start - timedelta(days=1),
+        )
+        if queries:
+            result.append((start, queries))
+        history.extend(visits)
+        start = next_start
+    return tuple(result)

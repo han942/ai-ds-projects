@@ -29,7 +29,7 @@ artifacts/
 │       ├── candidates_test.jsonl  사용자별 새 후보·선택 결합·C5 후보
 │       └── source.diff       미커밋 상태로 실행했을 때만 생성
 ├── mlflow.db                 MLflow tracking DB (지표·파라미터만, 파일 복사 없음)
-├── ingestion_sources/        DB에 적재한 크롤링 원본의 고정 사본과 적재 결과
+├── ingestion_sources/        전국 .csv.partial의 고정 .csv 사본과 .import.json 적재 결과
 └── archive/primary/          보관한 이전 평가 방식의 결과
     ├── runs/                 primary leave-last-two-out run 폴더
     ├── comparisons/          지역 제거·LightGCN 비교 결과
@@ -51,7 +51,7 @@ artifacts/
 | `comparisons/<model>/<run_id>/` | `rating-recsys-compare <model>` (`lightgcn`, `deepconn`). 2026-09-30 이전 run은 모델별 `python -m rating_recsys.experiments.<model>_cli`로 만들었다 |
 | `snapshots/*.reviews.jsonl` | `rating-recsys-compare deepconn` (본문 파일이 없으면 DB에서 읽기 전용으로 한 번 만든다) |
 | `mlflow.db` | `rating-recsys-experiment` (`--no-mlflow`이면 생략) |
-| `ingestion_sources/` | `python -m rating_recsys.ingestion.import_crawler` |
+| `ingestion_sources/` | `python -m rating_recsys.ingestion.import_crawler` (최신 전국 `.csv.partial`만 대상) |
 | `archive/primary/` | 현재 코드에서는 만들지 않음. [보관 안내](../analysis/archive/primary/README.md) |
 
 ## 보는 방법

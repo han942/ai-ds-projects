@@ -30,11 +30,24 @@ sudo .venv/bin/python -m playwright install-deps chromium
 
 이미 시도했지만 불완전·차단·중단 상태인 식당의 재시도를 건너뛰고 새 대기 식당부터 진행하려면 `--skip-incomplete`를 함께 지정합니다. 기존 부분 CSV에 저장된 리뷰 행은 보존됩니다. 의도적으로 미룬 프로필 URL은 체크포인트의 `skip_incomplete_urls`에 기록됩니다.
 
+이 모드에서는 미룬 식당도 완료 판정에서 처리한 것으로 간주하므로, 나머지 조건을
+충족하면 최종 `.csv`로 바뀔 수 있습니다. 이때 `crawl_complete=true`가 모든 식당의
+평가를 끝까지 수집했다는 뜻은 아닙니다. 누락 여부는 `skip_incomplete_urls`와
+식당별 상태를 함께 확인합니다.
+
 ~~~bash
 .venv/bin/python crawler/diningcode_playwright.py --national-regions --max-restaurants 0 --resume --skip-incomplete
 ~~~
 
 미완료 파일은 crawler/data 아래에서 .csv.partial 및 .checkpoint.json으로 확인할 수 있습니다. 첫 파일을 엑셀에서 바로 열려면 수집 완료 후 생성되는 .csv를 사용하세요.
+
+## v2 DB 적재
+
+프로젝트 루트에서 `python -m rating_recsys.ingestion.import_crawler`를 실행하면
+`crawler/data/`의 최신 전국 `.csv.partial`을 고정 복사해 PostgreSQL에 적재하고,
+`artifacts/ingestion_sources/`에 원본 사본과 `.import.json` 결과를 남깁니다.
+먼저 migration을 적용하고 `.env`의 `DATABASE_URL`, `USER_HASH_SALT`를 설정합니다.
+이 명령은 중간 수집분을 위한 것이며 완료된 `.csv`는 자동으로 선택하지 않습니다.
 
 ## 접근 제한과 완료 판정
 

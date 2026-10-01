@@ -29,6 +29,8 @@ KEY_CONDITIONS = (
     "train_fraction",
     "validation_fraction",
     "random_seed",
+    "ranker_training_mode",
+    "ranker_label_mode",
 )
 
 
@@ -184,7 +186,7 @@ def _data_lines(manifest: dict, metrics: dict) -> list[str]:
     config = manifest["config"]
     lines.append(
         "주요 조건: "
-        + ", ".join(f"`{key}` {config[key]}" for key in KEY_CONDITIONS)
+        + ", ".join(f"`{key}` {config[key]}" for key in KEY_CONDITIONS if key in config)
     )
     changed = _changed_conditions(config)
     lines += ["", "기본값과 다른 조건: " + (", ".join(changed) if changed else "없음")]
@@ -217,7 +219,29 @@ def _selection_lines(manifest: dict, metrics: dict) -> list[str]:
         else f"Ranker 학습 query 중 정답이 후보 밖에 있던 {injected:,}개는 정답을 끼워 넣었다"
         " (2026-09-30 이전 run 방식)."
     )
-    return [
+    mode = config.get("ranker_training_mode", "prefix")
+    label_mode = config.get("ranker_label_mode", "relevance")
+    extra = [
+        f"LTR 학습 query: `{mode}`. 학습 label: `{label_mode}`. "
+        "평가의 relevance 기준은 학습 label과 독립적으로 유지한다.",
+    ]
+    if label_mode == "rating":
+        extra += [
+            "원래 평점을 반점 단위 정수 index(평점 × 2)로 전달하고 gain은 원래 평점으로 설정한다. "
+            "4·4.5·5점의 차이를 보존한다. 미관측 후보의 0은 실제 0점 평가가 아닌 약한 negative다.",
+        ]
+    if mode == "window":
+        final_training = training["refit_all_windows"]
+        extra += [
+            f"최종 window 학습: group {final_training['usable_groups']:,}개 중 여러 positive가 검색된 group "
+            f"{final_training['multi_positive_groups']:,}개, 서로 다른 관측 label이 있는 group "
+            f"{final_training['distinct_observed_label_groups']:,}개, 실제 평점이 다른 관측 쌍 "
+            f"{final_training['observed_preference_pairs']:,}개. 평균 검색 positive "
+            f"{final_training['mean_retrieved_positives_per_group']:.2f}개/group.",
+            "각 학습 window 시작 전까지 후보와 feature를 고정한다. 마지막 부분 window는 cutoff까지 자르고, "
+            "최종 refit에서는 T2까지 전체 window를 재구성하여 중복 학습하지 않는다.",
+        ]
+    return extra + ["",
         f"C4 LightGCN: {settings['layers']}층 · {settings['dimension']}차원 · L2 "
         f"{settings['regularization']:g} · learning rate {settings['learning_rate']:g} · "
         f"batch {settings['batch_size']} · {settings['epochs']} epoch (config 고정값, 이 run에서 "
@@ -382,6 +406,8 @@ FLAG_NAMES = {
     "region_mode": "--region-mode",
     "relevance_high_threshold": "--relevance-high",
     "relevance_low_threshold": "--relevance-low",
+    "ranker_training_mode": "--ranker-training-mode",
+    "ranker_label_mode": "--ranker-label-mode",
     "train_fraction": "--train-fraction",
     "validation_fraction": "--validation-fraction",
     "legacy_c3_quota": "--legacy-c3-quota",

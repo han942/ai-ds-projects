@@ -69,6 +69,11 @@ negative다. 평점 4.0 이상이 86.5%라 이 등급은 경험의 질을 거의
 
 ## 4. Query
 
+2026-10-02에 비교용 `--ranker-training-mode window`와
+`--ranker-label-mode rating`을 추가했다. 아래 설명과 기존 결과는 기본값
+`prefix/relevance`의 기준선이다. 여러 정답 학습의 구성, 원래 평점의 gain, 누수 경계와
+미관측 후보의 한계는 [모델 점검·실험 문서](./MODEL_REVIEW_AND_EXPERIMENTS.md#4-ltr-비교-정답-1개--여러-정답--원래-평점)에 있다.
+
 Query 하나는 한 사용자가 한 시점에 받는 추천 1회다. 학습과 평가는 query 형태가 다르다.
 
 | | 학습 query | 평가 query |
@@ -88,7 +93,8 @@ Query 하나는 한 사용자가 한 시점에 받는 추천 1회다. 학습과 
     모델 40개, 학습 약 4분이다. 그 시점 그래프에 없던 사용자(학습 query의 약 16%)는
     LightGCN 후보가 없어 C1 순서만 쓴다.
 - 학습 query는 정답이 그 query의 C5 후보 100개 안에 있을 때만 ranker 학습 group이
-  된다. 평가 query와 같은 조건이다. 후보 밖 정답을 후보 목록에 끼워 넣지 않는다
+  된다. 학습 group에는 relevance > 0인 정답과 relevance 0인 후보가 모두 있어야 한다.
+  후보 밖 정답을 후보 목록에 끼워 넣지 않는다
   (2026-09-30 이전에는 끼워 넣었다. 11절).
   평가 query에서는 정답이 후보에 없으면 그대로 실패로 센다.
 - Window 시작 전 이력이 없는 사용자는 개인화할 수 없어 평가하지 않고 수만 기록한다.
@@ -135,17 +141,29 @@ LightGCN 원점수는 시점별 모델마다 척도가 달라 query 안에서 �
 0.05, seed 42, deterministic. Query당 정답이 1개인 학습 query로 학습하므로 실제로는
 정답 1개와 C5 오답 약 99개를 구분하는 pairwise 학습에 가깝다.
 
+사용자 평균과 식당 평균 feature는 단순 평균이며 shrinkage를 적용하지 않는다.
+이는 사용자·식당 관계를 전혀 학습하지 않았다는 뜻이 아니다. C4는 사용자·식당
+embedding 내적을 방문 기반 BPR로 학습하고, v1 MF에는 명시적인 사용자·식당 bias와
+내적이 있었다. [기존 구현 점검](./MODEL_REVIEW_AND_EXPERIMENTS.md#2-기본적인-사용자식당-관계를-구현하지-않았던-것인가)을 참고한다.
+
 ## 7. 설정 선택 (validation만 사용)
 
 1. LambdaRank: `num_leaves × min_child_samples` 조합마다 validation NDCG@10으로 early
    stopping(50 round)한 모델, 그리고 고정 설정(150 trees, 15 leaves) 중
-   validation NDCG@10이 가장 높은 것. 트리 수는 그 모델의 best iteration.
+   validation NDCG@10이 가장 높은 것. 동률이면 Recall@10, 그다음 grid 순서로 고른다.
+   Early stopping 모델의 트리 수는 best iteration, 고정 모델은 150개다.
 2. 최종 모델: 고른 설정과 트리 수로 T2까지의 학습 query(train + validation window)로
    다시 학습한다.
 3. Test window는 이 뒤에 한 번만 평가한다. 결과를 보고 설정을 다시 바꾸지 않는다.
 
 Stage 1 구성과 LightGCN 설정은 별도 비교 run의 validation으로 먼저 정했고, 파이프라인
 run 안에서는 고르지 않는다.
+
+Early stopping에는 C5 후보 안에 정답이 하나 이상 있는 validation group만 전달한다.
+이때 LightGBM의 NDCG는 후보 안의 label로 ideal DCG를 계산한다. 반면 설정 선택에는
+정답이 있는 전체 validation 사용자와 window 전체 정답으로 계산한 오프라인 NDCG를
+사용한다. 두 NDCG의 평가 대상과 정규화 기준이 다르다. R0는 비교 지표로만 계산하며
+현재 선택 후보나 자동 fallback에 포함되지 않는다.
 
 테스트로 확인하는 것: test 구간 데이터만 바꿔도 선택 결과, validation 지표, 최종 모델
 파일이 바이트 단위로 같다. LightGCN 학습 edge 수가 각 cutoff·구간 시작일 이전
@@ -165,6 +183,10 @@ interaction 수와 같다.
 C5 Recall@100이 Stage 2가 도달할 수 있는 상한이다. C5 − C3 차이는 paired bootstrap으로
 보고한다.
 
+이 상한은 같은 query에서의 **Recall**에 대한 것이다. NDCG·Precision·MAP의 상한을
+Recall@100 값으로 해석하지 않는다. 기본 cutoff 이외의 K는
+[README의 현재 CLI 제약](./README.md#조정할-수-있는-조건)을 먼저 확인한다.
+
 LTR 재정렬 (R0, R1, K = 5/10):
 
 | 지표 | 정의 |
@@ -178,8 +200,11 @@ LTR 재정렬 (R0, R1, K = 5/10):
 | Novelty@K | 추천 식당 인기 비율의 −log2 평균 |
 | 지역 다양성@K | 한 목록 안에서 지역이 다른 식당 쌍의 비율 |
 
+Coverage·novelty·지역 다양성은 정답 유무와 관계없이 이력이 있는 모든 평가 query의
+추천 목록으로 계산한다. 정확도 지표의 모수와 다르다.
+
 R1 − R0 차이는 같은 사용자끼리 짝지은 paired bootstrap(2,000회) 95% 신뢰구간으로
-보고한다. 신뢰구간이 0을 포함하면 차이가 없다고 해석한다.
+보고한다. 신뢰구간이 0을 포함하면 개선 또는 악화를 확정할 근거가 부족하다고 해석한다.
 
 ## 9. 별도 후보 실험
 
@@ -203,6 +228,11 @@ cutoff 이전 리뷰만 들어가고, 학습 visit의 리뷰는 두 문서에서
 
 새 모델은 `retrieval/`에 구현하고 `experiments/candidate_models.py`에 설정 하나만
 추가하면 같은 CLI·보고서로 비교된다([README](./README.md#후보-모델-비교-실험)).
+
+2026-10-02의 후속 방향은 리뷰 표현을 평점 기반 후보 모델의 별도 feature로 추가하는
+것이다. Sentence Transformers와 그 사전학습 모델은 사용자 요청으로 보류했다.
+LTR 텍스트 feature 추가와 구분하며, 아직 새 모델의 측정 결과는 없다.
+[후보 설계와 비교 조건](./MODEL_REVIEW_AND_EXPERIMENTS.md#5-리뷰-텍스트--평점-후보-생성-설계)에 기록했다.
 
 ## 10. 출력
 
@@ -249,6 +279,8 @@ MLflow(experiment `rating-recsys`)에는 지표·파라미터·tag만 기록하�
   질을 거의 구분하지 못한다. 리뷰 기반 경험 라벨은 다음 단계다.
 - 날짜의 약 20%는 연도를 추론한 값이라 window 경계가 부정확할 수 있다.
 - 기본 실행은 seed 1개다. 작은 차이는 seed를 바꿔 반복하기 전에는 확정하지 않는다.
+- Test 1회 평가는 각 run 안의 규칙이다. 같은 test window를 반복해서 확인하며 모델을
+  바꾼 결과는 새로운 holdout에서 확인하기 전까지 탐색적 비교로 해석한다.
 - 날짜는 분할과 누수 차단에만 쓰고 모델 feature로는 쓰지 않는다(time-aware 모델은
   계획서 M8).
 

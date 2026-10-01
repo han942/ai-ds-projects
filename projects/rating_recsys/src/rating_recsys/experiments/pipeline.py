@@ -11,14 +11,14 @@ Protocol
 3. Stage 1 is C5 = RRF(C1 item-item, C4 LightGCN). For a window, LightGCN is
    fitted on every interaction up to the window start. C0, C2 and the previous
    C3 quota union are built from the same context and reported for reference.
-4. Ranker training queries are single-positive prefix queries whose target is
-   on or before the evaluation cutoff: <= T1 while tuning, <= T2 for the final
-   refit. Candidates and features for every query use only interactions
-   ordered before that query; its LightGCN model is the one refit at the start
-   of the query's calendar block (``lightgcn_checkpoint_months``) on
-   interactions dated before that start. Only queries whose positive is among
-   their own Stage 1 candidates become training groups; positives are never
-   added to a candidate list.
+4. Ranker training defaults to single-positive prefix queries. Optional
+   window queries hold several outcomes and freeze history, context and
+   LightGCN before the calendar block starts. Targets stop at T1 while tuning
+   and T2 for final refitting. Prefix queries use interactions ordered before
+   the target and a graph from before its calendar block. Only queries with
+   observed positives among their own Stage 1 candidates and differing labels
+   become training groups; positives are never added to candidate lists.
+   Optional raw-rating gain changes training labels, not evaluation relevance.
 5. Tuning reads only the validation window: a LightGBM grid with early
    stopping selected by NDCG@ranking_k. LightGCN settings are fixed in the
    config (chosen earlier on the validation window).
@@ -54,6 +54,7 @@ from rating_recsys.experiments.config import ExperimentConfig
 from rating_recsys.experiments.models import RecommendationQuery, WindowQuery
 from rating_recsys.experiments.queries import (
     build_prefix_queries,
+    build_training_windows,
     build_window_queries,
     global_interaction_key,
 )
@@ -220,6 +221,7 @@ def prefix_training_arrays(
     feature_names: tuple[str, ...],
     log: Callable[[str], None] = lambda _: None,
     label: str = "train",
+    config: ExperimentConfig | None = None,
 ) -> TrainingArrays:
     """Cutoff-safe single-positive LambdaRank rows for prefix queries.
 
@@ -234,6 +236,7 @@ def prefix_training_arrays(
     for determinism.
     """
 
+    config = config or ExperimentConfig()
     capacity_per_query = generator.candidate_k
     features = np.empty(
         (len(queries) * capacity_per_query, len(feature_names)), dtype=np.float32
@@ -274,7 +277,8 @@ def prefix_training_arrays(
         graph_queries += int(bool(ranked))
         context = builder.context
         result = generator.retrieve(query, context, graph_ranked=ranked, scorer=model)
-        if query.relevance <= 0:
+        target_label = config.training_label(query.target.rating)
+        if target_label <= 0:
             continue
         relevant += 1
         available += int(result.reference.target_available)
@@ -293,7 +297,7 @@ def prefix_training_arrays(
             continue
         for row in rows:
             features[offset] = [row.features[name] for name in feature_names]
-            labels[offset] = row.relevance
+            labels[offset] = target_label if row.restaurant_id == query.target.restaurant_id else 0
             offset += 1
         groups.append(len(rows))
 
@@ -327,6 +331,7 @@ def window_candidates(
     *,
     graph: LightGCN | None = None,
     feature_names: tuple[str, ...] | None,
+    training_config: ExperimentConfig | None = None,
 ) -> WindowCandidates:
     """Candidates (and optionally ranker features) for fixed-cutoff queries.
 
@@ -395,9 +400,13 @@ def window_candidates(
                 dtype=np.float32,
             ).reshape(len(result.union), len(feature_names))
         )
+        training_labels = (
+            {visit.restaurant_id: training_config.training_label(visit.rating) for visit in query.window}
+            if training_config is not None else query.relevance_by_item
+        )
         label_blocks.append(
             np.asarray(
-                [query.relevance_by_item.get(c.restaurant_id, 0) for c in result.union],
+                [training_labels.get(c.restaurant_id, 0) for c in result.union],
                 dtype=np.int32,
             )
         )
@@ -430,6 +439,87 @@ def window_candidates(
             "relevant_positives": positives,
             "available_positives": available_positives,
             "rate": available_positives / positives if positives else 0.0,
+        },
+    )
+
+
+def window_training_arrays(
+    reference_interactions: tuple[Interaction, ...],
+    generator: HybridCandidateGenerator,
+    graphs: CheckpointedLightGCN,
+    *,
+    config: ExperimentConfig,
+    through: date,
+    phase: str = "train",
+    log: Callable[[str], None] = lambda _: None,
+) -> TrainingArrays:
+    """Multiple observed restaurants per query, with cutoff-safe real candidates.
+
+    No target is injected. All labels are outcomes from the following window;
+    all features and both retrieval sources are frozen before its start.
+    """
+    rows = tuple(sorted(reference_interactions, key=global_interaction_key))
+    dates = [row.event_date for row in rows]
+    builder = IncrementalRetrievalContext()
+    index = 0
+    feature_blocks, label_blocks, groups = [], [], []
+    query_count = relevant = available = retrieved = scored = 0
+    multiple = distinct = preference_pairs = observed_count = 0
+    for start, queries in build_training_windows(rows, config=config, through=through, phase=phase):
+        while index < len(rows) and rows[index].event_date < start:
+            builder.add(rows[index])
+            index += 1
+        graph = graphs.model_for(start, rows, dates)
+        candidates = window_candidates(
+            queries, builder.context, generator, graph=graph,
+            feature_names=config.feature_names, training_config=config,
+        )
+        offset = 0
+        catalog_ids = set(builder.context.item_counts)
+        for query, size in zip(queries, candidates.group_sizes, strict=True):
+            graphs.count_query(start)
+            query_count += 1
+            scored += int(bool(candidates.ordered["c4_lightgcn"][query.query_id]))
+            labels = candidates.labels[offset:offset + size]
+            values = candidates.features[offset:offset + size]
+            offset += size
+            positives = {
+                visit.restaurant_id for visit in query.window
+                if config.training_label(visit.rating) > 0
+            }
+            relevant += int(bool(positives))
+            available += int(bool(positives & catalog_ids))
+            retrieved += int(bool(size and np.any(labels > 0)))
+            if not size or labels.max() <= 0 or labels.max() == labels.min():
+                continue
+            groups.append(size)
+            feature_blocks.append(values)
+            label_blocks.append(labels)
+            observed = labels[labels > 0]
+            observed_count += len(observed)
+            multiple += int(len(observed) > 1)
+            distinct += int(len(set(observed)) > 1)
+            # Counts actual rating comparisons even in the three-bin control.
+            selected = set(candidates.ordered[STAGE1][query.query_id])
+            ratings = [visit.rating for visit in query.window if visit.restaurant_id in selected]
+            preference_pairs += sum(a != b for i, a in enumerate(ratings) for b in ratings[i + 1:])
+        log(f"{phase} window {start}: {len(queries)} queries, cumulative usable groups {len(groups)}")
+    if not groups:
+        raise ValueError("Training windows have no candidate groups with different labels")
+    return TrainingArrays(
+        features=np.concatenate(feature_blocks), labels=np.concatenate(label_blocks), groups=groups,
+        summary={
+            "mode": "window", "label_mode": config.ranker_label_mode,
+            "queries": query_count, "usable_groups": len(groups), "feature_rows": sum(groups),
+            "relevant_queries": relevant, "available_positive_queries": available,
+            "retrieved_positive_queries": retrieved,
+            "retrieved_positive_rate": retrieved / relevant if relevant else 0.0,
+            "lightgcn_scored_queries": scored,
+            "lightgcn_scored_rate": scored / query_count if query_count else 0.0,
+            "multi_positive_groups": multiple, "distinct_observed_label_groups": distinct,
+            "observed_preference_pairs": preference_pairs,
+            "mean_retrieved_positives_per_group": observed_count / len(groups),
+            "latest_target_date": max(row.event_date for row in rows if row.event_date <= through).isoformat(),
         },
     )
 
@@ -675,13 +765,18 @@ def run_experiment(
     checkpoints = CheckpointedLightGCN(
         graph_config, months=config.lightgcn_checkpoint_months, log=emit
     )
-    train_queries = build_prefix_queries(split.train, config=config, phase="train")
-    _assert_targets_through(train_queries, t1)
-    train_arrays = prefix_training_arrays(
-        train_queries, split.train, generator, checkpoints,
-        feature_names=feature_names, log=emit, label="train_prefix",
-    )
-    lap("03_build_train_prefix_rows")
+    if config.ranker_training_mode == "window":
+        train_arrays = window_training_arrays(
+            split.train, generator, checkpoints, config=config, through=t1, log=emit,
+        )
+    else:
+        train_queries = build_prefix_queries(split.train, config=config, phase="train")
+        _assert_targets_through(train_queries, t1)
+        train_arrays = prefix_training_arrays(
+            train_queries, split.train, generator, checkpoints,
+            feature_names=feature_names, log=emit, label="train_prefix", config=config,
+        )
+    lap("03_build_train_rows")
 
     validation_context = build_context(split.train)
     validation_candidates = window_candidates(
@@ -752,24 +847,37 @@ def run_experiment(
     lap("05_tune_lightgbm_on_validation")
 
     # ---- Step D: final refit on train + validation window (targets <= T2) -
-    refit_queries = tuple(
-        query
-        for query in build_prefix_queries(test_history, config=config, phase="refit")
-        if query.target.event_date > t1
-    )
-    _assert_targets_through(refit_queries, t2)
-    refit_arrays = prefix_training_arrays(
-        refit_queries, test_history, generator, checkpoints,
-        feature_names=feature_names, log=emit, label="refit_prefix",
-    )
-    final_features = np.concatenate([train_arrays.features, refit_arrays.features])
-    final_labels = np.concatenate([train_arrays.labels, refit_arrays.labels])
-    final_groups = train_arrays.groups + refit_arrays.groups
-    training_summary = {
-        "train_prefix": train_arrays.summary,
-        "refit_validation_window_prefix": refit_arrays.summary,
-    }
-    del train_arrays, refit_arrays
+    if config.ranker_training_mode == "window":
+        # Rebuild the partial T1 calendar window through T2 exactly once.
+        train_summary = train_arrays.summary
+        del train_arrays
+        refit_arrays = window_training_arrays(
+            test_history, generator, checkpoints, config=config, through=t2, phase="refit", log=emit,
+        )
+        final_features, final_labels, final_groups = (
+            refit_arrays.features, refit_arrays.labels, refit_arrays.groups,
+        )
+        training_summary = {"train_window": train_summary, "refit_all_windows": refit_arrays.summary}
+        del refit_arrays
+    else:
+        refit_queries = tuple(
+            query
+            for query in build_prefix_queries(test_history, config=config, phase="refit")
+            if query.target.event_date > t1
+        )
+        _assert_targets_through(refit_queries, t2)
+        refit_arrays = prefix_training_arrays(
+            refit_queries, test_history, generator, checkpoints,
+            feature_names=feature_names, log=emit, label="refit_prefix", config=config,
+        )
+        final_features = np.concatenate([train_arrays.features, refit_arrays.features])
+        final_labels = np.concatenate([train_arrays.labels, refit_arrays.labels])
+        final_groups = train_arrays.groups + refit_arrays.groups
+        training_summary = {
+            "train_prefix": train_arrays.summary,
+            "refit_validation_window_prefix": refit_arrays.summary,
+        }
+        del train_arrays, refit_arrays
     gc.collect()
     final_params = {
         "num_leaves": chosen_ranker["num_leaves"],
@@ -827,7 +935,7 @@ def run_experiment(
                 ),
                 "final_refit": (
                     "선택한 설정, 트리 수 = validation best iteration, "
-                    "train + validation window prefix query로 재학습"
+                    f"train + validation의 {config.ranker_training_mode} query로 재학습"
                 ),
             },
             "ranker_grid": ranker_rows,
@@ -875,9 +983,11 @@ def run_experiment(
             "tuning_training_targets_through": t1.isoformat(),
             "refit_training_targets_through": t2.isoformat(),
             "ranker_training_groups": (
-                "prefix queries whose positive is among their own Stage 1 "
-                "candidates; no positive is added to a candidate list"
+                f"{config.ranker_training_mode} queries with observed positives among their own "
+                "Stage 1 candidates and different labels; no positive is added to a candidate list"
             ),
+            "ranker_training_label_mode": config.ranker_label_mode,
+            "evaluation_labels": "fixed relevance thresholds, independent of training labels",
             "validation_context_through": t1.isoformat(),
             "test_context_through": t2.isoformat(),
             "test_evaluations": 1,
@@ -932,6 +1042,7 @@ def _ranker(config: ExperimentConfig, params: dict[str, object]) -> LightGBMLamb
         min_child_samples=int(params["min_child_samples"]),
         reg_lambda=config.reg_lambda,
         n_jobs=config.n_jobs,
+        label_gain=config.label_gain,
     )
 
 

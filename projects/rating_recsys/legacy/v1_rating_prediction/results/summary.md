@@ -1,6 +1,6 @@
 # v1 재실험 결과: MF · DeepCoNN · Hybrid
 
-`diningcode_revision.ipynb` 실행 시 자동 생성된다. 수정 내용은 [`../REVISION_PLAN.md`](../REVISION_PLAN.md).
+[`diningcode_revision.ipynb`](../diningcode_revision.ipynb) 실행 시 자동 생성된다. 이전 수치와의 관계는 아래에 기록했다.
 
 ## 조건
 

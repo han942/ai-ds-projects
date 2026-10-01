@@ -23,8 +23,12 @@ LightGCN)로 바꿨다. C0 인기, C2 지역 인기, C3는 결합하지 않고 �
 그 위치를 학습했기 때문에 대체했다.
 
 2026-10-01부터 R1 점수가 같으면 C5 순위를 유지한다. 위 지표는 이 변경 전 실행 결과다.
+현재는 재현 가능한 오프라인 실험 파이프라인이다. 추천 API와 노출·클릭 로그,
+pgvector/PostGIS 검색은 아직 구현하지 않았다.
 
 - 모델과 평가 방식: [BASELINE_MODEL.md](./BASELINE_MODEL.md)
+- 기존 MF·bias 구현 점검, 여러 정답 LTR 비교, 리뷰·평점 후보 설계:
+  [MODEL_REVIEW_AND_EXPERIMENTS.md](./MODEL_REVIEW_AND_EXPERIMENTS.md)
 - 전체 계획과 마일스톤: [RECOMMENDER_V2_PLAN.md](./RECOMMENDER_V2_PLAN.md)
 - 기록 문서: [analysis/](./analysis/README.md) · 로컬 산출물: [artifacts/](./artifacts/README.md)
 
@@ -101,12 +105,20 @@ query용 LightGCN 40개 학습 약 4분).
 | 후보 | `--lightgcn-checkpoint-months` | 3 | 학습 query용 LightGCN 재학습 간격 (12의 약수) |
 | 참고 | `--legacy-c3-quota` | 0.75 | 비교용 C3의 quota. Stage 1에는 영향 없음 |
 | LTR | `--ranking-k` | 10 | 최종 추천 수, 평가 cutoff |
+| LTR | `--ranker-training-mode` | `prefix` | `window`는 사용자별 기간 안의 여러 방문을 한 group으로 학습 |
+| LTR | `--ranker-label-mode` | `relevance` | `rating`은 원래 평점의 선형 gain. 평가 relevance 기준은 유지 |
 | 선택 | `--num-leaves-grid`, `--min-child-samples-grid` | 15,31,63 / 10,100 | LambdaRank grid |
 | 선택 | `--learning-rate`, `--max-estimators`, `--early-stopping-rounds` | 0.05, 1000, 50 | 트리 수는 early stopping으로 결정 |
 | 기타 | `--seed`, `--bootstrap-samples`, `--n-jobs` | 42, 2000, 8 | |
 | 출력 | `--label`, `--no-mlflow`, `--artifacts-dir` | | run 이름표, MLflow 기록 끄기, 출력 위치 |
 
-예: 후보를 200개로 늘려 비교 → `rating-recsys-experiment --snapshot <file> --candidate-k 200 --label k200`
+예: 지역 feature를 제거해 비교 →
+`rating-recsys-experiment --snapshot <file> --region-mode without_region --label no-region`
+
+현재 K별 지표는 후보 20/50/100, 재정렬 5/10 중 설정값 이하만 생성한다(해당 값이
+하나도 없으면 설정 K를 사용). 이 때문에 `--candidate-k 200/300`이나
+`--ranking-k 20`처럼 설정 K가 지표에 포함되지 않는 경우 실행이 실패한다. 후보 수
+확대 실험에 앞서 설정 K를 평가 cutoff에 포함하도록 코드를 수정해야 한다.
 
 ### 결과 보기
 
@@ -185,13 +197,17 @@ content hash로 중복을 막으므로 같은 파일을 다시 적재해도 안�
 rating-recsys-ingest --dry-run          # DB 연결 없이 schema·필수값·날짜 검사
 rating-recsys-migrate                   # schema 적용
 rating-recsys-ingest --skip-migrations  # 기존 5개 CSV 적재
-python -m rating_recsys.ingestion.import_crawler   # 전국 크롤링 결과 적재
+python -m rating_recsys.ingestion.import_crawler   # 최신 전국 .csv.partial 중간 스냅샷 적재
 rating-recsys-dataset                   # 읽기 전용: 데이터 규모와 분할 크기 출력
 ```
 
 `.env`의 `DATABASE_URL`은 Supabase Dashboard의 `Connect`에서 복사한다(IPv4 전용
 네트워크면 port 5432 Session pooler, `sslmode=require` 유지). `USER_HASH_SALT`는 한 번
 정하면 바꾸지 않는다. 검증 SQL은 [queries/](./queries/)에 있다.
+
+`import_crawler`는 `crawler/data/`에서 가장 최근 수정된 전국 `.csv.partial`만
+읽는다. 이를 `artifacts/ingestion_sources/`에 고정 복사하고 적재 결과를
+`.import.json`으로 남긴다. 완료된 `.csv`는 이 명령의 입력 대상이 아니다.
 
 2026-09-27 DB 기준 규모 (전국 크롤링은 미완료 중간 스냅샷):
 
