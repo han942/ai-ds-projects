@@ -31,6 +31,7 @@ from typing import Sequence
 from rating_recsys.config import PROJECT_ROOT
 from rating_recsys.experiments.candidate_models import CANDIDATE_MODELS, CandidateModel
 from rating_recsys.experiments.config import ExperimentConfig
+from rating_recsys.experiments.cli import add_satisfaction_arguments, satisfaction_config_from_args
 from rating_recsys.experiments.prepared import add_cache_arguments
 
 
@@ -68,6 +69,7 @@ def build_parser(model: CandidateModel) -> argparse.ArgumentParser:
     data.add_argument("--rrf-constant", type=int, default=default.rrf_constant)
     data.add_argument("--bootstrap-samples", type=int, default=default.bootstrap_samples)
     data.add_argument("--seed", type=int, default=default.random_seed)
+    add_satisfaction_arguments(data)
 
     training = parser.add_argument_group("학습 곡선과 조기 종료")
     training.add_argument("--max-epochs", type=int, default=model.default_max_epochs)
@@ -88,6 +90,7 @@ def configs_from_args(
     model: CandidateModel, args: argparse.Namespace
 ) -> tuple[ExperimentConfig, tuple[object, ...]]:
     config = ExperimentConfig(
+        **satisfaction_config_from_args(args),
         train_fraction=args.train_fraction,
         validation_fraction=args.validation_fraction,
         candidate_k=args.candidate_k,

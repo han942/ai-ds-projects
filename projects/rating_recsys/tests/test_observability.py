@@ -7,13 +7,19 @@ from importlib.util import find_spec
 from pathlib import Path
 from unittest.mock import patch
 
+from rating_recsys.experiments.artifacts import read_jsonl, write_jsonl
 from rating_recsys.observability.app import (
+    attach_review_text,
     bootstrap_rows,
+    diagnostic_index,
     discover_runs,
     hit_count,
     item_rows,
     item_summary,
+    rating_threshold_rows,
+    review_text_index,
     stage_rows,
+    target_rows,
     user_rows,
     RANKING_STAGES,
 )
@@ -76,12 +82,98 @@ class DashboardDataTests(unittest.TestCase):
         self.assertTrue(rows[0]["visited_in_window"])
         self.assertFalse(rows[0]["is_positive"])
 
+    def test_target_rows_separate_retrieval_miss_from_reranking_miss(self) -> None:
+        query = {
+            "query_id": "test:u2",
+            "user_id": 2,
+            "history": [],
+            "window": [
+                {"restaurant_id": 11, "event_date": "2026-02-01", "restaurant_name": "a", "rating": 5, "relevance": 2},
+                {"restaurant_id": 12, "event_date": "2026-02-02", "restaurant_name": "b", "rating": 3.5, "relevance": 1},
+                {"restaurant_id": 13, "event_date": "2026-02-03", "restaurant_name": "c", "rating": 2, "relevance": 0},
+            ],
+        }
+        audit = {
+            11: {"candidate_rank": 4, "final_rank": 14},
+            12: {"candidate_rank": None, "final_rank": None},
+            13: {"candidate_rank": 1, "final_rank": 1},
+        }
+        rows = target_rows(
+            query,
+            [{"restaurant_id": 13, "final_rank": 1}],
+            target_diagnostics=audit,
+            ranking_k=10,
+            low_threshold=3,
+            high_threshold=4,
+        )
+        self.assertEqual(rows[0]["결과"], "후보 검색 성공 · 최종 14위")
+        self.assertEqual(rows[1]["결과"], "Retriever가 후보로 찾지 못함")
+        self.assertEqual(rows[2]["평가상 분류"], "저평점 방문 · 비관련")
+        self.assertEqual(rows[2]["결과"], "최종 Top-K 추천")
+
+    def test_rating_threshold_sensitivity_keeps_low_ratings_out_of_positive_labels(self) -> None:
+        query = {
+            "query_id": "test:u3",
+            "user_id": 3,
+            "window": [
+                {"restaurant_id": 21, "rating": 5},
+                {"restaurant_id": 22, "rating": 3.5},
+                {"restaurant_id": 23, "rating": 2},
+            ],
+        }
+        recommendations = {
+            "test:u3": [
+                {"restaurant_id": 22, "final_rank": 1},
+                {"restaurant_id": 23, "final_rank": 2},
+            ]
+        }
+        rows = rating_threshold_rows(
+            [query], recommendations, thresholds=(3, 3.5, 4), cutoff=2
+        )
+        self.assertEqual([row["긍정 방문 수"] for row in rows], [2, 2, 1])
+        self.assertEqual([row["긍정 정답 없는 사용자"] for row in rows], [0, 0, 0])
+        self.assertEqual([row["Top-K에 든 저평점 방문"] for row in rows], [1, 1, 1])
+        self.assertEqual(rows[0]["Recall@2"], 0.5)
+        self.assertEqual(rows[2]["Recall@2"], 0.0)
+        self.assertEqual(rows[0]["Precision@2"], 0.5)
+
+    def test_review_text_joins_only_to_the_matching_user_restaurant_date(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot = Path(directory) / "snapshot.jsonl"
+            write_jsonl(snapshot, [{
+                "review_id": 1001,
+                "user_id": 4,
+                "restaurant_id": 31,
+                "event_date": "2026-01-03",
+            }])
+            write_jsonl(snapshot.with_name("snapshot.reviews.jsonl"), [{
+                "review_id": 1001,
+                "review_text": "재방문하고 싶은 맛이었어요.",
+            }])
+            index = review_text_index(snapshot)
+        row = attach_review_text(
+            {"restaurant_id": 31, "event_date": "2026-01-03"}, 4, index
+        )
+        self.assertEqual(row["review_text"], "재방문하고 싶은 맛이었어요.")
+        self.assertIsNone(
+            attach_review_text(
+                {"restaurant_id": 31, "event_date": "2026-01-04"}, 4, index
+            )["review_text"]
+        )
+
     def test_helpers_on_real_run(self) -> None:
         run = _Run.get()
         self.assertEqual(discover_runs(run.root / "artifacts"), [run.result.run_dir])
         rows = stage_rows(run.result.metrics["test"], RANKING_STAGES, ("recall", "map"))
         self.assertEqual({row["K"] for row in rows}, set(SMALL.ranking_cutoffs))
         self.assertTrue(bootstrap_rows(run.result.metrics["test"]["bootstrap_r1_minus_r0"]))
+        target_audit = read_jsonl(run.result.run_dir / "target_diagnostics_test.jsonl")
+        query_rows = read_jsonl(run.result.run_dir / "queries_test.jsonl")
+        self.assertTrue(target_audit)
+        self.assertEqual(
+            len(diagnostic_index(target_audit)),
+            len(query_rows),
+        )
 
 
 @unittest.skipUnless(find_spec("streamlit"), "experiment extra is not installed")
@@ -105,6 +197,8 @@ class DashboardSmokeTests(unittest.TestCase):
         app = self._app(run.root / "artifacts")
         self.assertFalse(app.exception)
         self.assertTrue(any("실험 보고서" in item.value for item in app.markdown))
+        self.assertGreaterEqual(len(app.get("vega_lite_chart")), 2)
+        self.assertTrue(any(item.label == "사용자별 진단" for item in app.tabs))
         self.assertGreaterEqual(len(app.dataframe), 5)
         app.sidebar.radio(key="phase").set_value("validation").run(timeout=60)
         self.assertFalse(app.exception)

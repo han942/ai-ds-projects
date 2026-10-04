@@ -36,6 +36,24 @@ def _ints(text: str) -> tuple[int, ...]:
     return tuple(int(item) for item in text.split(",") if item.strip())
 
 
+def add_satisfaction_arguments(group) -> None:
+    default = ExperimentConfig()
+    group.add_argument(
+        "--satisfaction-mode", choices=("absolute", "history-aware"),
+        default=default.satisfaction_mode,
+        help="absolute: 기존 등급; history-aware: 이력이 충분하면 과거 사용자 평균으로 강한 만족 경계 보정",
+    )
+    group.add_argument("--satisfaction-min-history", type=int, default=default.satisfaction_min_history)
+    group.add_argument("--satisfaction-mean-weight", type=float, default=default.satisfaction_mean_weight)
+    group.add_argument("--satisfaction-max-shift", type=float, default=default.satisfaction_max_shift)
+
+
+def satisfaction_config_from_args(args) -> dict[str, object]:
+    return {name: getattr(args, name) for name in (
+        "satisfaction_mode", "satisfaction_min_history", "satisfaction_mean_weight", "satisfaction_max_shift",
+    )}
+
+
 def build_parser() -> argparse.ArgumentParser:
     default = ExperimentConfig()
     parser = argparse.ArgumentParser(
@@ -65,6 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--relevance-low", type=float, default=default.relevance_low_threshold,
         help="이 평점 이상은 relevance 1, 미만은 정답이 아님",
     )
+    add_satisfaction_arguments(data)
 
     model = parser.add_argument_group("후보 생성과 LTR")
     model.add_argument(
@@ -131,6 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
     return ExperimentConfig(
+        **satisfaction_config_from_args(args),
         ranker_training_mode=args.ranker_training_mode,
         ranker_label_mode=args.ranker_label_mode,
         rating_shrinkage_strength=args.rating_shrinkage_strength,

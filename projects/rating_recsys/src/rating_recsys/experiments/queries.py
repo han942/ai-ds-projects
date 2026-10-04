@@ -44,7 +44,7 @@ def build_prefix_queries(
                     cutoff=target.event_date,
                     history=tuple(history[:index]),
                     target=target,
-                    relevance=config.relevance(target.rating),
+                    relevance=config.relevance(target.rating, history=history[:index]),
                 )
             )
     return tuple(sorted(queries, key=lambda query: query.query_id))
@@ -92,7 +92,7 @@ def build_window_queries(
                 history=user_history,
                 window=visits,
                 relevance_by_item={
-                    item.restaurant_id: config.relevance(item.rating) for item in visits
+                    item.restaurant_id: config.relevance(item.rating, history=user_history) for item in visits
                 },
             )
         )

@@ -1,177 +1,168 @@
 # Rating Recommender System V2
 
-DiningCode의 방문·평점 이력으로 미방문 식당을 추천하는 2-stage 추천 시스템이다.
-후보 식당 검색과 최종 순위 학습을 분리하고, 고정 데이터에서 시간 순서에 따라 평가한다.
+DiningCode의 방문·평점·리뷰로 **사용자가 만족할 식당을 추천하는 방법**을 비교한다. 현재 기준 모델은 방문·평점 이력만 사용하는 Two-stage 추천 시스템이다.
 
-## Architecture
+## 연구 질문
+
+| 질문 | 확인할 내용 |
+|---|---|
+| **RQ1** | 과거 리뷰와 식당 정보를 더하면 방문·평점 이력 baseline보다 만족할 식당을 더 잘 추천하는가? |
+| **RQ2** | 같은 추천 과제와 평가 기준에서 어떤 모델 구성이 더 효과적인가? |
+
+성능 향상은 가정하지 않는다. 입력 정보의 효과와 모델 구조의 효과를 나눠 비교한다.
+
+## 현재 시스템
+
+| 단계 | 현재 구성 | 역할 |
+|---|---|---|
+| 후보 검색 | C1 Item-item + C4 LightGCN → C5 RRF | 사용자별 식당 후보 100개 생성 |
+| 재정렬 | R1 LightGBM LambdaRank | 후보를 다시 정렬해 Top-10 추천 |
+| 텍스트·식당 정보 | 미사용 | 후속 실험에서 추가 |
+| 별점 예측 | 미지원 | 현재 ranker는 별점이 아닌 순위 점수를 출력 |
 
 ```mermaid
-flowchart TB
-    subgraph DATA["1 · 데이터 준비"]
-        DB["DiningCode 리뷰 → PostgreSQL"] --> S["고정 interaction snapshot"]
-        S --> D["전역 날짜 분할<br/>Train ≤ T1 · Validation: T1~T2 · Test > T2"]
-        D --> P["추천 시점 이전 이력으로 후보·feature 생성<br/>단계별 prepared 파일 저장·재사용"]
-    end
-
-    subgraph TRAIN["2 · 학습과 모델 선택"]
-        X["Train 이력 prefix별 C5 후보·feature<br/>다음 방문 식당을 정답으로 학습"] --> L["R1: LambdaRank 설정별 학습"]
-        L --> V["T1 시점의 validation 후보 재정렬<br/>T1 이후 T2까지의 방문으로 설정·트리 수 선택"]
-        V --> F["선택한 설정으로 최종 refit<br/>T2까지의 학습 query 사용"]
-    end
-
-    subgraph EVAL["3 · 추천과 평가"]
-        C["T2 시점의 C5 후보 100개<br/>item-item + LightGCN 순위 결합"] --> R["최종 LambdaRank → 추천 10개"]
-        R --> E["T2 이후 방문·평점으로 평가<br/>후보 Recall · 최종 NDCG/Recall 등"]
-        C --> E
-        E --> A["보고서·지표·추천 목록 저장<br/>MLflow · Streamlit"]
-    end
-
-    P --> X
-    P --> V
-    P --> F
-    P --> C
-    F --> R
-
-    classDef data fill:#e8f0fe,stroke:#4a6da7,color:#1f2328
-    classDef train fill:#fdf0e3,stroke:#c98b3a,color:#1f2328
-    classDef eval fill:#e9f5ec,stroke:#4a8a5f,color:#1f2328
-    class DB,S,D,P data
-    class X,L,V,F train
-    class C,R,E,A eval
+flowchart LR
+    A[과거 방문·평점] --> B[C1 Item-item]
+    A --> C[C4 LightGCN]
+    B --> D[C5 RRF 후보 100개]
+    C --> D
+    D --> E[R1 LambdaRank]
+    E --> F[추천 Top-10]
+    F --> G[미래 실제 방문·평점과 비교]
 ```
 
-후보·feature는 각 추천 시점 이전 정보로 만들고, 이후 방문·평점은 정답에만 사용한다.
-Validation/test의 정답 식당을 후보에 추가하지 않으며 test로 모델 설정을 선택하지 않는다.
-구체적인 데이터 경로는 [baseline의 훈련부터 평가까지의 흐름](./BASELINE_MODEL.md#훈련부터-평가까지의-전체-흐름)에 정리했다.
+후보와 feature는 추천 시점 이전 정보만 사용한다. 미래 방문·평점은 평가 정답으로만 사용하며, 정답 식당을 후보에 강제로 추가하지 않는다.
 
-## Goal
+## 데이터와 시간 분할
 
-사용자의 과거 방문을 바탕으로 취향에 맞는 새로운 식당을 찾는 것이 목표다.
-먼저 **후보 검색이 미래 방문 식당을 얼마나 찾는지**, 다음으로 **찾은 후보를 얼마나
-좋은 순서로 추천하는지**를 구분해서 개선한다. 현재는 로컬 오프라인 실험 단계이며,
-추천 API와 실제 노출·클릭 기반 검증은 후속 과제다.
+DiningCode 리뷰를 고정 interaction snapshot으로 만들어 실험에 사용한다. snapshot을 사용하면 반복 실험마다 크롤링이나 DB 적재를 다시 하지 않아도 된다.
 
-## Dataset
-
-수집한 DiningCode 리뷰를 PostgreSQL에 적재하고, 사용자·식당 쌍의 최초 interaction을
-추출한 snapshot을 실험 입력으로 고정했다. 반복 실험에는 크롤링·DB 적재가 필요 없다.
-
-| 항목 | 현재 평가 데이터 |
+| 항목 | 현재 기준 |
 |---|---|
 | Snapshot | `e7896add5b4b5939` |
-| 규모 | Interaction 88,554개 · 사용자 14,008명 · 식당 4,587개 |
-| 전역 cutoff | T1: 2025-12-19 · T2: 2026-05-04 |
+| 규모 | 88,554 interactions · 사용자 14,008명 · 식당 4,587개 |
+| Train cutoff (T1) | 2025-12-19 |
+| Validation cutoff (T2) | 2026-05-04 |
 | Train / validation / test | 70,883 / 8,934 / 8,737 interactions |
-| Test 사용자 | 과거 이력이 있는 1,580명, positive 정답이 있는 평가 사용자 1,573명 |
+| Test 사용자 | cutoff 이전 이력이 있는 1,580명 |
+| Prepared 데이터 | 이번 Window 실행의 4개 배열 파일 약 45 MB · 같은 조건에서 자동 재사용 |
 
-Positive 정답은 평가 기간에 방문하고 평점 3점 이상을 준 식당이다.
+Test는 T2 이후 약 145일 동안의 여러 실제 방문으로 구성된다. 바로 다음 방문 하나만을 맞히는 평가는 아니다.
 
-같은 snapshot·생성 조건의 학습 feature·label·group과 평가 후보는
-`artifacts/prepared/`의 압축 배열과 manifest에서 자동 재사용한다. Ranker 설정만
-바꾸면 이 데이터를 다시 만들지 않는다. 새 후보 모델의 학습·후보는 별도로 계산한다.
-현재 baseline 준비 자료는 약 77MB이며, 이 컴퓨터에서 최초 준비 21.3분 → 재사용
-7.2초였다. **데이터 준비·읽기 시간이며 ranker 학습 시간은 포함하지 않는다.**
+- test 방문은 평점과 관계없이 모두 보존한다.
+- 개인화 순위 평가는 cutoff 이전 방문 이력이 있는 사용자를 대상으로 한다.
+- test 기간에 방문·평점이 기록되지 않은 식당은 미관측 항목이다. 낮은 평점으로 간주하지 않는다.
+- 사용자 데모그래픽 정보는 없다. 사용자 취향은 과거 리뷰·평점에서, 식당 특성은 cutoff 당시 이용 가능한 리뷰·메뉴·속성에서 추출하는 것을 계획한다.
+- 과거 시점의 실험에는 그 시점 이후 수집한 리뷰·메뉴·속성을 사용하지 않는다.
 
-## Model & Training
+## 학습과 평가
 
-현재 baseline은 **C5 후보 검색 + R1 순위 학습**이다. 코드의 C/R 이름은 각각
-candidate retrieval과 ranking 단계의 식별자다.
+### 현재 학습 방식
 
-| 단계 | 모델 | 역할·설정 |
-|---|---|---|
-| C1 | Item-item 협업 필터링 | 함께 방문된 식당의 유사도로 미방문 식당 검색 |
-| C4 | LightGCN | 사용자–식당 방문 그래프 학습, 3 layers · 64 dimensions · 20 epochs |
-| C5 | Reciprocal Rank Fusion (RRF) | C1·C4의 순위를 결합, 상수 60 · 후보 100개 · 방문 식당 제외 |
-| R1 | LightGBM LambdaRank | 16개 feature로 후보 재정렬, learning rate 0.05 · seed 42 · 추천 10개 |
+1. Train 기간을 기본 3개월 Window로 나눈다.
+2. 각 기간 시작 전 이력으로 C5가 후보를 검색하고, 후보별 feature를 만든다.
+3. 기간 내 모든 방문을 개인별 만족도 정답으로 묶고, 정답이 실제 후보에 검색된 query로 LambdaRank를 학습한다.
+4. Validation의 Graded NDCG@10으로 ranker 설정과 트리 수를 선택한다.
+5. 선택한 설정으로 T2까지 다시 학습한 뒤, test에서 최종 평가한다.
 
-Feature는 후보 모델의 점수·순위, 인기도, 과거 사용자·식당 평균 평점, 이력 길이,
-지역 비율 등이다. 현재 baseline은 리뷰 텍스트를 입력으로 사용하지 않는다.
-사용자·식당 평균 평점은 단순 평균이며 shrinkage 강도는 λ=0이다.
+현재 기준 학습은 **기준 날짜까지의 이력으로 후보를 만들고, 이후 일정 기간의 모든 방문을
+한 정답 목록으로 묶는 Window 방식**으로 진행한다. 같은 날 방문도 목록에 함께 보존한다.
+과거 CLI 기본값은 Prefix/absolute로 유지하며, 새 baseline은 Window/history-aware 옵션을 명시한다.
+학습 3개월과 test 약 145일의 기간 차이는 남아 있다.
+자세한 차이는 [PLAN의 날짜 경계 설명](./PLAN.md#같은-날짜-방문-처리의-의미)에 있다.
 
-학습은 과거 이력에서 **다음 방문 하나를 정답으로 삼는 prefix 방식**이다.
-평점 4 이상은 relevance 2, 3 이상 4 미만은 1, 나머지와 미관측 후보는 0으로 두고
-순위를 학습한다. 이는 평점을 정규화해서 예측하는 회귀 모델과는 다르다.
-평가에서는 이후 기간의 **여러 방문 식당**을 정답으로 사용한다.
+### 현재 구현의 평점 기준과 지표
 
-Validation NDCG@10으로 7개 ranker 설정과 트리 수를 선택하고, T2까지 다시 학습해
-test를 평가한다. 현재 측정에서 선택된 설정은 leaves 15 · min child 10 · 1 tree다.
-상세 feature·label·탐색 규칙은 [BASELINE_MODEL.md](./BASELINE_MODEL.md)에 있다.
+강한 만족 경계 h는 과거 이력 10건 미만에서 4점, 10건 이상에서
+`clip(4 + 0.5 × (과거 사용자 평균 − 4), 3.5, 4.5)`다.
 
-## Evaluation Results
-
-2026-10-02 현재 코드로 다시 학습한 baseline의 test 결과다. 후보 Recall과 최종
-순위 정확도는 positive 정답이 있는 사용자 1,573명을 대상으로 계산한다.
-
-| 지표 | 현재 baseline | 의미 |
+| 실제 test 평점 | Graded relevance | 해석 |
 |---|---:|---|
-| 후보 Recall@100 | 20.1626% | 미래 positive 식당 중 후보 100개에 포함된 비율의 사용자별 평균 |
-| 최종 NDCG@10 | 0.029360 | 추천 순위와 평점에 따른 relevance를 함께 반영한 점수 |
-| 최종 Recall@10 | 4.1284% | 미래 positive 식당 중 추천 10개에 포함된 비율의 사용자별 평균 |
-| 최종 Precision@10 | 1.5639% | 추천 10개 중 미래 positive 식당의 비율의 사용자별 평균 |
+| h 이상 | 2 | 강한 만족 |
+| 3점 이상 h 미만 | 1 | 약한 만족 |
+| 3점 미만 | 0 | 만족 정답 아님; test 행은 유지 |
 
-평균 평점 shrinkage λ=10은 test NDCG@10 0.028207이었다. Baseline 대비 차이의
-95% 신뢰구간이 0을 포함해 개선을 확인하지 못했고, 기본값 λ=0을 유지한다.
-[측정 원본과 비교 조건](./artifacts/comparisons/shrinkage/20261002T062004863532Z-e7896add/report.md)을 함께 보관한다.
-이 수치는 이전 run의 결과나 V1의 평점 예측 RMSE와 섞어 비교하지 않는다.
+| 평가 단계 | 지표 | 답하는 질문 |
+|---|---|---|
+| 후보 검색 | Recall@100, 4점 이상 Recall@100 | 만족한 식당을 재정렬 전에 찾았는가? |
+| 최종 추천 · 주 비교 | **Graded NDCG@10** | 만족한 식당을 추천 상위에 배치했는가? |
+| 고평점 추천 진단 | 4점 이상 Recall@10 | 실제 고평점 식당이 Top-10에 포함됐는가? |
+| 별점 예측 모델만 해당 | 모든 test 평점의 MAE/RMSE | 방문한 식당에 줄 평점을 얼마나 정확히 예측했는가? |
+| 저평점 진단 | 실제 3점 미만 방문의 Top-K 포함 수·비율 | 나중에 낮은 점수를 준 식당을 상위에 둔 사례는 얼마인가? |
 
-## Limitations
+Validation Graded NDCG@10으로 설정을 고르고, test Graded NDCG@10은 최종 비교에 한 번 사용한다. MAE/RMSE는 별점 예측값을 출력하는 모델에만 적용한다. 낮은 MAE가 좋은 추천 순위를 보장하지 않으므로 순위 지표와 따로 해석한다.
 
-- 후보 Recall@100이 약 20.2%여서 검색 단계에서 빠진 정답은 재정렬로 복구할 수 없다.
-- 기본 학습의 다음 방문 정답과 평가의 여러 미래 방문 정답 사이에 구조 차이가 있다.
-- 미관측 식당이 싫어하는 식당이라는 뜻은 아니다. 오프라인 방문 기록에는 노출 정보가 없다.
-- 현재 결과는 고정 기간의 실험이다. 새 방법의 일반화 확인에는 추가 seed와 새 미래 holdout이 필요하다.
+선택한 공통 만족도 기준은 **이력이 적으면 기존 기준을 유지하고, 충분하면 사용자의 과거 평균
+평점도 활용하는 것**이다. 이 기준은 구현·검증됐으며 Window baseline과 후속 모델을 모두
+같은 기준으로 평가한다. 최소 이력 10건의 train 분석 근거와 적용 예시는
+[SATISFACTION_BASELINE.md](./SATISFACTION_BASELINE.md)에 정리했다.
 
-실험 후보군, 지난 실험의 판단, 학습 label 변경 계획은 [PLAN.md](./PLAN.md)에 모은다.
+## 현재 측정 결과
 
-## Code Architecture
+아래 값은 **2026-10-04 Window + 개인별 만족도 기준**의 전체 실행 결과다.
 
-모델 실행 코드는 [`src/rating_recsys/`](./src/rating_recsys/) 아래에 단계별로 나뉜다.
+| 지표 | 현재 결과 | 기준 |
+|---|---:|---|
+| C5 후보 Recall@100 | 20.1626% | 등급 > 0 test 식당; 3점 이상 |
+| 최종 Graded NDCG@10 | 0.025467 | 개인별 만족도 등급 |
+| 최종 Recall@10 | 3.6502% | 등급 > 0 test 식당 |
+| 4점 이상 Recall@10 | 3.5105% | 4점 이상 방문이 있는 사용자 |
+| 실제 3점 미만 방문의 Top-10 포함 | 3 / 43 (6.98%) | 관측된 저평점 방문 |
 
-| 모듈 | 역할 |
+선택된 ranker는 leaves 63 / min_child_samples 100 / trees 76이다. Test 이력 사용자
+1,580명 중 862명에게 개인 기준을 적용했다. R0 후보 순서의 NDCG@10은 0.026590이며,
+R1 − R0의 95% CI가 0을 포함해 이번 실행에서는 재정렬의 이득을 확인하지 못했다.
+현재 ranker는 별점을 출력하지 않아 MAE/RMSE는 없다. 과거 2026-10-02 수치는
+평가 등급·학습 방식이 달라 직접 비교하지 않는다.
+출처: [실행 보고서](./artifacts/runs/20261004T125314601899Z-e7896add/report.md).
+
+## 실험 비교 범위
+
+| 비교 축 | 후보 구성 |
 |---|---|
-| [`ingestion/`](./src/rating_recsys/ingestion/) · [`db/`](./src/rating_recsys/db/) | 리뷰 변환·중복 제거·적재, DB 연결과 migration 실행 |
-| [`datasets/`](./src/rating_recsys/datasets/) | Interaction 조회와 전역 날짜 분할 |
-| [`retrieval/`](./src/rating_recsys/retrieval/) | 후보 모델, LightGCN, RRF 결합 |
-| [`ranking/`](./src/rating_recsys/ranking/) | Feature 생성과 LambdaRank 학습·예측 |
-| [`experiments/`](./src/rating_recsys/experiments/) | Snapshot·prepared 데이터, 전체 파이프라인과 비교 실험 실행 |
-| [`evaluation/`](./src/rating_recsys/evaluation/) | 후보·최종 추천 지표와 보고서 생성 |
-| [`observability/`](./src/rating_recsys/observability/) | MLflow 기록과 Streamlit 결과 조회 |
-| [`tests/`](./tests/) | 데이터·후보·순위·파이프라인·비교·조회 기능 검증 |
+| 입력 정보 (RQ1) | 방문·평점 이력 / 사용자 리뷰 / 식당 정보 / 리뷰와 식당 정보 모두 |
+| 후보 검색 | Item-item, MF, LightGCN, BM25, 리뷰 임베딩, Two-Tower |
+| 재정렬 | R0 기준 순서, LambdaRank, Jev decision model |
+| 추천 구조 (RQ2) | Two-stage, Two-Tower, Generative Retrieval, 리스트 생성형 추천 |
 
-## Resources & Repository Contents
+현재 구현은 C5 + LambdaRank다. BM25·임베딩·Two-Tower·Jev·생성형 추천은 비교 계획이며, 상태와 실험 순서는 [PLAN.md](./PLAN.md)에 정리한다. baseline의 feature·label·설정·평가 절차는 [BASELINE_MODEL.md](./BASELINE_MODEL.md)에서 확인할 수 있다.
 
-직접 관리하는 V2 문서는 아래 세 개다. 실행 시 생성되는 보고서는 해당 결과 폴더에 둔다.
-로컬 데이터·모델 등 일부 artifact는 Git에 포함되지 않으므로 새 checkout에서는 준비가 필요하다.
+## 제한 사항
+
+- 추천 노출 기록이 없어 오프라인 평가는 실제 추천이 방문이나 만족을 유발했다는 인과 효과를 검증하지 않는다.
+- 현재 baseline은 리뷰 텍스트와 식당 콘텐츠를 사용하지 않는다.
+- 기존 test 결과는 한 snapshot과 한 미래 기간에 대한 측정이다. 일반화를 확인하려면 추가 seed와 새로운 미래 holdout이 필요하다.
+- 신규 사용자 1,214명은 cutoff 이전 이력이 없어 개인화 순위 평가에서 제외되며, 별도 cold-start 평가가 필요하다.
+
+## 저장소 안내
 
 | 경로 | 내용 |
 |---|---|
-| [README.md](./README.md) | 프로젝트 목표·아키텍처·현재 결과와 시작 방법 |
-| [BASELINE_MODEL.md](./BASELINE_MODEL.md) | 현재 baseline의 구조·훈련/평가 규칙·설정·수치 |
-| [PLAN.md](./PLAN.md) | 앞으로의 실험, 지난 결과와 판단, 상세 실행·환경·데이터 관리 방법 |
-| [`artifacts/snapshots/`](./artifacts/snapshots/) | 고정 interaction·리뷰 입력과 적재 원본 |
-| [`artifacts/prepared/`](./artifacts/prepared/) | 반복 학습에 재사용하는 feature·label·group·후보 자료 |
-| [`artifacts/runs/`](./artifacts/runs/) · [`artifacts/comparisons/`](./artifacts/comparisons/) | 표준 실행과 방법별 비교의 보고서·지표·모델·추천 목록 |
-| [`migrations/`](./migrations/) · [`queries/`](./queries/) | DB 스키마와 데이터 검증 SQL |
+| [BASELINE_MODEL.md](./BASELINE_MODEL.md) | 현재 baseline 구조·학습·평가·결과 상세 |
+| [SATISFACTION_BASELINE.md](./SATISFACTION_BASELINE.md) | 개인별 만족도 기준·10건 선택 근거·Window 실행 |
+| [PLAN.md](./PLAN.md) | 연구 질문·평가 기준·실험 로드맵·실행 안내 |
+| [AGENTS.md](./AGENTS.md) · [docs_style.md](./docs_style.md) | 프로젝트 지침·문서 작성 기준 |
+| [`src/rating_recsys/`](./src/rating_recsys/) | 데이터·후보 검색·순위 학습·평가 코드 |
+| [`artifacts/snapshots/`](./artifacts/snapshots/) | 고정 interaction·리뷰 입력 |
+| [`artifacts/prepared/`](./artifacts/prepared/) | 재사용 학습 feature·label·group·후보 자료 |
+| [`artifacts/runs/`](./artifacts/runs/) · [`artifacts/comparisons/`](./artifacts/comparisons/) | 실행·비교 결과와 추천 목록 |
+| [`migrations/`](./migrations/) · [`queries/`](./queries/) | DB schema 변경과 데이터 검증 SQL |
 | [`crawler/`](./crawler/) | 데이터 수집 코드·수집 상태 |
-| [Legacy V1 README](./legacy/v1_rating_prediction/README.md) | 과거 평점 예측 프로젝트의 설명·재실험·archive 안내 |
-| [pyproject.toml](./pyproject.toml) · [.env.example](./.env.example) | 패키지·실행 명령·의존성과 환경 변수 예시 |
+| [Legacy V1 README](./legacy/v1_rating_prediction/README.md) | 이전 평점 예측 프로젝트 |
 
-## Setup
+## 실행
 
-Baseline은 CPU에서 실행하며 Python 3.10 환경에서 확인했다. 현재 컴퓨터에는 프로젝트
-내부 `.venv`에 필요한 패키지가 설치되어 있고, 주요 실행 명령도 사용자 PATH에 등록되어 있다.
-아래 명령은 `projects/rating_recsys` 디렉터리에서 실행한다.
+명령은 `projects/rating_recsys`에서 실행한다. 고정 snapshot을 사용하므로 실험 실행에는 DB 연결이 필요 없다.
 
 ```bash
-# 같은 조건의 prepared 파일이 있으면 자동 재사용하여 학습·평가
-rating-recsys-experiment --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl
+# 개인별 만족도 기준의 Window baseline; 같은 조건의 prepared 데이터 재사용
+rating-recsys-experiment --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl \
+  --ranker-training-mode window --satisfaction-mode history-aware \
+  --label window-personal-satisfaction-n10
 
-# 기존 표준 run의 지표·추천 조회
+# 기존 표준 실행 결과 조회
 rating-recsys-dashboard --address 127.0.0.1
 mlflow ui --backend-store-uri sqlite:///artifacts/mlflow.db --host 127.0.0.1 --port 5000
 ```
 
-Snapshot 실험에는 DB 접속이 필요 없다. 새 환경에서는 프로젝트 환경을 활성화한 뒤
-`pip install -e '.[experiment,dev]'`로 설치한다. DB를 사용할 때는 `.env.example`을
-`.env`로 복사해 접속 정보를 설정한다. 환경 생성·PATH 등록·데이터 사전 준비·비교 명령은
-[PLAN의 실행 안내](./PLAN.md#실행-방법)에 정리했다. Shrinkage 비교 결과는 별도 보고서로 조회한다.
+새 환경에서는 Python 3.10 환경에서 `pip install -e '.[experiment,dev]'`로 설치한다. DB를 쓸 때는 `.env.example`을 `.env`로 복사하고 접속 정보를 설정한다. 추가 실행 명령과 환경 준비는 [PLAN.md](./PLAN.md#실행-방법)를 참고한다.

@@ -55,7 +55,7 @@ def preprocessing_signature() -> str:
     for node in ast.parse(text).body:
         if isinstance(node, ast.ClassDef) and node.name == "ExperimentConfig":
             for method in node.body:
-                if getattr(method, "name", None) in ("relevance", "training_label", "feature_names", "include_region", "lightgcn_config"):
+                if getattr(method, "name", None) in ("relevance", "satisfaction_profile", "training_label", "feature_names", "include_region", "lightgcn_config"):
                     sources[f"config.{method.name}"] = ast.get_source_segment(text, method)
     return _digest(sources)
 
@@ -86,6 +86,7 @@ class PreparedData:
             "region_mode": config.region_mode, "legacy_c3_quota": config.legacy_c3_quota,
             "lightgcn": config.lightgcn_config.to_dict(), "features": list(config.feature_names),
             "relevance_thresholds": [config.relevance_low_threshold, config.relevance_high_threshold],
+            "satisfaction": {key: value for key, value in config.to_dict().items() if key.startswith("satisfaction_")},
             "rating_shrinkage_strength": config.rating_shrinkage_strength,
         }
 

@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import math
+from typing import TYPE_CHECKING, Sequence
 
 from rating_recsys.ranking.features import FEATURE_NAMES, NO_REGION_FEATURE_NAMES
+
+if TYPE_CHECKING:
+    from rating_recsys.datasets.models import Interaction
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +39,11 @@ class ExperimentConfig:
     rating_shrinkage_strength: float = 0.0
     relevance_high_threshold: float = 4.0
     relevance_low_threshold: float = 3.0
+    # Opt in to the new task explicitly; old runs retain their absolute labels.
+    satisfaction_mode: str = "absolute"
+    satisfaction_min_history: int = 10
+    satisfaction_mean_weight: float = 0.5
+    satisfaction_max_shift: float = 0.5
     # C4 LightGCN. Training queries use models refit every
     # ``lightgcn_checkpoint_months`` (calendar aligned) on earlier interactions.
     lightgcn_dimension: int = 64
@@ -62,6 +71,16 @@ class ExperimentConfig:
     n_jobs: int = 8
 
     def __post_init__(self) -> None:
+        if self.satisfaction_mode not in {"absolute", "history-aware"}:
+            raise ValueError("satisfaction_mode must be absolute or history-aware")
+        if isinstance(self.satisfaction_min_history, bool) or not isinstance(self.satisfaction_min_history, int) or self.satisfaction_min_history < 2:
+            raise ValueError("satisfaction_min_history must be an integer >= 2")
+        if not math.isfinite(self.satisfaction_mean_weight) or not 0 <= self.satisfaction_mean_weight <= 1:
+            raise ValueError("satisfaction_mean_weight must be finite and between 0 and 1")
+        if not math.isfinite(self.satisfaction_max_shift) or self.satisfaction_max_shift < 0:
+            raise ValueError("satisfaction_max_shift must be finite and nonnegative")
+        if self.satisfaction_mode == "history-aware" and self.relevance_high_threshold - self.satisfaction_max_shift <= self.relevance_low_threshold:
+            raise ValueError("personalized strong threshold must stay above the weak threshold")
         if self.rating_shrinkage_strength < 0 or not math.isfinite(self.rating_shrinkage_strength):
             raise ValueError("rating_shrinkage_strength must be finite and nonnegative")
         if self.ranker_training_mode not in {"prefix", "window"}:
@@ -120,21 +139,44 @@ class ExperimentConfig:
     def ranking_cutoffs(self) -> tuple[int, ...]:
         return tuple(k for k in (5, 10) if k <= self.ranking_k) or (self.ranking_k,)
 
-    def relevance(self, rating: float) -> int:
-        if rating >= self.relevance_high_threshold:
+    def satisfaction_profile(self, history: Sequence[Interaction] = ()) -> dict[str, object]:
+        """Describe the label rule using only the query's past rated visits.
+
+        Blend the absolute strong threshold with the past user mean, with a
+        bounded shift. The weak threshold stays fixed: low ratings are never
+        promoted. No variance division is used, including constant histories.
+        """
+        count = len(history)
+        past_mean = math.fsum(row.rating for row in history) / count if count else None
+        personalized = self.satisfaction_mode == "history-aware" and count >= self.satisfaction_min_history
+        shift = 0.0
+        if personalized:
+            shift = max(-self.satisfaction_max_shift, min(
+                self.satisfaction_max_shift,
+                self.satisfaction_mean_weight * (past_mean - self.relevance_high_threshold),
+            ))
+        return {
+            "mode": self.satisfaction_mode, "history_count": count,
+            "past_mean": past_mean, "personalized": personalized,
+            "strong_threshold": self.relevance_high_threshold + shift,
+            "weak_threshold": self.relevance_low_threshold,
+        }
+
+    def relevance(self, rating: float, *, history: Sequence[Interaction] = ()) -> int:
+        if rating >= self.satisfaction_profile(history)["strong_threshold"]:
             return 2
         if rating >= self.relevance_low_threshold:
             return 1
         return 0
 
-    def training_label(self, rating: float) -> int:
+    def training_label(self, rating: float, *, history: Sequence[Interaction] = ()) -> int:
         """Half-star rating indexes preserve ratings without three-bin grading.
 
         Zero is reserved for an unobserved candidate, not a measured zero-star
         rating. Evaluation relevance remains unchanged in both training modes.
         """
         if self.ranker_label_mode == "relevance":
-            return self.relevance(rating)
+            return self.relevance(rating, history=history)
         label = round(rating * 2)
         if not 1 <= rating <= 5 or abs(label / 2 - rating) > 1e-8:
             raise ValueError("rating labels require ratings from 1 to 5 in half-star steps")

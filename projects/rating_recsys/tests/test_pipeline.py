@@ -26,6 +26,8 @@ RUN_FILES = (
     "queries_test.jsonl",
     "recommendations_validation.jsonl",
     "recommendations_test.jsonl",
+    "target_diagnostics_validation.jsonl",
+    "target_diagnostics_test.jsonl",
 )
 
 

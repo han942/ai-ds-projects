@@ -282,7 +282,7 @@ def prefix_training_arrays(
         graph_queries += int(bool(ranked))
         context = builder.context
         result = generator.retrieve(query, context, graph_ranked=ranked, scorer=model)
-        target_label = config.training_label(query.target.rating)
+        target_label = config.training_label(query.target.rating, history=query.history)
         if target_label <= 0:
             continue
         relevant += 1
@@ -413,7 +413,7 @@ def window_candidates(
             ).reshape(len(result.union), len(feature_names))
         )
         training_labels = (
-            {visit.restaurant_id: training_config.training_label(visit.rating) for visit in query.window}
+            {visit.restaurant_id: training_config.training_label(visit.rating, history=query.history) for visit in query.window}
             if training_config is not None else query.relevance_by_item
         )
         label_blocks.append(
@@ -478,6 +478,8 @@ def window_training_arrays(
     feature_blocks, label_blocks, groups, rating_priors = [], [], [], []
     query_count = relevant = available = retrieved = scored = 0
     multiple = distinct = preference_pairs = observed_count = 0
+    personalized_queries = 0
+    satisfaction_label_counts = {str(label): 0 for label in (0, 1, 2)}
     for start, queries in build_training_windows(rows, config=config, through=through, phase=phase):
         while index < len(rows) and rows[index].event_date < start:
             builder.add(rows[index])
@@ -493,13 +495,16 @@ def window_training_arrays(
         for query, size in zip(queries, candidates.group_sizes, strict=True):
             graphs.count_query(start)
             query_count += 1
+            personalized_queries += int(config.satisfaction_profile(query.history)["personalized"])
+            for grade in query.relevance_by_item.values():
+                satisfaction_label_counts[str(grade)] += 1
             scored += int(bool(candidates.ordered["c4_lightgcn"][query.query_id]))
             labels = candidates.labels[offset:offset + size]
             values = candidates.features[offset:offset + size]
             offset += size
             positives = {
                 visit.restaurant_id for visit in query.window
-                if config.training_label(visit.rating) > 0
+                if config.training_label(visit.rating, history=query.history) > 0
             }
             relevant += int(bool(positives))
             available += int(bool(positives & catalog_ids))
@@ -526,6 +531,10 @@ def window_training_arrays(
         rating_priors=np.asarray(rating_priors, dtype=np.float64),
         summary={
             "mode": "window", "label_mode": config.ranker_label_mode,
+            "satisfaction_mode": config.satisfaction_mode,
+            "personalized_queries": personalized_queries,
+            "fallback_queries": query_count - personalized_queries,
+            "satisfaction_label_counts": satisfaction_label_counts,
             "queries": query_count, "usable_groups": len(groups), "feature_rows": sum(groups),
             "relevant_queries": relevant, "available_positive_queries": available,
             "retrieved_positive_queries": retrieved,
@@ -640,7 +649,44 @@ def stage_metrics(
         cutoffs=config.ranking_cutoffs,
         **common,
     )
+    metrics["rating_diagnostics"] = {
+        STAGE1: rating_diagnostics(queries, candidates.ordered[STAGE1], config.candidate_cutoffs),
+        "r0_candidate_order": rating_diagnostics(queries, candidates.ordered[STAGE1], config.ranking_cutoffs),
+        "r1_lambdarank": rating_diagnostics(queries, ranked_ids(ranked), config.ranking_cutoffs),
+    }
     return metrics
+
+
+def rating_diagnostics(queries, ordered, cutoffs) -> dict[str, object]:
+    """Absolute-rating diagnostics, with explicit macro and visit denominators.
+
+    These do not change the task's graded labels or selection metric. Queries
+    with only low ratings are kept in the low-rating diagnostic denominator.
+    """
+    high = [{v.restaurant_id for v in q.window if v.rating >= 4.0} for q in queries]
+    low = [{v.restaurant_id for v in q.window if v.rating < 3.0} for q in queries]
+    high_users = sum(bool(ids) for ids in high)
+    high_visits = sum(len(ids) for ids in high)
+    low_visits = sum(len(ids) for ids in low)
+    result = {
+        "queries": len(queries), "high_rating_queries": high_users,
+        "high_rating_visits": high_visits, "low_rating_visits": low_visits,
+    }
+    for k in cutoffs:
+        high_hits = low_hits = 0
+        macro_sum = 0.0
+        for q, high_ids, low_ids in zip(queries, high, low, strict=True):
+            top = set(ordered.get(q.query_id, ())[:k])
+            hits = len(top & high_ids)
+            high_hits += hits
+            low_hits += len(top & low_ids)
+            if high_ids:
+                macro_sum += hits / len(high_ids)
+        result[f"high_rating_recall_at_{k}"] = macro_sum / high_users if high_users else 0.0
+        result[f"high_rating_hit_count_at_{k}"] = high_hits
+        result[f"low_rating_hit_count_at_{k}"] = low_hits
+        result[f"low_rating_visit_inclusion_rate_at_{k}"] = low_hits / low_visits if low_visits else 0.0
+    return result
 
 
 def paired_bootstrap(
@@ -956,8 +1002,8 @@ def run_experiment(
         "feature_schema": list(feature_names),
         "split": split.summary(),
         "windows": {
-            "validation": _window_summary(validation_queries, validation_new, t1),
-            "test": _window_summary(test_queries, test_new, t2),
+            "validation": _window_summary(validation_queries, validation_new, t1, config),
+            "test": _window_summary(test_queries, test_new, t2, config),
         },
         "leakage_checks": {
             "lightgcn_validation_graph_through": t1.isoformat(),
@@ -973,7 +1019,11 @@ def run_experiment(
                 "Stage 1 candidates and different labels; no positive is added to a candidate list"
             ),
             "ranker_training_label_mode": config.ranker_label_mode,
-            "evaluation_labels": "fixed relevance thresholds, independent of training labels",
+            "evaluation_labels": (
+                "history-aware strong threshold from each query's pre-cutoff ratings; fixed weak threshold"
+                if config.satisfaction_mode == "history-aware"
+                else "fixed relevance thresholds, independent of training labels"
+            ),
             "validation_context_through": t1.isoformat(),
             "test_context_through": t2.isoformat(),
             "test_evaluations": 1,
@@ -1048,13 +1098,14 @@ def _window_summary(
     queries: tuple[WindowQuery, ...],
     new_users: int,
     cutoff: date,
+    config: ExperimentConfig | None = None,
 ) -> dict[str, object]:
     positives = [
         sum(value > 0 for value in query.relevance_by_item.values())
         for query in queries
         if query.relevant
     ]
-    return {
+    summary = {
         "history_through": cutoff.isoformat(),
         "seen_users": len(queries),
         "evaluated_users": len(positives),
@@ -1062,6 +1113,18 @@ def _window_summary(
         "relevant_positives": sum(positives),
         "mean_relevant_per_user": sum(positives) / len(positives) if positives else 0.0,
     }
+    if config is not None:
+        profiles = [config.satisfaction_profile(q.history) for q in queries]
+        summary["satisfaction"] = {
+            "mode": config.satisfaction_mode,
+            "minimum_history": config.satisfaction_min_history,
+            "personalized_users": sum(p["personalized"] for p in profiles),
+            "fallback_users": sum(not p["personalized"] for p in profiles),
+            "strong_threshold_min": min((p["strong_threshold"] for p in profiles), default=None),
+            "strong_threshold_max": max((p["strong_threshold"] for p in profiles), default=None),
+            "label_counts": {str(label): sum(v == label for q in queries for v in q.relevance_by_item.values()) for label in (0, 1, 2)},
+        }
+    return summary
 
 
 def _write_window_artifacts(
@@ -1076,6 +1139,10 @@ def _write_window_artifacts(
         query_id: {restaurant_id: rank for rank, restaurant_id in enumerate(ids, 1)}
         for query_id, ids in candidates.ordered[STAGE1].items()
     }
+    final_rank = {
+        query_id: {restaurant_id: rank for rank, (restaurant_id, _) in enumerate(rows, 1)}
+        for query_id, rows in ranked.items()
+    }
     write_jsonl(
         run_dir / f"queries_{phase}.jsonl",
         (
@@ -1083,6 +1150,7 @@ def _write_window_artifacts(
                 "query_id": query.query_id,
                 "user_id": query.user_id,
                 "cutoff": query.cutoff.isoformat(),
+                "satisfaction": config.satisfaction_profile(query.history),
                 "history": [
                     {
                         "restaurant_id": item.restaurant_id,
@@ -1126,6 +1194,27 @@ def _write_window_artifacts(
                     for rank, (restaurant_id, score) in enumerate(
                         ranked.get(query.query_id, ())[: config.ranking_k], start=1
                     )
+                ],
+            }
+            for query in queries
+        ),
+    )
+    write_jsonl(
+        run_dir / f"target_diagnostics_{phase}.jsonl",
+        (
+            {
+                "query_id": query.query_id,
+                "targets": [
+                    {
+                        "restaurant_id": item.restaurant_id,
+                        "candidate_rank": candidate_rank[query.query_id].get(
+                            item.restaurant_id
+                        ),
+                        "final_rank": final_rank[query.query_id].get(
+                            item.restaurant_id
+                        ),
+                    }
+                    for item in query.window
                 ],
             }
             for query in queries

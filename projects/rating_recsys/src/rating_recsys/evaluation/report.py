@@ -32,6 +32,10 @@ KEY_CONDITIONS = (
     "ranker_training_mode",
     "ranker_label_mode",
     "rating_shrinkage_strength",
+    "satisfaction_mode",
+    "satisfaction_min_history",
+    "satisfaction_mean_weight",
+    "satisfaction_max_shift",
 )
 
 
@@ -119,6 +123,17 @@ def render_report(manifest: dict, metrics: dict) -> str:
         "",
     ]
     lines += _ltr_lines(test, k, boot)
+    diagnostics = test.get("rating_diagnostics", {}).get("r1_lambdarank")
+    if diagnostics:
+        lines += [
+            "", f"### 절대 평점 보조 진단 (Top-{k})", "",
+            f"4점 이상 Recall@{k}: {_pct(diagnostics[f'high_rating_recall_at_{k}'])} "
+            f"(4점 이상 미래 방문이 있는 사용자 {diagnostics['high_rating_queries']:,}명에 대한 사용자별 평균).",
+            f"실제 3점 미만 미래 방문 {diagnostics['low_rating_visits']:,}개 중 Top-{k}에 포함된 방문 "
+            f"{diagnostics[f'low_rating_hit_count_at_{k}']:,}개 "
+            f"({_pct(diagnostics[f'low_rating_visit_inclusion_rate_at_{k}'])}). "
+            "미관측 식당은 이 분모에 넣지 않는다.",
+        ]
     lines += [
         "",
         "## 6. 해석 (작성자 기입)",
@@ -138,6 +153,7 @@ def render_report(manifest: dict, metrics: dict) -> str:
         "",
         "같은 폴더의 `manifest.json`(조건·구간·환경), `metrics.json`(모든 수치), "
         "`queries_*.jsonl`·`recommendations_*.jsonl`(사용자별 정답과 Top-K), "
+        "`target_diagnostics_*.jsonl`(정답 방문별 후보·최종 순위), "
         "`model.txt`(최종 ranker)가 이 보고서의 원본이다.",
     ]
     return "\n".join(lines) + "\n"
@@ -185,6 +201,24 @@ def _data_lines(manifest: dict, metrics: dict) -> list[str]:
         "",
     ]
     config = manifest["config"]
+    if config.get("satisfaction_mode") == "history-aware":
+        n = config["satisfaction_min_history"]
+        weight = config["satisfaction_mean_weight"]
+        shift = config["satisfaction_max_shift"]
+        lines += [
+            "", f"**개인별 만족도 기준:** 과거 이력 {n}건 미만이면 기존 경계를 유지한다. "
+            f"{n}건 이상이면 강한 만족 경계 = 기존 경계 + clip({weight:g} × "
+            f"(과거 사용자 평균 − 기존 경계), −{shift:g}, +{shift:g}). "
+            f"기본 설정에서는 3.5~4.5점이며, 약한 만족 경계 {config['relevance_low_threshold']:g}점은 고정한다. "
+            "강한 만족 label 2/gain 3, 약한 만족 label 1/gain 1, 나머지 label 0/gain 0이다. "
+            "평균은 각 query cutoff 이전 이력만 사용한다. 기존 등급의 과거 NDCG와 직접 비교하지 않는다.",
+        ]
+        for phase, title in (("validation", "Validation"), ("test", "Test")):
+            info = manifest["windows"][phase].get("satisfaction", {})
+            if info:
+                lines.append(f"- {title}: 개인 기준 {info['personalized_users']:,}명, "
+                             f"이력 부족으로 절대 기준 적용 {info['fallback_users']:,}명; "
+                             f"미래 방문의 label 0/1/2 수 {info['label_counts']}.")
     lines.append(
         "주요 조건: "
         + ", ".join(f"`{key}` {config[key]}" for key in KEY_CONDITIONS if key in config)
@@ -415,6 +449,10 @@ FLAG_NAMES = {
     "ranker_training_mode": "--ranker-training-mode",
     "ranker_label_mode": "--ranker-label-mode",
     "rating_shrinkage_strength": "--rating-shrinkage-strength",
+    "satisfaction_mode": "--satisfaction-mode",
+    "satisfaction_min_history": "--satisfaction-min-history",
+    "satisfaction_mean_weight": "--satisfaction-mean-weight",
+    "satisfaction_max_shift": "--satisfaction-max-shift",
     "train_fraction": "--train-fraction",
     "validation_fraction": "--validation-fraction",
     "legacy_c3_quota": "--legacy-c3-quota",

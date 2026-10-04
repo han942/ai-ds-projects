@@ -581,8 +581,8 @@ def run_candidate_comparison(
         },
         "split": split.summary(),
         "windows": {
-            "validation": _window_summary(validation_queries, validation_new, t1),
-            "test": _window_summary(test_queries, test_new, t2),
+            "validation": _window_summary(validation_queries, validation_new, t1, config),
+            "test": _window_summary(test_queries, test_new, t2, config),
         },
         "leakage_checks": {
             "validation_model_inputs_through": t1.isoformat(),

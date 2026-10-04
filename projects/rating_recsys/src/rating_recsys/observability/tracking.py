@@ -154,6 +154,8 @@ def log_run(run_dir: Path, *, artifacts_root: Path) -> dict[str, object]:
                 f"{phase}/positive_availability",
                 metrics[phase]["positive_availability"]["rate"],
             )
+            for stage, values in metrics[phase].get("rating_diagnostics", {}).items():
+                buffer.add_stage(phase, f"{stage}/rating_diagnostics", values)
         for source, name in BOOTSTRAPS.items():
             for key, values in (metrics["test"].get(source) or {}).items():
                 if isinstance(values, dict):
