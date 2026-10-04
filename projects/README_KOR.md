@@ -6,7 +6,7 @@
 - **링크:** https://github.com/han942/ai-ds-projects/tree/main/projects/rating_recsys
 - **목표:** 식당 추천 웹사이트에서 크롤링한 사용자 리뷰 데이터를 활용하여 추천 모델 구축
 - **기술 스택:** ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) ![MySQL](https://img.shields.io/badge/MySQL-4479A1?style=flat&logo=mysql&logoColor=white) ![pymysql](https://img.shields.io/badge/pymysql-4479A1?style=flat&logo=python&logoColor=white) ![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=flat&logo=pytorch&logoColor=white) ![Pandas](https://img.shields.io/badge/Pandas-150458?style=flat&logo=pandas&logoColor=white) ![Selenium](https://img.shields.io/badge/Selenium-43B02A?style=flat&logo=selenium&logoColor=white) ![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=flat&logo=scikit-learn&logoColor=white)
-- **주요 코드:** `src/rating_recsys/` (`rating-recsys-experiment`로 실행), v1 노트북은 `legacy/`
+- **주요 코드:** `src/rating_recsys/` (`rating-recsys-experiment`로 실행), v1 노트북·과거 결과는 [Legacy V1 README](./rating_recsys/legacy/v1_rating_prediction/README.md) 참고
 - **주요 내용:**
   - Selenium/Playwright로 다이닝코드 리뷰를 크롤링하고 중복 제거 후 Supabase PostgreSQL에 적재
   - 2-stage 추천: item-item CF와 LightGCN 후보를 RRF로 결합한 뒤 LightGBM LambdaRank로 재정렬, 누수 없는 전역 날짜 분할로 평가

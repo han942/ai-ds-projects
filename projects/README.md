@@ -8,7 +8,7 @@ This folder contains my main data science/AI projects, organized by topic.
 - Link: https://github.com/han942/ai-ds-projects/tree/main/projects/rating_recsys
 - Goal: Constructing recommnedation model that represents user-reviews, leading to high quality recommendation in restuarant domains.
 - Tech stack: ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) ![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=flat&logo=pytorch&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white) ![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=flat&logo=supabase&logoColor=white) ![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white) ![Selenium](https://img.shields.io/badge/Selenium-43B02A?style=flat&logo=selenium&logoColor=white) ![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=flat&logo=scikit-learn&logoColor=white) ![MLflow](https://img.shields.io/badge/MLflow-0194E2?style=flat&logo=mlflow&logoColor=white) 
-- Main code: `src/rating_recsys/` (run `rating-recsys-experiment`); v1 notebooks are under `legacy/`
+- Main code: `src/rating_recsys/` (run `rating-recsys-experiment`); v1 notebooks and archived results are documented in the [Legacy V1 README](./rating_recsys/legacy/v1_rating_prediction/README.md)
 - Highlights:
   - Crawling DiningCode reviews with Selenium/Playwright and loading them into Supabase PostgreSQL with deduplication
   - Two-stage recommender: item-item CF + LightGCN candidates fused with RRF, then LightGBM LambdaRank reranking, evaluated on a leakage-free global date split

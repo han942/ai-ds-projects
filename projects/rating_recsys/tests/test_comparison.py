@@ -8,6 +8,7 @@ import unittest
 from dataclasses import dataclass, replace
 from importlib.util import find_spec
 from pathlib import Path
+from unittest.mock import patch
 
 from rating_recsys.datasets.split import build_global_temporal_split
 from rating_recsys.experiments import compare_cli
@@ -71,6 +72,20 @@ class RegistryTests(unittest.TestCase):
 
 
 class ComparisonRunTests(unittest.TestCase):
+    def test_new_model_reuses_pipeline_baseline_candidates(self):
+        rows = synthetic_interactions()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = run_small(rows, root)
+            with patch("rating_recsys.experiments.pipeline.fit_lightgcn", side_effect=AssertionError("baseline graph rebuilt")), \
+                 patch("rating_recsys.experiments.pipeline.window_candidates", side_effect=AssertionError("baseline candidates rebuilt")), \
+                 patch.object(LIGHTGCN, "fit", wraps=LIGHTGCN.fit) as new_model_fit:
+                compared = run_tiny(LIGHTGCN, rows, root)
+            self.assertEqual(new_model_fit.call_count, 2)
+            self.assertEqual({e["status"] for e in compared.manifest["prepared_data"]["entries"]}, {"hit"})
+            self.assertEqual(compared.metrics["test"]["c5_c1_lightgcn_rrf"]["recall_at_10"],
+                             baseline.metrics["test"]["c5_c1_lightgcn_rrf"]["recall_at_10"])
+
     def test_run_folder_curves_leakage_and_report(self) -> None:
         rows = synthetic_interactions()
         split = build_global_temporal_split(rows)

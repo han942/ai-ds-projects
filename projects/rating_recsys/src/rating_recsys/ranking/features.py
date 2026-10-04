@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import math
 from typing import Iterable
 
 from rating_recsys.experiments.models import Candidate, FeatureRow, RecommendationQuery
@@ -42,12 +43,27 @@ FEATURE_NAMES = (
 NO_REGION_FEATURE_NAMES = FEATURE_NAMES[:-1]
 
 
+def shrink_mean(total: float, count: int, prior: float, strength: float) -> float:
+    """Regularize a past-only average toward a past-only global prior."""
+    if strength < 0 or not math.isfinite(strength):
+        raise ValueError("rating shrinkage strength must be finite and nonnegative")
+    denominator = count + strength
+    return (total + strength * prior) / denominator if denominator else 0.0
+
+
+def global_rating_prior(context: RetrievalContext) -> float:
+    count = sum(context.item_counts.values())
+    return sum(context.item_rating_sum.values()) / count if count else 0.0
+
+
 def feature_values(
     query: RecommendationQuery,
     candidate: Candidate,
     context: RetrievalContext,
     *,
     include_region: bool = True,
+    rating_shrinkage_strength: float = 0.0,
+    rating_prior: float | None = None,
 ) -> dict[str, float]:
     """Features of one candidate, all from data before the query.
 
@@ -62,10 +78,22 @@ def feature_values(
         if history_length
         else 0.0
     )
+    item_average = context.average_rating(candidate.restaurant_id)
+    if rating_shrinkage_strength:
+        prior = global_rating_prior(context) if rating_prior is None else rating_prior
+        average_rating = shrink_mean(
+            sum(item.rating for item in query.history), history_length,
+            prior, rating_shrinkage_strength,
+        )
+        item_average = shrink_mean(
+            context.item_rating_sum.get(candidate.restaurant_id, 0.0),
+            context.item_counts.get(candidate.restaurant_id, 0),
+            prior, rating_shrinkage_strength,
+        )
     ranks = candidate.source_ranks
     values = {
         "popularity_score": candidate.source_scores.get(POPULARITY, 0.0),
-        "item_average_rating": context.average_rating(candidate.restaurant_id),
+        "item_average_rating": item_average,
         "item_item_sum_similarity": candidate.source_scores.get(ITEM_ITEM, 0.0),
         "item_item_max_similarity": candidate.source_scores.get(
             "item_item_max", 0.0
@@ -98,7 +126,9 @@ def build_feature_rows(
     context: RetrievalContext,
     *,
     include_region: bool = True,
+    rating_shrinkage_strength: float = 0.0,
 ) -> tuple[FeatureRow, ...]:
+    prior = global_rating_prior(context) if rating_shrinkage_strength else None
     return tuple(
         FeatureRow(
             query_id=query.query_id,
@@ -113,7 +143,8 @@ def build_feature_rows(
             ),
             candidate=candidate,
             features=feature_values(
-                query, candidate, context, include_region=include_region
+                query, candidate, context, include_region=include_region,
+                rating_shrinkage_strength=rating_shrinkage_strength, rating_prior=prior,
             ),
         )
         for candidate in candidates

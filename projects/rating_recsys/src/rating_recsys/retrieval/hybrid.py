@@ -1,7 +1,7 @@
 """Stage 1 baseline C5: reciprocal rank fusion of C1 item-item and C4 LightGCN.
 
-Chosen from the validation window of the LightGCN comparison run
-``artifacts/comparisons/lightgcn/20260928T064358512632Z-e7896add``: among
+Chosen from the validation window of the 2026-09-28 LightGCN comparison
+(history in ``PLAN.md`` and ``legacy/v2_experiments.zip``): among
 LightGCN alone and its RRF fusions with C0/C1/C2, C1 + LightGCN had the highest
 validation Recall@100. C0 (popularity), C2 (region popularity) and the previous
 C3 quota union are still built from the same context. They are reported as

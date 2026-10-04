@@ -25,6 +25,7 @@ from typing import Sequence
 
 from rating_recsys.config import PROJECT_ROOT
 from rating_recsys.experiments.config import ExperimentConfig
+from rating_recsys.experiments.prepared import add_cache_arguments
 
 
 def _floats(text: str) -> tuple[float, ...]:
@@ -77,6 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="학습 label만 변경: relevance 0/1/2 또는 원래 평점의 선형 gain. 평가 기준은 동일",
     )
     model.add_argument("--candidate-k", type=int, default=default.candidate_k)
+    model.add_argument(
+        "--rating-shrinkage-strength", type=float, default=default.rating_shrinkage_strength,
+        help="사용자·식당 평균 평점을 과거 전체 평균 쪽으로 보정하는 강도 (0은 기존 평균)",
+    )
     model.add_argument("--ranking-k", type=int, default=default.ranking_k)
     model.add_argument("--rrf-constant", type=int, default=default.rrf_constant)
     model.add_argument(
@@ -120,6 +125,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--bootstrap-samples", type=int, default=default.bootstrap_samples
     )
     tuning.add_argument("--n-jobs", type=int, default=default.n_jobs)
+    add_cache_arguments(parser)
     return parser
 
 
@@ -127,6 +133,7 @@ def config_from_args(args: argparse.Namespace) -> ExperimentConfig:
     return ExperimentConfig(
         ranker_training_mode=args.ranker_training_mode,
         ranker_label_mode=args.ranker_label_mode,
+        rating_shrinkage_strength=args.rating_shrinkage_strength,
         train_fraction=args.train_fraction,
         validation_fraction=args.validation_fraction,
         candidate_k=args.candidate_k,
@@ -181,6 +188,8 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
         artifacts_root=args.artifacts_dir,
         config=config,
         label=args.label,
+        use_cache=not args.no_cache,
+        rebuild_cache=args.rebuild_cache,
     )
     summary: dict[str, object] = {
         "run_id": result.run_id,

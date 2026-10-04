@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import math
 
 from rating_recsys.ranking.features import FEATURE_NAMES, NO_REGION_FEATURE_NAMES
 
@@ -31,6 +32,7 @@ class ExperimentConfig:
     # Historical baseline defaults remain available for controlled comparisons.
     ranker_training_mode: str = "prefix"
     ranker_label_mode: str = "relevance"
+    rating_shrinkage_strength: float = 0.0
     relevance_high_threshold: float = 4.0
     relevance_low_threshold: float = 3.0
     # C4 LightGCN. Training queries use models refit every
@@ -60,6 +62,8 @@ class ExperimentConfig:
     n_jobs: int = 8
 
     def __post_init__(self) -> None:
+        if self.rating_shrinkage_strength < 0 or not math.isfinite(self.rating_shrinkage_strength):
+            raise ValueError("rating_shrinkage_strength must be finite and nonnegative")
         if self.ranker_training_mode not in {"prefix", "window"}:
             raise ValueError("ranker_training_mode must be prefix or window")
         if self.ranker_label_mode not in {"relevance", "rating"}:

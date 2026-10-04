@@ -31,6 +31,7 @@ from typing import Sequence
 from rating_recsys.config import PROJECT_ROOT
 from rating_recsys.experiments.candidate_models import CANDIDATE_MODELS, CandidateModel
 from rating_recsys.experiments.config import ExperimentConfig
+from rating_recsys.experiments.prepared import add_cache_arguments
 
 
 def build_parser(model: CandidateModel) -> argparse.ArgumentParser:
@@ -79,6 +80,7 @@ def build_parser(model: CandidateModel) -> argparse.ArgumentParser:
         help="연속으로 개선이 없으면 중단할 평가 횟수",
     )
     model.add_arguments(parser.add_argument_group(f"{model.title} grid"))
+    add_cache_arguments(parser)
     return parser
 
 
@@ -164,6 +166,8 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
         command=argv,
         log=lambda message: print(message, file=sys.stderr, flush=True),
         plot=args.plot,
+        use_cache=not args.no_cache,
+        rebuild_cache=args.rebuild_cache,
     )
     k = config.candidate_k
     selection = result.metrics["selection"]

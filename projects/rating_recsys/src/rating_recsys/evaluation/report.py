@@ -31,6 +31,7 @@ KEY_CONDITIONS = (
     "random_seed",
     "ranker_training_mode",
     "ranker_label_mode",
+    "rating_shrinkage_strength",
 )
 
 
@@ -225,6 +226,11 @@ def _selection_lines(manifest: dict, metrics: dict) -> list[str]:
         f"LTR 학습 query: `{mode}`. 학습 label: `{label_mode}`. "
         "평가의 relevance 기준은 학습 label과 독립적으로 유지한다.",
     ]
+    if config.get("rating_shrinkage_strength", 0):
+        extra.append(
+            f"평점 feature shrinkage 강도 {config['rating_shrinkage_strength']:g}: "
+            "사용자·식당 평균을 query 이전 전체 평균으로 보정한다. 후보·label·평가 기준은 동일하다."
+        )
     if label_mode == "rating":
         extra += [
             "원래 평점을 반점 단위 정수 index(평점 × 2)로 전달하고 gain은 원래 평점으로 설정한다. "
@@ -408,6 +414,7 @@ FLAG_NAMES = {
     "relevance_low_threshold": "--relevance-low",
     "ranker_training_mode": "--ranker-training-mode",
     "ranker_label_mode": "--ranker-label-mode",
+    "rating_shrinkage_strength": "--rating-shrinkage-strength",
     "train_fraction": "--train-fraction",
     "validation_fraction": "--validation-fraction",
     "legacy_c3_quota": "--legacy-c3-quota",

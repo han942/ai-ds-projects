@@ -6,6 +6,7 @@ import unittest
 from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from rating_recsys.datasets.split import build_global_temporal_split
 from rating_recsys.evaluation.report import write_report
@@ -362,7 +363,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(Path(summary["report"]), runs[0] / "report.md")
             self.assertEqual(
                 sorted(path.name for path in artifacts.iterdir()),
-                ["input.jsonl", "runs", "snapshots"],
+                ["input.jsonl", "prepared", "runs", "snapshots"],
             )
 
     def test_console_scripts_exit_zero(self) -> None:
@@ -396,6 +397,82 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr[-2000:])
             self.assertNotIn("{'run_id'", result.stderr)
+
+
+class PreparedDataTests(unittest.TestCase):
+    def test_window_rating_cache_preserves_groups_and_checkpoint_counts(self):
+        config = replace(SMALL, ranker_training_mode="window", ranker_label_mode="rating")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cold = run_small(synthetic_interactions(), root, config=config)
+            with patch("rating_recsys.experiments.pipeline.window_training_arrays", side_effect=AssertionError("windows rebuilt")), \
+                 patch("rating_recsys.experiments.pipeline.fit_lightgcn", side_effect=AssertionError("graph rebuilt")):
+                warm = run_small(synthetic_interactions(), root, config=config)
+            self.assertEqual(_without_timing(cold.metrics), _without_timing(warm.metrics))
+            self.assertEqual({e["status"] for e in warm.manifest["prepared_data"]["entries"]}, {"hit"})
+
+    def test_shrinkage_reuses_baseline_rows_without_changing_results(self):
+        from rating_recsys.experiments.shrinkage import run_shrinkage_comparison
+        rows = synthetic_interactions()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run_small(rows, root)
+            with patch("rating_recsys.experiments.pipeline.prefix_training_arrays", side_effect=AssertionError("rows rebuilt")), \
+                 patch("rating_recsys.experiments.pipeline.fit_lightgcn", side_effect=AssertionError("graph rebuilt")):
+                warm = run_shrinkage_comparison(rows, project_root=root, artifacts_root=root / "artifacts", config=SMALL, log=lambda _: None)
+            fresh = run_shrinkage_comparison(rows, project_root=root, artifacts_root=root / "fresh", config=SMALL, use_cache=False, log=lambda _: None)
+            self.assertEqual({e["status"] for e in warm.manifest["prepared_data"]["entries"]}, {"hit"})
+            self.assertEqual(_without_timing(warm.metrics), _without_timing(fresh.metrics))
+
+    def test_warm_runs_skip_preprocessing_and_preserve_outputs(self):
+        rows = synthetic_interactions()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cold = run_small(rows, root)
+            with patch("rating_recsys.experiments.pipeline.fit_lightgcn", side_effect=AssertionError("graph rebuilt")), \
+                 patch("rating_recsys.experiments.pipeline.prefix_training_arrays", side_effect=AssertionError("rows rebuilt")), \
+                 patch("rating_recsys.experiments.pipeline.window_candidates", side_effect=AssertionError("candidates rebuilt")):
+                warm = run_small(list(reversed(rows)), root)
+                tuned = run_small(rows, root, config=replace(SMALL, num_leaves_grid=(5,), max_estimators=15))
+            self.assertEqual({e["status"] for e in warm.manifest["prepared_data"]["entries"]}, {"hit"})
+            self.assertEqual({e["status"] for e in tuned.manifest["prepared_data"]["entries"]}, {"hit"})
+            self.assertEqual(_without_timing(cold.metrics), _without_timing(warm.metrics))
+            for name in ("model.txt", "recommendations_validation.jsonl", "recommendations_test.jsonl"):
+                self.assertEqual((cold.run_dir / name).read_bytes(), (warm.run_dir / name).read_bytes())
+            uncached = run_small(rows, root / "uncached", use_cache=False)
+            self.assertFalse((root / "uncached/artifacts/prepared").exists())
+            self.assertEqual(_without_timing(cold.metrics), _without_timing(uncached.metrics))
+
+    def test_changed_data_parameters_or_preprocessing_do_not_reuse_stale_rows(self):
+        rows = synthetic_interactions()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cold = run_small(rows, root)
+            changed_seed = run_small(rows, root, config=replace(SMALL, random_seed=43))
+            changed_data = run_small([replace(rows[0], rating=1.5), *rows[1:]], root)
+            with patch("rating_recsys.experiments.prepared.preprocessing_signature", return_value="new-preprocessing"):
+                changed_code = run_small(rows, root)
+            for result in (changed_seed, changed_data, changed_code):
+                entries = result.manifest["prepared_data"]["entries"]
+                self.assertEqual({e["status"] for e in entries}, {"built"})
+                self.assertTrue({e["key"] for e in entries}.isdisjoint(
+                    {e["key"] for e in cold.manifest["prepared_data"]["entries"]}))
+
+    def test_corrupt_training_file_is_rebuilt_without_rebuilding_other_stages(self):
+        rows = synthetic_interactions()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cold = run_small(rows, root)
+            entry = next(e for e in cold.manifest["prepared_data"]["entries"] if e["kind"] == "train")
+            path = root / "artifacts" / entry["path"] / "data.npz"
+            with path.open("ab") as handle:
+                handle.write(b"corrupt")
+            warm = run_small(rows, root)
+            self.assertEqual({e["kind"]: e["status"] for e in warm.manifest["prepared_data"]["entries"]},
+                             {"validation": "hit", "train": "built", "refit": "hit", "test": "hit"})
+            self.assertEqual(_without_timing(cold.metrics), _without_timing(warm.metrics))
+            forced = run_small(rows, root, rebuild_cache=True)
+            self.assertEqual({e["status"] for e in forced.manifest["prepared_data"]["entries"]}, {"built"})
 
 
 if __name__ == "__main__":

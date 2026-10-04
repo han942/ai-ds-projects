@@ -15,7 +15,7 @@ from rating_recsys.ingestion.transform import transform_file
 
 
 CRAWLER_DATA = PROJECT_ROOT / "crawler" / "data"
-ARTIFACTS = PROJECT_ROOT / "artifacts" / "ingestion_sources"
+ARTIFACTS = PROJECT_ROOT / "artifacts" / "snapshots" / "ingestion_sources"
 SOURCE = "diningcode_playwright_national"
 
 

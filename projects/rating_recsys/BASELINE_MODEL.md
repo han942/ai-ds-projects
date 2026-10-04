@@ -1,291 +1,156 @@
-# Two-stage 모델과 평가 방식
+# Current Baseline
 
-## 1. 목적
+기준일: 2026-10-02. V2의 현재 모델은 **C5 후보 검색 + R1 LambdaRank**다.
 
-사용자가 아직 방문하지 않은 식당의 순위를 매긴다. 후보 생성(Stage 1)과
-재정렬(Stage 2)을 분리해, 정답을 후보 단계에서 놓쳤는지 재정렬 단계에서 아래로
-밀었는지를 따로 측정한다. 새 후보 모델(two-tower, content vector 등)도 같은
-ranker 아래에서 비교한다.
+## 구조와 설정
 
-| ID | 구성 | 단계 | 역할 |
-|---|---|---|---|
-| C1 | Item-item co-occurrence | 후보 | 이력 기반 개인화 (학습 없음) |
-| C4 | LightGCN | 후보 | 학습형 그래프 협업 필터링 |
-| **C5** | **C1·C4 RRF** | **후보 결합** | **Stage 2에 넘기는 Top-100 (현재 기준선)** |
-| C0 | 전체 인기 | 참고 | 비개인화 하한선. 결합하지 않고 ranker feature로 사용 |
-| C2 | 지역 인기 | 참고 | 결합하지 않고 ranker feature(지역 비율)로 사용 |
-| C3 | C0·C1·C2 quota RRF | 참고 | 2026-09-27까지의 Stage 1. 비교용으로 계속 계산 |
-| C6 | DeepCoNN | 별도 실험 | 리뷰 텍스트 CNN 후보. 파이프라인에는 넣지 않음 |
-| R0 | C5 순서 그대로 | 재정렬 기준선 | 재정렬 없이 자른 Top-10 |
-| R1 | LightGBM LambdaRank | 재정렬 | 최종 Top-10 |
+| 단계 | 구성 | 현재 설정 |
+|---|---|---|
+| C1 | 과거 방문 식당의 co-occurrence 기반 item-item | 사용자 이력과 유사한 미방문 식당 검색 |
+| C4 | LightGCN, 방문 기반 BPR | 3 layers, 64 dimensions, 20 epochs, L2 1e-4 |
+| C5 | C1·C4의 Reciprocal Rank Fusion | RRF 상수 60, Top-100, 방문한 식당 제외 |
+| R1 | LightGBM LambdaRank | 16개 feature, Top-10, learning rate 0.05, seed 42 |
 
-2026-09-30에 Stage 1을 C3에서 C5로 바꿨다. 근거는
-[LightGCN 비교 run](./artifacts/comparisons/lightgcn/20260928T064358512632Z-e7896add/report.md)이다.
-LightGCN 단독과 C0·C1·C2 결합 조합 중 C1+C4가 validation Recall@100이 가장 높았다.
-Test에서도 C3보다 +3.50%p [+2.30, +4.70] 높았다. C0·C2를 결합에 넣으면 오히려 낮아졌다.
+C0 인기·C2 지역 인기·이전 C3는 참고 목록이다. C5 결합에는 C1·C4만 쓴다.
+Ranker feature는 인기도·식당 평균, item-item·LightGCN 점수/순위, RRF·후보 순위,
+사용자 이력 길이·평균, 지역 비율이다. LightGCN 점수는 query 내에서 표준화한다.
+리뷰 텍스트는 현재 baseline의 입력에 포함되지 않는다.
 
-## 2. 전체 흐름
+사용자·식당 평균은 단순 평균(`rating_shrinkage_strength=0`)이다. 선택적 shrinkage는
+`(평점 합 + λ × 과거 전체 평균)/(평가 수 + λ)`로 두 평균 feature만 보정한다.
+학습 label이나 후보 생성 방식은 바꾸지 않는다.
+
+## 훈련부터 평가까지의 전체 흐름
 
 ```mermaid
 flowchart TD
-    DB[(Supabase PostgreSQL)] --> S[고정 snapshot<br/>artifacts/snapshots]
-    S --> P[전역 날짜 cutoff 분할<br/>train ≤ T1 < validation ≤ T2 < test]
-    P --> G[LightGCN 학습<br/>window 시작 이전 interaction]
-    G --> V[Validation 선택<br/>LambdaRank grid + early stopping]
-    V --> F[최종 재학습<br/>T2까지의 학습 query]
-    F --> T[Test 1회 평가]
-    T --> A[artifacts/runs/run_id<br/>report.md · metrics.json]
-    A --> M[MLflow]
-    A --> UI[Streamlit]
+    DB["Supabase PostgreSQL"] --> S["고정 snapshot<br/>artifacts/snapshots"]
+    S --> D["전역 날짜 cutoff 분할<br/>Train ≤ T1 · Validation ≤ T2 · Test > T2"]
+
+    subgraph SELECT["1. Train 학습과 validation 선택"]
+        TH["T1까지의 interaction"] --> CP["학습 시점별 LightGCN<br/>3개월 구간 시작 전 데이터로 학습"]
+        CP --> X["이력 prefix마다 C5 후보 100개 + feature<br/>다음 방문을 label로 사용"]
+        TH --> X
+        X --> L["여러 설정의 LambdaRank 학습"]
+        TH --> VC["T1까지의 LightGCN + item-item<br/>Validation 사용자별 C5 후보·feature"]
+        L --> VR["Validation 후보 재정렬"]
+        VC --> VR
+        VL["T1 이후 T2까지 실제 방문·평점<br/>평가 정답"] --> VS["Validation NDCG@10으로<br/>설정·트리 수 선택"]
+        VR --> VS
+    end
+
+    subgraph FINAL["2. 선택된 설정으로 최종 학습"]
+        FH["T2까지의 interaction"] --> FX["Train + validation 기간의 학습 query<br/>각 query 당시 과거 정보로 후보·feature 생성"]
+        FX --> FM["선택된 설정·트리 수로<br/>최종 LambdaRank refit"]
+    end
+
+    subgraph TEST["3. Test 추천과 평가"]
+        TC["T2까지 학습한 LightGCN + item-item<br/>Test 사용자별 C5 후보 100개·feature"] --> TR["최종 LambdaRank로 순위 결정<br/>Top-10 추천"]
+        TL["T2 이후 실제 방문·평점<br/>평가 정답"] --> E["후보 Recall@20/50/100<br/>최종 NDCG·Recall 등 @5/10"]
+        TC --> E
+        TR --> E
+    end
+
+    D --> TH
+    D --> VL
+    D --> FH
+    D --> TL
+    VS --> FM
+    FH --> TC
+    FM --> TR
+    E --> A["실행 결과 저장<br/>report.md · metrics.json · 모델 · 추천 목록"]
+    A --> M["MLflow: 지표·설정 기록"]
+    A --> UI["Streamlit: 결과·사용자별 추천 조회"]
 ```
 
-## 3. 데이터와 분할
+**학습**에서는 C5가 검색한 식당별 feature와 다음 방문 label로 ranker를 만든다.
+**Validation**에서는 T1 시점에 만든 후보를 재정렬하고, 이후 실제 방문과 비교해
+설정·트리 수를 고른다. **최종 학습**은 선택된 설정을 유지한 채 T2까지 다시 학습한다.
+**Test**에서는 T2 시점의 이력·후보·feature를 고정하고, T2 이후 방문으로 성능을 계산한다.
 
-입력은 `recsys.reviews`에서 사용자·식당 쌍마다 최초 방문 하나만 남긴 interaction이다.
-정답 리뷰의 본문과 세부 점수(맛·가격·서비스)는 파이프라인 입력에 넣지 않는다.
-DeepCoNN 실험만 리뷰 본문을 별도 파일(`<snapshot>.reviews.jsonl`)로 읽고, cutoff
-이전 리뷰만 쓴다(9절).
+미래 방문·평점은 정답 경로로만 들어간다. Validation/test의 정답 식당을 후보에
+추가하거나 그 평점을 사용자·식당 평균에 미리 반영하지 않는다. Test 지표로
+설정이나 트리 수를 다시 선택하지 않는다.
 
-분할은 모든 사용자에게 같은 두 날짜를 적용한다. T1, T2는 전체 interaction 날짜의
-80%, 90% 지점이다(`--train-fraction`, `--validation-fraction`).
+같은 snapshot·생성 조건이면 후보·feature·label·group을 `artifacts/prepared/`에
+저장해 재사용한다. 트리 수나 ranker 설정만 바꿀 때 과거 LightGCN과 학습 행을 다시
+만들지 않는다. 후보 모델·feature·학습 정답 구성 등이 바뀌면 새 조건의 파일을 만든다.
+Cutoff 이전 정보만 쓰는 규칙과 학습·평가 구조는 동일하다.
 
-```text
-사용자 A:  r1  r2  r3 │ r4  r5 │ r6  r7
-                   T1        T2
-train  ≤ T1       : r1 r2 r3
-validation window : r4 r5   (이력 r1~r3)
-test window       : r6 r7   (이력 r1~r5)
-```
+## 학습과 평가
 
-| Relevance | 조건 |
-|---:|---|
-| 2 | 평점 4.0 이상 |
-| 1 | 평점 3.0 이상 4.0 미만 |
-| 0 | 그 외, 또는 방문 기록 없음 |
+1. 모든 사용자에게 같은 날짜 T1·T2를 적용한다. Train은 T1까지, validation은
+   (T1, T2], test는 T2 이후다. 각 사용자·식당 쌍의 최초 interaction만 사용한다.
+2. 기본 학습은 `prefix/relevance`: 과거 이력으로 다음 방문 하나를 정답으로 둔다.
+   평점 4 이상은 label 2, 3 이상 4 미만은 1, 나머지와 미관측 후보는 0이다.
+   LambdaRank gain은 0/1/3이다. 사용자 평점을 정규화해 예측하는 모델은 아니다.
+3. 정답이 실제 C5 후보에 포함된 학습 query만 사용한다. 정답을 후보에 끼워 넣지
+   않는다. 학습 query의 LightGCN은 3개월 구간 시작 전 데이터로만 학습한다.
+4. Validation NDCG@10으로 ranker 설정·트리 수를 선택하고 T2까지 refit한다.
+   Grid는 leaves 15/31/63 × min_child 10/100(최대 1,000 trees, early stopping 50)
+   및 고정 150 trees / leaves 15 / min_child 10이다.
+5. Test는 미래 window의 여러 방문을 정답으로 평가한다. 후보·feature·평점 prior는
+   cutoff 이전 정보만 쓴다. Ranker 점수가 같으면 C5 순위를 유지한다.
 
-방문 기록이 없는 식당은 싫어서 안 간 것인지 몰라서 안 간 것인지 알 수 없는 약한
-negative다. 평점 4.0 이상이 86.5%라 이 등급은 경험의 질을 거의 구분하지 못한다
-(11절).
+후보 Recall@20/50/100, 최종 NDCG·Recall·Precision·MAP·MRR@5/10을 기록한다.
+정답이 있는 사용자만 정확도 평균에 포함한다. Coverage·novelty·지역 다양성은
+모든 추천 query를 대상으로 계산한다. 모델 선택에는 test를 사용하지 않는다.
 
-## 4. Query
+### 트리 수를 선택하는 이유
 
-2026-10-02에 비교용 `--ranker-training-mode window`와
-`--ranker-label-mode rating`을 추가했다. 아래 설명과 기존 결과는 기본값
-`prefix/relevance`의 기준선이다. 여러 정답 학습의 구성, 원래 평점의 gain, 누수 경계와
-미관측 후보의 한계는 [모델 점검·실험 문서](./MODEL_REVIEW_AND_EXPERIMENTS.md#4-ltr-비교-정답-1개--여러-정답--원래-평점)에 있다.
+R1은 여러 결정 트리의 출력을 더해 식당의 **순위 점수**를 만드는 모델이다.
+앞선 트리들이 놓친 순서 차이를 다음 트리가 보정한다. 트리 수(`n_estimators`)는
+이 보정을 몇 번 누적할지 정하는 하이퍼파라미터다. 너무 적으면 학습이 부족할 수
+있고, 너무 많으면 학습 데이터에 과도하게 맞춰질 수 있다. 학습·추론 비용도 늘어난다.
+트리 하나의 복잡도는 `num_leaves`가 정하며, 현재 learning rate는 0.05로 고정한다.
 
-Query 하나는 한 사용자가 한 시점에 받는 추천 1회다. 학습과 평가는 query 형태가 다르다.
+현재 선택 과정은 **하이퍼파라미터 탐색 + early stopping**이다.
 
-| | 학습 query | 평가 query |
-|---|---|---|
-| 만드는 방법 | 이력 prefix: (r1 → r2), (r1, r2 → r3), … | 사용자 1명 × window 1개 |
-| 정답 수 | 1개 | window 안의 방문 전부 (평균 약 3.6개) |
-| 시점 제한 | 튜닝: 정답 ≤ T1 / 최종: 정답 ≤ T2 | 이력 ≤ window 시작 |
-| 대상 | 두 번째 방문부터 | window 시작 전에 이력이 있는 사용자 |
+1. `num_leaves` 15/31/63과 `min_child_samples` 10/100의 6개 조합을 학습한다.
+   Leaves는 트리 하나의 최대 말단 수, min child는 말단의 최소 학습 샘플 수 설정이다.
+2. 각 조합은 최대 1,000회까지 트리를 추가한다. Validation NDCG@10이 50회 연속
+   개선되지 않으면 멈추고, 그동안 가장 좋았던 회차를 트리 수로 선택한다.
+   트리 수별 모델을 처음부터 각각 다시 학습하는 방식은 아니다.
+3. 별도로 early stopping 없이 150개 트리를 사용하는 기준 설정도 비교한다.
+   총 7개 설정 중 validation NDCG@10이 가장 높은 설정을 고른다.
+   동점이면 Recall@10, 다시 동점이면 grid 순서를 따른다.
+4. 선택된 설정·트리 수를 고정하고 T2까지의 데이터로 최종 학습한다.
+   Test는 선택이 끝난 모델의 성능을 확인하는 데만 사용한다.
 
-- 후보와 feature는 각 query 시점 이전의 interaction으로만 계산한다. Query를
-  시간순으로 처리하면서 인기도·co-occurrence를 증분 갱신한다.
-- LightGCN은 query마다 다시 학습할 수 없어 시점별 모델을 따로 둔다.
-  - 평가 query: window 시작 이전의 모든 interaction으로 학습한 모델
-    (validation은 train, test는 train + validation).
-  - 학습 query: 3개월 단위 구간(1·4·7·10월 1일 시작)마다, 그 구간 시작일 **이전**
-    interaction으로 다시 학습한 모델(`--lightgcn-checkpoint-months`). 전체 데이터에서
-    모델 40개, 학습 약 4분이다. 그 시점 그래프에 없던 사용자(학습 query의 약 16%)는
-    LightGCN 후보가 없어 C1 순서만 쓴다.
-- 학습 query는 정답이 그 query의 C5 후보 100개 안에 있을 때만 ranker 학습 group이
-  된다. 학습 group에는 relevance > 0인 정답과 relevance 0인 후보가 모두 있어야 한다.
-  후보 밖 정답을 후보 목록에 끼워 넣지 않는다
-  (2026-09-30 이전에는 끼워 넣었다. 11절).
-  평가 query에서는 정답이 후보에 없으면 그대로 실패로 센다.
-- Window 시작 전 이력이 없는 사용자는 개인화할 수 없어 평가하지 않고 수만 기록한다.
+Early stopping의 NDCG는 검색된 후보 안의 정답을 기준으로 정규화한다.
+설정 간 최종 비교와 report의 NDCG는 미래 window 전체 정답을 기준으로 정규화한다.
+두 단계 모두 validation을 사용하지만 계산 범위에는 이 차이가 있다.
 
-## 5. Stage 1: 후보 생성
+이번 baseline의 1 tree와 shrinkage의 96 trees는 각각 검증 과정에서 선택된 결과다.
+트리가 더 많다고 더 좋은 모델이라는 뜻은 아니다. 1 tree 선택은 해당 검증 조건에서
+후속 보정의 이득이 없었다는 관찰이며, 원인을 알려면 학습 곡선·feature·label을
+별도로 살펴봐야 한다. 평균 평점 shrinkage와 boosting의 learning rate는 별개 설정이다.
 
-- C1: 두 식당을 함께 방문한 사용자 수를 빈도로 cosine 정규화한 유사도를 이력에 대해 합산.
+## 현재 측정값
 
-  ```text
-  sim(i, j)  = cooccurrence(i, j) / sqrt(freq(i) · freq(j))
-  score(j|u) = Σ_{i ∈ history(u)} sim(i, j)
-  ```
+[2026-10-02 비교 원본](./artifacts/comparisons/shrinkage/20261002T062004863532Z-e7896add/report.md)의
+baseline 조건이다. 현재 코드의 동점 처리·validation 지표를 적용해 다시 학습했다.
 
-- C4 LightGCN: 사용자–식당 이분 그래프의 대칭 정규화 인접행렬로 3층 전파하고 0~3층
-  embedding을 평균한다. 방문 식당을 균등 샘플 미방문 식당보다 높게 두는 BPR loss,
-  batch L2 1e-4, Adam(learning rate 0.005, batch 2048), 64차원, 20 epoch, seed 42.
-  NumPy/SciPy 구현이다. 설정은 LightGCN 비교 run의 validation 학습 곡선으로 골랐고
-  파이프라인에서는 고정값이다.
-- C5: C1 Top-100과 C4 Top-100을 순위로 결합한다(RRF = Σ 1/(60 + rank)). Quota 없이
-  상위 100개.
-- 참고 C0, C2, C3: 같은 context에서 계산해 표에 남긴다. C3는 C0+C1 RRF 상위 75개를
-  먼저 채우고 나머지를 C0+C1+C2 RRF로 채운다(quota 0.75는 2026-09-27 run에서
-  validation으로 고른 값, `--legacy-c3-quota`).
-
-모든 후보에서 사용자가 이미 방문한 식당은 뺀다.
-
-## 6. Stage 2: LambdaRank
-
-Feature는 모두 query 시점 이전 데이터로 계산한다.
-
-- 인기도(C0 점수, C0 Top-100 안의 역순위와 포함 여부), 식당 평균 평점
-- Item-item 유사도 합·최대, C1 역순위와 포함 여부
-- LightGCN 점수(그 query의 후보 100개 안에서 표준화), C4 역순위와 포함 여부
-- C5 RRF 점수, C5 안의 역순위
-- 사용자 이력 길이와 평균 평점
-- 과거 방문 지역 대비 후보 지역 비율 (`--region-mode without_region`이면 제외)
-
-LightGCN 원점수는 시점별 모델마다 척도가 달라 query 안에서 표준화한 값만 쓴다.
-
-최종 순서는 ranker 점수 내림차순이다. 점수가 정확히 같으면 그 query의 C5 후보
-순서를 유지한다(2026-10-01 반영). 근접 점수는 반올림해 동점으로 묶지 않는다.
-
-학습 설정: group = query, label = relevance 0/1/2, label gain 0/1/3, learning rate
-0.05, seed 42, deterministic. Query당 정답이 1개인 학습 query로 학습하므로 실제로는
-정답 1개와 C5 오답 약 99개를 구분하는 pairwise 학습에 가깝다.
-
-사용자 평균과 식당 평균 feature는 단순 평균이며 shrinkage를 적용하지 않는다.
-이는 사용자·식당 관계를 전혀 학습하지 않았다는 뜻이 아니다. C4는 사용자·식당
-embedding 내적을 방문 기반 BPR로 학습하고, v1 MF에는 명시적인 사용자·식당 bias와
-내적이 있었다. [기존 구현 점검](./MODEL_REVIEW_AND_EXPERIMENTS.md#2-기본적인-사용자식당-관계를-구현하지-않았던-것인가)을 참고한다.
-
-## 7. 설정 선택 (validation만 사용)
-
-1. LambdaRank: `num_leaves × min_child_samples` 조합마다 validation NDCG@10으로 early
-   stopping(50 round)한 모델, 그리고 고정 설정(150 trees, 15 leaves) 중
-   validation NDCG@10이 가장 높은 것. 동률이면 Recall@10, 그다음 grid 순서로 고른다.
-   Early stopping 모델의 트리 수는 best iteration, 고정 모델은 150개다.
-2. 최종 모델: 고른 설정과 트리 수로 T2까지의 학습 query(train + validation window)로
-   다시 학습한다.
-3. Test window는 이 뒤에 한 번만 평가한다. 결과를 보고 설정을 다시 바꾸지 않는다.
-
-Stage 1 구성과 LightGCN 설정은 별도 비교 run의 validation으로 먼저 정했고, 파이프라인
-run 안에서는 고르지 않는다.
-
-Early stopping에는 C5 후보 안에 정답이 하나 이상 있는 validation group만 전달한다.
-이때 LightGBM의 NDCG는 후보 안의 label로 ideal DCG를 계산한다. 반면 설정 선택에는
-정답이 있는 전체 validation 사용자와 window 전체 정답으로 계산한 오프라인 NDCG를
-사용한다. 두 NDCG의 평가 대상과 정규화 기준이 다르다. R0는 비교 지표로만 계산하며
-현재 선택 후보나 자동 fallback에 포함되지 않는다.
-
-테스트로 확인하는 것: test 구간 데이터만 바꿔도 선택 결과, validation 지표, 최종 모델
-파일이 바이트 단위로 같다. LightGCN 학습 edge 수가 각 cutoff·구간 시작일 이전
-interaction 수와 같다.
-
-## 8. 평가 지표
-
-모든 정확도 지표는 사용자(query)별로 계산해 평균한다. 정답(relevance > 0)이 1개
-이상인 사용자만 평균에 넣는다.
-
-후보 생성 (C0~C5, K = 20/50/100):
-
-| 지표 | 정의 |
+| 조건 | 값 |
 |---|---|
-| Recall@K | 후보 K개 안의 정답 수 / 그 사용자의 전체 정답 수 |
+| Snapshot | `e7896add5b4b5939`, interaction 88,554 / 사용자 14,008 / 식당 4,587 |
+| T1 / T2 | 2025-12-19 / 2026-05-04 |
+| Train / validation / test interaction | 70,883 / 8,934 / 8,737 |
+| Test 사용자 | 과거 이력 1,580명, positive가 있는 평가 사용자 1,573명 |
+| 최종 학습 | 15,929 groups / 1,574,652 feature rows |
+| 이 데이터에서 선택된 ranker | leaves 15 / min_child 10 / 1 tree |
 
-C5 Recall@100이 Stage 2가 도달할 수 있는 상한이다. C5 − C3 차이는 paired bootstrap으로
-보고한다.
+| Test 지표 | Baseline |
+|---|---:|
+| 후보 Recall@100 | 20.1626% |
+| NDCG@5 / NDCG@10 | 0.023906 / 0.029360 |
+| Recall@10 | 4.1284% |
+| Precision@10 | 1.5639% |
+| MAP@10 / MRR@10 | 0.015684 / 0.051154 |
 
-이 상한은 같은 query에서의 **Recall**에 대한 것이다. NDCG·Precision·MAP의 상한을
-Recall@100 값으로 해석하지 않는다. 기본 cutoff 이외의 K는
-[README의 현재 CLI 제약](./README.md#조정할-수-있는-조건)을 먼저 확인한다.
+Shrinkage λ=10의 test NDCG@10은 0.028207, Recall@10은 4.0369%였다.
+NDCG 차이 −0.001153의 paired bootstrap 95% CI [−0.005006, +0.002692]는 0을
+포함한다. 이 한 번의 비교로 기본 모델에 채택하지 않는다. 현재 수치는 과거
+2026-09-30 run과 동점 처리·validation 계산이 달라 그 결과와 섞어 비교하지 않는다.
 
-LTR 재정렬 (R0, R1, K = 5/10):
-
-| 지표 | 정의 |
-|---|---|
-| Recall@K | Top-K 안의 정답 수 / 전체 정답 수 |
-| Precision@K | Top-K 안의 정답 수 / K |
-| NDCG@K | gain 2^rel − 1, 할인 1/log2(rank+1), 사용자 정답으로 만든 ideal DCG로 정규화 |
-| MAP@K | 정답이 나온 위치마다의 precision 합 / min(K, 정답 수) |
-| MRR@K | 첫 정답 순위의 역수 |
-| Catalog coverage@K | 전체 후보 catalog 중 한 번 이상 추천된 식당 비율 |
-| Novelty@K | 추천 식당 인기 비율의 −log2 평균 |
-| 지역 다양성@K | 한 목록 안에서 지역이 다른 식당 쌍의 비율 |
-
-Coverage·novelty·지역 다양성은 정답 유무와 관계없이 이력이 있는 모든 평가 query의
-추천 목록으로 계산한다. 정확도 지표의 모수와 다르다.
-
-R1 − R0 차이는 같은 사용자끼리 짝지은 paired bootstrap(2,000회) 95% 신뢰구간으로
-보고한다. 신뢰구간이 0을 포함하면 개선 또는 악화를 확정할 근거가 부족하다고 해석한다.
-
-## 9. 별도 후보 실험
-
-파이프라인과 같은 split·평가 query·C0~C5로 새 후보 소스를 C5와 비교한다. Ranker는 다시
-학습하지 않는다. 모든 모델이 같은 절차를 쓴다: validation 학습 곡선으로 grid와 epoch
-수를 고르고, 결합 방식(단독, C1과 RRF, C1+C4와 RRF)을 validation Recall@100으로 고른
-뒤, T2까지 다시 학습해 test를 한 번 평가한다. 명령은 `rating-recsys-compare <model>`,
-결과는 `artifacts/comparisons/<model>/<run_id>/report.md`.
-
-| 모델 | 비교 대상 | 결과 |
-|---|---|---|
-| LightGCN | 당시 기준선 C3 (C5를 고른 실험) | C1+LightGCN RRF가 C3보다 +3.50%p → C5 |
-| DeepCoNN | 현재 기준선 C5 | 결합해도 C5보다 −1.72%p [−2.65, −0.86] → 채택 안 함 |
-
-DeepCoNN은 사용자 문서(본인의 과거 리뷰)와 식당 문서(그 식당의 과거 리뷰)를 각각
-글자 embedding → 1D CNN → max-over-time → FC로 읽고 FM으로 점수를 낸다. 문서에는
-cutoff 이전 리뷰만 들어가고, 학습 visit의 리뷰는 두 문서에서 모두 뺀다. 논문의
-평점 회귀(MSE)와 순위 학습(BPR)을 모두 grid에 넣었다. 점수의 대부분이 식당 항에서
-나오고 그 항이 방문 수와 Spearman 0.90이라, 리뷰에서 사실상 인기도를 배웠다
-([보고서](./artifacts/comparisons/deepconn/20260930T111734850000Z-e7896add/report.md) 7절).
-
-새 모델은 `retrieval/`에 구현하고 `experiments/candidate_models.py`에 설정 하나만
-추가하면 같은 CLI·보고서로 비교된다([README](./README.md#후보-모델-비교-실험)).
-
-2026-10-02의 후속 방향은 리뷰 표현을 평점 기반 후보 모델의 별도 feature로 추가하는
-것이다. Sentence Transformers와 그 사전학습 모델은 사용자 요청으로 보류했다.
-LTR 텍스트 feature 추가와 구분하며, 아직 새 모델의 측정 결과는 없다.
-[후보 설계와 비교 조건](./MODEL_REVIEW_AND_EXPERIMENTS.md#5-리뷰-텍스트--평점-후보-생성-설계)에 기록했다.
-
-## 10. 출력
-
-`artifacts/runs/<run_id>/` 폴더 하나에 모든 결과가 있다.
-
-| 파일 | 내용 |
-|---|---|
-| `report.md` | 결과 보고서: 요약, 데이터와 조건, 설정 선택, 후보 지표, LTR 지표, 해석(직접 기입), 재현 |
-| `manifest.json` | 조건, snapshot, 구간 경계, 누수 경계, commit·환경, 단계별 시간 |
-| `metrics.json` | validation/test 단계별 지표, bootstrap, 선택 grid, LightGCN checkpoint, 학습 데이터 요약, feature importance |
-| `queries_*.jsonl` | 사용자별 이력과 window 정답 |
-| `recommendations_*.jsonl` | 사용자별 Top-10 (점수, C5 내 순위 포함) |
-| `model.txt` | 최종 LambdaRank |
-
-MLflow(experiment `rating-recsys`)에는 지표·파라미터·tag만 기록하고 파일은 복사하지
-않는다. 폴더 구조와 정리 기준은 [artifacts/README.md](./artifacts/README.md)에 있다.
-
-## 11. 현재 결과와 한계
-
-[2026-09-30 C5 기준선](./artifacts/runs/20260930T135424227862Z-e7896add/report.md), test 1,573명:
-
-| | 이전 (C3 후보) | C5 후보 + 정답 끼워넣기 | **현재 (C5 후보)** |
-|---|---:|---:|---:|
-| Stage 1 Recall@100 | 16.66% | 20.16% | **20.16%** (C3 대비 +3.50%p [+2.30, +4.70]) |
-| R0 NDCG@10 | 0.0174 | 0.0276 | 0.0276 |
-| R1 NDCG@10 | 0.0268 | 0.0253 | 0.0276 |
-| R1 − R0 NDCG@10 | +0.0094 [+0.0043, +0.0144] | −0.0023 [−0.0067, +0.0020] | −0.0000 [−0.0046, +0.0044] |
-| 최종 ranker 트리 수 | 83 | 54 | 1 |
-
-위 수치는 2026-10-01 동점 처리 변경 전 실행 결과다. 해당 실행에서는 후보 품질은
-올랐지만 R1은 C5 순서를 넘지 못했다. 변경 후 성능은 재측정해야 한다.
-
-- 2026-09-30 앞선 run과 그 전 C3 run은 후보 밖 학습 정답을 후보 목록 끝(순위 101)에 끼워
-  넣었다. 끼워 넣은 행만 그 순위를 가져서, 두 run의 최종 모델은 모든 트리의 첫 분기로
-  이 행을 골라냈다(C3 run은 `rrf_score = 0`, C5 run은 `candidate_rank_inverse < 1/100`).
-  C3 run의 R1 − R0 +0.0094에는 이 효과가 섞여 있을 수 있다. 지금은 정답이 후보 안에 있는
-  학습 query(약 24%)만 쓴다.
-- 해당 실행에서는 validation best iteration이 1이었다. 트리 1개라 점수 동점이 많았고,
-  당시 동점은 식당 id 순으로 놓였다. 2026-10-01부터는 C5 순위를 보존한다.
-- 학습 query의 LightGCN 점수는 최대 3개월 전 그래프, 평가 query는 cutoff 직전
-  그래프에서 나온다.
-- 관측된 리뷰만 정답으로 쓰는 오프라인 평가다. 추천했지만 방문 기록이 없는 식당을
-  실제 dislike로 해석할 수 없다. 평점 4.0 이상이 86.5%라 relevance 등급이 경험의
-  질을 거의 구분하지 못한다. 리뷰 기반 경험 라벨은 다음 단계다.
-- 날짜의 약 20%는 연도를 추론한 값이라 window 경계가 부정확할 수 있다.
-- 기본 실행은 seed 1개다. 작은 차이는 seed를 바꿔 반복하기 전에는 확정하지 않는다.
-- Test 1회 평가는 각 run 안의 규칙이다. 같은 test window를 반복해서 확인하며 모델을
-  바꾼 결과는 새로운 holdout에서 확인하기 전까지 탐색적 비교로 해석한다.
-- 날짜는 분할과 누수 차단에만 쓰고 모델 feature로는 쓰지 않는다(time-aware 모델은
-  계획서 M8).
-
-## 12. 이전 평가 방식
-
-2026-09-27까지 쓴 사용자별 leave-last-two-out 평가와 그 결과(지역 제거, LightGCN
-후보 실험 포함)는 [analysis/archive/primary/](./analysis/archive/primary/README.md)에
-보관했다.
+실행·실험 후보와 한계는 [PLAN.md](./PLAN.md)에 모아 둔다.

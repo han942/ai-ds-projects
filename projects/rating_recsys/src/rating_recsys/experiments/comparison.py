@@ -35,16 +35,13 @@ from rating_recsys.experiments.artifacts import read_json, read_jsonl, write_jso
 from rating_recsys.experiments.candidate_models import CandidateModel
 from rating_recsys.experiments.config import ExperimentConfig
 from rating_recsys.experiments.models import WindowQuery
+from rating_recsys.experiments.prepared import PreparedData
 from rating_recsys.experiments.pipeline import (
     STAGE1,
     WindowCandidates,
-    _generator,
     _window_summary,
-    build_context,
-    fit_lightgcn,
     observations,
     paired_bootstrap,
-    window_candidates,
 )
 from rating_recsys.experiments.queries import build_window_queries
 from rating_recsys.experiments.snapshot import (
@@ -370,6 +367,8 @@ def run_candidate_comparison(
     command: Sequence[str] | None = None,
     log: Callable[[str], None] | None = None,
     plot: bool = True,
+    use_cache: bool = True,
+    rebuild_cache: bool = False,
 ) -> ComparisonResult:
     config = config or ExperimentConfig()
     grid = tuple(grid or model.default_grid(config.random_seed))
@@ -433,16 +432,12 @@ def run_candidate_comparison(
     test_queries, test_new = build_window_queries(
         test_history, split.test, config=config, phase="test", cutoff=t2
     )
-    generator = _generator(config)
+    prepared = PreparedData(artifacts_root, snapshot["dataset_snapshot_id"], split, config,
+                            enabled=use_cache, rebuild=rebuild_cache, log=emit)
     lap("01_split_and_window_queries")
 
     # ---- Validation: C0-C5 with the pipeline's fixed LightGCN --------------
-    graph, _ = fit_lightgcn(split.train, config.lightgcn_config)
-    validation_candidates = window_candidates(
-        validation_queries, build_context(split.train), generator,
-        graph=graph, feature_names=None,
-    )
-    del graph
+    validation_candidates, _ = prepared.window("validation", split.train, validation_queries)
     lap("02_validation_c0_to_c5")
 
     # ---- Validation: learning curves, config and policy choice -------------
@@ -482,11 +477,7 @@ def run_candidate_comparison(
         ],
     }
     lap("04_refit_train_plus_validation")
-    graph, _ = fit_lightgcn(test_history, config.lightgcn_config)
-    test_candidates = window_candidates(
-        test_queries, build_context(test_history), generator, graph=graph, feature_names=None
-    )
-    del graph
+    test_candidates, _ = prepared.window("test", test_history, test_queries)
     test_ranked = source_rankings(refit, test_queries, config.candidate_k)
     test_stages = policy_rankings(model, test_queries, test_candidates, test_ranked, config)
     test_metrics = evaluate_stages(test_queries, test_stages, test_candidates, config)
@@ -560,6 +551,7 @@ def run_candidate_comparison(
     manifest = {
         "run_id": run_id,
         "kind": "candidate-comparison",
+        "prepared_data": prepared.manifest,
         "label": label,
         "created_at": created_at.isoformat(),
         "command": list(command) if command is not None else None,

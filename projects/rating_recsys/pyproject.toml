@@ -38,6 +38,7 @@ rating-recsys-dataset = "rating_recsys.datasets.cli:main"
 rating-recsys-experiment = "rating_recsys.experiments.cli:console_main"
 rating-recsys-compare = "rating_recsys.experiments.compare_cli:console_main"
 rating-recsys-dashboard = "rating_recsys.observability.cli:main"
+rating-recsys-prepare = "rating_recsys.experiments.prepared:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

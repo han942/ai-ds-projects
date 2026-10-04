@@ -52,6 +52,7 @@ from rating_recsys.evaluation.report import write_report
 from rating_recsys.experiments.artifacts import write_json, write_jsonl
 from rating_recsys.experiments.config import ExperimentConfig
 from rating_recsys.experiments.models import RecommendationQuery, WindowQuery
+from rating_recsys.experiments.prepared import PreparedData
 from rating_recsys.experiments.queries import (
     build_prefix_queries,
     build_training_windows,
@@ -63,7 +64,7 @@ from rating_recsys.experiments.snapshot import (
     environment_manifest,
     freeze_snapshot,
 )
-from rating_recsys.ranking.features import build_feature_rows, feature_values
+from rating_recsys.ranking.features import build_feature_rows, feature_values, global_rating_prior
 from rating_recsys.ranking.lambdarank import LightGBMLambdaRanker
 from rating_recsys.retrieval.baselines import (
     IncrementalRetrievalContext,
@@ -93,6 +94,8 @@ class TrainingArrays:
     labels: np.ndarray
     groups: list[int]
     summary: dict[str, int | float | str | None]
+    # One past-only prior per group, used to share retrieval in the ablation.
+    rating_priors: np.ndarray | None = None
 
 
 @dataclass(slots=True)
@@ -107,6 +110,7 @@ class WindowCandidates:
     item_regions: dict[int, str]
     item_names: dict[int, str]
     positive_availability: dict[str, int | float]
+    rating_prior: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,6 +247,7 @@ def prefix_training_arrays(
     )
     labels = np.empty(len(queries) * capacity_per_query, dtype=np.int32)
     groups: list[int] = []
+    rating_priors: list[float] = []
     ordered_queries = sorted(queries, key=lambda q: global_interaction_key(q.target))
     ordered_reference = sorted(reference_interactions, key=global_interaction_key)
     reference_dates = [item.event_date for item in ordered_reference]
@@ -289,7 +294,8 @@ def prefix_training_arrays(
         retrieved += 1
         rows = sorted(
             build_feature_rows(
-                query, result.union, context, include_region=generator.include_region
+                query, result.union, context, include_region=generator.include_region,
+                rating_shrinkage_strength=config.rating_shrinkage_strength,
             ),
             key=lambda row: row.restaurant_id,
         )
@@ -300,11 +306,13 @@ def prefix_training_arrays(
             labels[offset] = target_label if row.restaurant_id == query.target.restaurant_id else 0
             offset += 1
         groups.append(len(rows))
+        rating_priors.append(global_rating_prior(context))
 
     return TrainingArrays(
         features=features[:offset].copy(),
         labels=labels[:offset].copy(),
         groups=groups,
+        rating_priors=np.asarray(rating_priors, dtype=np.float64),
         summary={
             "queries": len(queries),
             "usable_groups": len(groups),
@@ -332,6 +340,7 @@ def window_candidates(
     graph: LightGCN | None = None,
     feature_names: tuple[str, ...] | None,
     training_config: ExperimentConfig | None = None,
+    rating_shrinkage_strength: float = 0.0,
 ) -> WindowCandidates:
     """Candidates (and optionally ranker features) for fixed-cutoff queries.
 
@@ -357,6 +366,7 @@ def window_candidates(
     group_sizes: list[int] = []
     catalog: set[int] = set()
     positives = available_positives = 0
+    prior = global_rating_prior(context)
     for query in queries:
         retrieval_query = query.retrieval_query()
         result = generator.retrieve(
@@ -393,6 +403,8 @@ def window_candidates(
                             candidate,
                             context,
                             include_region=generator.include_region,
+                            rating_shrinkage_strength=rating_shrinkage_strength,
+                            rating_prior=prior,
                         )
                         for candidate in result.union
                     )
@@ -435,6 +447,7 @@ def window_candidates(
         item_popularity=dict(context.item_counts),
         item_regions=dict(context.item_regions),
         item_names=dict(context.item_names),
+        rating_prior=prior,
         positive_availability={
             "relevant_positives": positives,
             "available_positives": available_positives,
@@ -462,7 +475,7 @@ def window_training_arrays(
     dates = [row.event_date for row in rows]
     builder = IncrementalRetrievalContext()
     index = 0
-    feature_blocks, label_blocks, groups = [], [], []
+    feature_blocks, label_blocks, groups, rating_priors = [], [], [], []
     query_count = relevant = available = retrieved = scored = 0
     multiple = distinct = preference_pairs = observed_count = 0
     for start, queries in build_training_windows(rows, config=config, through=through, phase=phase):
@@ -473,6 +486,7 @@ def window_training_arrays(
         candidates = window_candidates(
             queries, builder.context, generator, graph=graph,
             feature_names=config.feature_names, training_config=config,
+            rating_shrinkage_strength=config.rating_shrinkage_strength,
         )
         offset = 0
         catalog_ids = set(builder.context.item_counts)
@@ -493,6 +507,7 @@ def window_training_arrays(
             if not size or labels.max() <= 0 or labels.max() == labels.min():
                 continue
             groups.append(size)
+            rating_priors.append(candidates.rating_prior)
             feature_blocks.append(values)
             label_blocks.append(labels)
             observed = labels[labels > 0]
@@ -508,6 +523,7 @@ def window_training_arrays(
         raise ValueError("Training windows have no candidate groups with different labels")
     return TrainingArrays(
         features=np.concatenate(feature_blocks), labels=np.concatenate(label_blocks), groups=groups,
+        rating_priors=np.asarray(rating_priors, dtype=np.float64),
         summary={
             "mode": "window", "label_mode": config.ranker_label_mode,
             "queries": query_count, "usable_groups": len(groups), "feature_rows": sum(groups),
@@ -702,6 +718,8 @@ def run_experiment(
     label: str | None = None,
     allow_dirty: bool = True,
     log: Callable[[str], None] | None = None,
+    use_cache: bool = True,
+    rebuild_cache: bool = False,
 ) -> ExperimentResult:
     config = config or ExperimentConfig()
     emit = log or (lambda message: print(message, file=sys.stderr, flush=True))
@@ -756,33 +774,19 @@ def run_experiment(
     lap("01_split_and_window_queries")
 
     # ---- Step A: validation-window LightGCN (edges <= T1) -----------------
-    generator = _generator(config)
     graph_config = config.lightgcn_config
-    validation_graph, validation_graph_info = fit_lightgcn(split.train, graph_config)
-    lap("02_fit_validation_lightgcn")
+    prepared = PreparedData(artifacts_root, snapshot["dataset_snapshot_id"], split, config,
+                            enabled=use_cache, rebuild=rebuild_cache, log=emit)
+    validation_candidates, validation_graph_info = prepared.window("validation", split.train, validation_queries)
+    lap("02_prepare_validation_candidates")
 
     # ---- Step B: tuning-phase training rows (targets <= T1) ---------------
     checkpoints = CheckpointedLightGCN(
         graph_config, months=config.lightgcn_checkpoint_months, log=emit
     )
-    if config.ranker_training_mode == "window":
-        train_arrays = window_training_arrays(
-            split.train, generator, checkpoints, config=config, through=t1, log=emit,
-        )
-    else:
-        train_queries = build_prefix_queries(split.train, config=config, phase="train")
-        _assert_targets_through(train_queries, t1)
-        train_arrays = prefix_training_arrays(
-            train_queries, split.train, generator, checkpoints,
-            feature_names=feature_names, log=emit, label="train_prefix", config=config,
-        )
+    train_arrays = prepared.training("train", split.train, t1, checkpoints)
     lap("03_build_train_rows")
 
-    validation_context = build_context(split.train)
-    validation_candidates = window_candidates(
-        validation_queries, validation_context, generator,
-        graph=validation_graph, feature_names=feature_names,
-    )
     eval_set = positive_eval_set(validation_candidates)
     lap("04_build_validation_rows")
 
@@ -841,8 +845,7 @@ def run_experiment(
         run_dir, "validation", validation_queries, validation_ranked,
         validation_candidates, config,
     )
-    del eval_set, validation_candidates, validation_context, validation_ranker
-    del validation_graph
+    del eval_set, validation_candidates, validation_ranker
     gc.collect()
     lap("05_tune_lightgbm_on_validation")
 
@@ -851,25 +854,14 @@ def run_experiment(
         # Rebuild the partial T1 calendar window through T2 exactly once.
         train_summary = train_arrays.summary
         del train_arrays
-        refit_arrays = window_training_arrays(
-            test_history, generator, checkpoints, config=config, through=t2, phase="refit", log=emit,
-        )
+        refit_arrays = prepared.training("refit", test_history, t2, checkpoints)
         final_features, final_labels, final_groups = (
             refit_arrays.features, refit_arrays.labels, refit_arrays.groups,
         )
         training_summary = {"train_window": train_summary, "refit_all_windows": refit_arrays.summary}
         del refit_arrays
     else:
-        refit_queries = tuple(
-            query
-            for query in build_prefix_queries(test_history, config=config, phase="refit")
-            if query.target.event_date > t1
-        )
-        _assert_targets_through(refit_queries, t2)
-        refit_arrays = prefix_training_arrays(
-            refit_queries, test_history, generator, checkpoints,
-            feature_names=feature_names, log=emit, label="refit_prefix", config=config,
-        )
+        refit_arrays = prepared.training("refit", test_history, t2, checkpoints)
         final_features = np.concatenate([train_arrays.features, refit_arrays.features])
         final_labels = np.concatenate([train_arrays.labels, refit_arrays.labels])
         final_groups = train_arrays.groups + refit_arrays.groups
@@ -893,13 +885,7 @@ def run_experiment(
     lap("06_final_refit")
 
     # ---- Step E: the single test evaluation --------------------------------
-    test_graph, test_graph_info = fit_lightgcn(test_history, graph_config)
-    test_context = build_context(test_history)
-    test_candidates = window_candidates(
-        test_queries, test_context, generator,
-        graph=test_graph, feature_names=feature_names,
-    )
-    del test_graph
+    test_candidates, test_graph_info = prepared.window("test", test_history, test_queries)
     test_ranked = rank_window(final_ranker, test_queries, test_candidates)
     test_metrics = stage_metrics(test_queries, test_candidates, test_ranked, config)
     test_metrics["bootstrap_r1_minus_r0"] = paired_bootstrap(
@@ -993,6 +979,7 @@ def run_experiment(
             "test_evaluations": 1,
         },
         "timings_seconds": timings,
+        "prepared_data": prepared.manifest,
     }
     write_json(run_dir / "metrics.json", metrics)
     write_json(run_dir / "manifest.json", manifest)
