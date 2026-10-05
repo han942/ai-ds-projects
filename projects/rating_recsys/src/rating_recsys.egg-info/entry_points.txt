@@ -1,6 +1,9 @@
 [console_scripts]
+rating-recsys-compare = rating_recsys.experiments.compare_cli:console_main
 rating-recsys-dashboard = rating_recsys.observability.cli:main
 rating-recsys-dataset = rating_recsys.datasets.cli:main
-rating-recsys-experiment = rating_recsys.experiments.cli:main
+rating-recsys-experiment = rating_recsys.experiments.cli:console_main
 rating-recsys-ingest = rating_recsys.ingestion.cli:main
 rating-recsys-migrate = rating_recsys.db.migrate:main
+rating-recsys-prepare = rating_recsys.experiments.prepared:main
+rating-recsys-review-embeddings = rating_recsys.experiments.review_embedding_cli:console_main

@@ -1,14 +1,21 @@
 Metadata-Version: 2.4
 Name: rating-recsys
 Version: 0.1.0
-Summary: DB-backed two-stage restaurant recommender
+Summary: DB-backed two-stage restaurant recommender (candidate retrieval + LambdaRank)
 Requires-Python: >=3.10
 Requires-Dist: psycopg[binary]<4,>=3.2
 Requires-Dist: python-dotenv<2,>=1.0
 Provides-Extra: experiment
+Requires-Dist: aiohttp<4,>=3.9; extra == "experiment"
+Requires-Dist: tokenizers<0.23,>=0.21; extra == "experiment"
 Requires-Dist: lightgbm<5,>=4.5; extra == "experiment"
+Requires-Dist: matplotlib<4,>=3.8; extra == "experiment"
 Requires-Dist: mlflow<4,>=3; extra == "experiment"
+Requires-Dist: numpy<3,>=1.26; extra == "experiment"
 Requires-Dist: pandas<3,>=2.2; extra == "experiment"
+Requires-Dist: scipy<2,>=1.11; extra == "experiment"
 Requires-Dist: streamlit<2,>=1.40; extra == "experiment"
+Provides-Extra: deepconn
+Requires-Dist: torch==2.5.1; extra == "deepconn"
 Provides-Extra: dev
 Requires-Dist: pytest<9,>=8; extra == "dev"

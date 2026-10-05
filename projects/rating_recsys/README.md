@@ -125,7 +125,30 @@ R1 − R0의 95% CI가 0을 포함해 이번 실행에서는 재정렬의 이득
 | 재정렬 | R0 기준 순서, LambdaRank, Jev decision model |
 | 추천 구조 (RQ2) | Two-stage, Two-Tower, Generative Retrieval, 리스트 생성형 추천 |
 
-현재 구현은 C5 + LambdaRank다. BM25·임베딩·Two-Tower·Jev·생성형 추천은 비교 계획이며, 상태와 실험 순서는 [PLAN.md](./PLAN.md)에 정리한다. baseline의 feature·label·설정·평가 절차는 [BASELINE_MODEL.md](./BASELINE_MODEL.md)에서 확인할 수 있다.
+현재 baseline은 C5 + LambdaRank다. 리뷰 임베딩 후보 비교는 Liquid 무료 모델로 전체 실행·검증했다. 이번 조건의 후보 Recall은 C5보다 낮아 baseline은 유지한다. BM25·Two-Tower·Jev·생성형 추천은 비교 계획이며, 상태와 실험 순서는 [PLAN.md](./PLAN.md)에 정리한다. baseline의 feature·label·설정·평가 절차는 [BASELINE_MODEL.md](./BASELINE_MODEL.md)에서 확인할 수 있다.
+
+### 리뷰 임베딩 후보 실험
+
+사용자의 cutoff 이전 **최근 평점 4점 이상 리뷰 최대 5개**와 식당에 cutoff 이전에 달린 **최근 평점 4점 이상 리뷰 최대 10개**를 각각 하나의 문서로 묶는다. 리뷰 본문만 넣으며 메뉴·상호·지역 정보는 넣지 않는다. Liquid LFM2.5-Embedding-350M 무료 모델의 1,024차원 벡터로 방문하지 않은 식당 후보를 찾고, C5 및 C1/C4와의 RRF 결합을 같은 검증·테스트 분할에서 비교한다. 모델·차원·프로필 버전·본문 hash로 임베딩을 캐시한다. 현재 비교는 후보 단계만이며 새 후보용 LambdaRank 재학습은 후속 작업이다.
+
+사용자에는 `query: `, 식당에는 `document: `를 붙인다. 모델의 512토큰 한도를 지키기 위해 고정 revision의 토크나이저로 각 입력을 최대 500토큰까지 보존하며, 최신 리뷰를 먼저 넣는다. 한 요청에 최대 **128개 입력**, **동시 요청 2개**, **분당 18회**로 제한해 비동기 처리한다. 응답 순서가 달라도 입력별 벡터를 맞춰 저장하고, 일시적 오류는 재시도하며 완료 배치는 즉시 캐시한다. 제공자의 최대 배치 크기 128은 실제 API 호출로 확인했다.
+
+| 후보 | Test Recall@100 |
+|---|---:|
+| C5 | 20.1626% |
+| Liquid 리뷰 임베딩 단독 | 3.2757% |
+| C1+C4+임베딩 RRF | 16.5637% |
+
+검증으로 선택한 결합은 C5 대비 **−3.5989%p**이며 paired bootstrap 95% 구간은 −4.4422~−2.8003%p다. 임베딩 프로필이 없는 테스트 사용자 35명도 평가 모수에 유지했다. 캐시에 저장된 고유 입력 10,505개, API 성공 배치 83회, 3,604,868토큰의 실제 기록 비용은 **$0**이다. [실행 보고서](./artifacts/comparisons/review_embeddings/20261004T143348304525Z-e7896add/report.md)에 전체 조건·후보 지표·입력 잘림·API 사용량을 정리했다.
+
+프로젝트 `.env`의 `OPENROUTER_API_KEY=`에 본인의 키를 넣는다. 이 값이 있으면 이전 셸 환경변수보다 우선한다. 값은 Git에 올리지 않는다.
+
+```bash
+.venv/bin/python -m rating_recsys.experiments.review_embedding_cli --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl --satisfaction-mode history-aware --satisfaction-min-history 10 --dry-run
+.venv/bin/python -m rating_recsys.experiments.review_embedding_cli --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl --satisfaction-mode history-aware --satisfaction-min-history 10 --label liquid-free-async-128
+```
+
+`--dry-run`은 API를 호출하지 않고 시점별 프로필 수와 캐시 누락량을 출력한다. 실제 실행은 `artifacts/comparisons/review_embeddings/<run_id>/report.md`에 후보 비교를 기록한다. 무료 API 호출 제한이나 일시적 실패로 중단되면 저장된 벡터는 다음 실행에서 재사용한다. [모델 사양](https://openrouter.ai/liquid/lfm-2.5-embedding-350m:free)과 [공식 query/document 사용법](https://huggingface.co/LiquidAI/LFM2.5-Embedding-350M)을 참고했다.
 
 ## 제한 사항
 

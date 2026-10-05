@@ -120,7 +120,7 @@ validation/test 방문을 삭제하거나 같은 날짜 방문 전체를 버리�
 |---|---|---|---|
 | 0. 새 과제의 baseline | 개인별 만족도 정답 + Window + C5/LambdaRank | 선택한 과제에서의 기준 성능은 무엇인가? | 2026-10-04 구현·전체 실행·독립 지표 검증 완료 |
 | 1. 텍스트 없는 후보 모델 | Item-item, MF, Two-Tower, LightGCN, SASRec | 협업 관계·그래프·방문 순서 중 어떤 신호가 검색에 도움이 되는가? | Item-item·LightGCN 구현, 나머지 미구현 |
-| 2. 리뷰 텍스트 후보 검색 | BM25, 리뷰 임베딩 검색, C5와의 결합 | 어휘 검색·의미 검색이 C5의 후보 Recall을 보완하는가? | BM25·임베딩 미실험, 과거 DeepCoNN 결과만 있음 |
+| 2. 리뷰 텍스트 후보 검색 | BM25, 리뷰 임베딩 검색, C5와의 결합 | 어휘 검색·의미 검색이 C5의 후보 Recall을 보완하는가? | Liquid 임베딩 전체 실행 완료, BM25 미구현, 과거 DeepCoNN 결과 있음 |
 | 3. 텍스트 학습·재랭킹 | 텍스트 feature·Two-Tower, LambdaRank와 Jev 비교 | 학습형 ranker와 decision-model 재랭커가 순위를 개선하는가? | 후속 설계 |
 | 4. Generative Retrieval | TIGER 계열의 Semantic ID 후보 생성 + 공통 ranker | 벡터 검색을 ID 생성으로 바꾸면 후보 품질·비용이 달라지는가? | 미구현 |
 | 5. 리스트 생성형 추천·OneRec | 추천 목록 생성, 검색·순위 통합, 선호 정렬 | 분리된 Two-stage와 통합된 생성형 모델은 어떻게 다른가? | 미구현 |
@@ -159,6 +159,8 @@ BM25는 임베딩 없이 단어 일치로 후보를 찾는다. 임베딩 검색�
 OpenRouter는 임베딩을 만드는 API 선택지이고, pgvector·Milvus·Astra DB는 벡터를 저장·검색하는 기반이다.
 기존 Two-stage에도 텍스트를 넣을 수 있으므로, 텍스트 검색·텍스트 ranker feature·Two-Tower를 별도 변경으로 비교한다.
 후보를 바꾸는 조건은 새 후보의 학습 행·feature를 만들고 ranker도 재학습한다.
+
+Liquid 무료 임베딩의 첫 전체 실험은 완료했다. 검증으로 고른 C5+임베딩 RRF의 test Recall@100은 16.5637%로 C5 20.1626%보다 낮았다. 입력 프로필·토큰 제한·비동기 호출·실제 비용·bootstrap 차이는 [실행 보고서](./artifacts/comparisons/review_embeddings/20261004T143348304525Z-e7896add/report.md)에 기록했다. 후보 Recall 기준으로 baseline을 유지하며 다음 텍스트 비교는 BM25다.
 
 ### LambdaRank와 Jev 재랭킹 비교
 
@@ -226,9 +228,10 @@ Reward·선호 정렬은 관측 데이터로 확인할 수 있는 범위에서 �
 | 0 | Baseline 후보·학습 행 재사용 | 구현·실제 snapshot 검증 완료 | 같은 조건에서 자동 재사용 |
 | 1 | 선택한 개인별 만족도 정답 구현 | 구현·검증 완료, 최소 이력 10건 | 학습·validation·test의 정답 정의 일치 |
 | 2 | 새 기준으로 Window baseline 측정 | 전체 실행 완료: NDCG@10 0.025467 | 선택한 과제의 기준 성능 기록 |
-| 3 | BM25 식당 리뷰 검색 / C5+BM25 | 설계, 미구현 | BM25 단독 Recall 및 C5 보완 Recall |
+| 3 | OpenRouter 리뷰 임베딩 / C5 결합 | Liquid 무료 모델 실행·검증 완료: 단독 3.28%, 결합 16.56% < C5 20.16% | 임베딩 단독 Recall 및 C5 보완 Recall |
+| 3b | BM25 식당 리뷰 검색 / C5+BM25 | 설계, 미구현 | BM25 단독 Recall 및 C5 보완 Recall |
 | 4 | Jev vs LambdaRank 같은 후보 재랭킹 | 설계, 미구현 | 공통 후보 NDCG·Recall과 API 비용·지연 |
-| 5 | 리뷰 임베딩·dense/hybrid 검색·텍스트 Two-Tower | 설계, 모델·차원·저장소 미선택 | lexical과 분리한 검색·순위 효과 |
+| 5 | dense/hybrid 검색·텍스트 Two-Tower | 설계, 전용 벡터 저장소 미선택 | lexical과 분리한 검색·순위 효과 |
 | 6 | Generative Retrieval + 공통 ranker | 미구현 | 벡터 검색과 생성 후보 비교 |
 | 7 | 목록 생성·OneRec 통합·선호 정렬 | 미구현 | 구조 통합과 선호 정렬 효과 분리 |
 | 8 | 새 미래 holdout·seed 반복 | 미실행 | 반복 확인한 test의 탐색 결과 검증 |
@@ -354,7 +357,7 @@ MF(Matrix Factorization)의 기본 관계는 `μ + b_u + b_i + p_u·q_i`다.
 
 텍스트 표현과 결합 원칙:
 
-- OpenRouter 임베딩 API·외부 사전학습 encoder를 비교 범위에 포함한다. 사용 모델·차원·호출 조건은 아직 선택하지 않았다.
+- 첫 OpenRouter 후보 실험은 `liquid/lfm-2.5-embedding-350m:free` 1,024차원, 사용자 최근 긍정 리뷰 5개·식당 최근 긍정 리뷰 10개로 고정해 실행했다. Query/document 접두어와 최대 500토큰, 배치 128·동시성 2·분당 18회로 처리했다. 후보 Recall은 단독 3.28%, C5 결합 16.56%로 C5 20.16%보다 낮아 채택하지 않았다. 다른 encoder 비교는 후속 실험이다.
 - Cutoff 이전 리뷰로 학습하는 글자 n-gram TF-IDF 또는 자체 학습 표현도 비교한다. TF-IDF는 표현의 겹침을 측정하며 문장 의미를 이해하는 모델로 해석하지 않는다.
 - 좋아한/싫어한 식당의 프로필을 구분한다. 본인 리뷰와 방문 식당의 다른 사용자 리뷰를 비교하며, 이력이 부족하면 공통 프로필을 쓴다.
 - 어휘·IDF·문서·프로필은 cutoff 이전 리뷰로만 만든다. Target의 리뷰·평점·맛/가격/서비스는 label 외 입력에서 제외한다.

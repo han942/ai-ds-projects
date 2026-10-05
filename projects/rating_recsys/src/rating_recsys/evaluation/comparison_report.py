@@ -185,6 +185,9 @@ def render_report(manifest: dict, metrics: dict, *, has_plot: bool = False) -> s
         "## 3. 학습 곡선 (validation)",
         "",
     ]
+    if chosen.get("profile_preprocessing"):
+        position = lines.index("## 3. 학습 곡선 (validation)")
+        lines[position:position] = _embedding_notes(chosen, refit)
     if has_plot:
         lines += [f"![learning curve]({CURVE_FILE})", ""]
     has_rmse = any("rmse" in p for p in chosen["curve"])
@@ -371,3 +374,47 @@ def _ci(entry, *, percent: bool) -> str:
     if percent:
         return f"{100 * entry['delta']:+.2f}%p [{100 * low:+.2f}, {100 * high:+.2f}]"
     return f"{entry['delta']:+.4f} [{low:+.4f}, {high:+.4f}]"
+
+
+
+def _embedding_notes(chosen: dict, refit: dict) -> list[str]:
+    config = chosen["config"]
+    lines = [
+        "### 리뷰 임베딩 입력과 API",
+        "",
+        f"- 모델 `{config['model']}` · {config['dimensions']:,}차원 · "
+        f"배치 최대 {config['batch_size']}개 · 동시 요청 최대 {config['concurrency']}개 · "
+        f"분당 {config['requests_per_minute']:g}회. 성공한 배치를 SQLite에 즉시 저장한다.",
+        f"- 집계 `{config.get('aggregation', 'concat')}` · 사용자 표현 `{config.get('user_profile', 'own_reviews')}`. "
+        "own_reviews는 사용자 리뷰에 `query: `, 식당 리뷰에 `document: `를 붙인다. "
+        "liked_items는 선택한 사용자 리뷰 이벤트의 식당 document 벡터를 평균한다.",
+        "- concat은 본문을 묶은 전체 프로필을 토큰 예산까지 보존한다. review_mean은 "
+        "리뷰별 벡터를 정규화·평균·정규화하며 토큰 예산은 각 리뷰에 적용한다. "
+        "아래 잘림 비율의 단위는 concat=프로필, review_mean=개별 리뷰다.",
+        "- 외부 encoder는 고정했다. epoch 1과 loss 0은 공통 비교 실행기의 "
+        "프로필 생성 단계를 표시하며 모델 학습 loss가 아니다.",
+        "",
+        "| 구간 | 사용자 프로필 | 식당 프로필 | 잘린 API 입력 | 최대 입력 토큰 | "
+        "새 API 요청 | 캐시 재사용 | 새 요청 토큰 | 새 요청 비용 |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for label, row in (("Validation", chosen), ("Test", refit)):
+        prep, usage = row["profile_preprocessing"], row["openrouter_usage"]
+        fraction = prep["truncated_profiles"] / prep["profiles"] if prep["profiles"] else 0
+        lines.append(
+            f"| {label} | {row['users_with_review_profiles']:,} | "
+            f"{row['restaurants_with_review_profiles']:,} | {fraction:.2%} | "
+            f"{prep['max_sent_tokens']} | {usage['api_requests']} | {usage['cache_hits']:,} | "
+            f"{usage['prompt_tokens']:,} | ${usage['cost_usd']:.6f} |"
+        )
+    total = refit.get("embedding_cache_totals", {})
+    lines += [
+        "",
+        f"- 동일 모델 캐시의 누적 성공 요청 {total.get('successful_requests', 0):,}회 · "
+        f"입력 {total.get('documents', 0):,}개 · {total.get('prompt_tokens', 0):,}토큰 · "
+        f"${total.get('cost_usd', 0):.6f}. 사전 API 검증 호출도 포함한다.",
+        "- 토크나이저 revision·파일 SHA-256·프로필 버전·전체 설정과 API 사용량은 "
+        "`manifest.json`과 `metrics.json`에 기록한다.",
+        "",
+    ]
+    return lines

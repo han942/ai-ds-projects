@@ -129,6 +129,9 @@ class CandidateModel:
         )
 
     # ---- training --------------------------------------------------------
+    def prepare_fit(self, queries: Sequence[WindowQuery]) -> None:
+        """Optionally restrict expensive preprocessing to evaluation users."""
+
     def fit(
         self,
         model_config: Any,
@@ -324,3 +327,83 @@ def mean_rating_rmse(train: Iterable[Interaction], queries: Sequence[WindowQuery
 CANDIDATE_MODELS: dict[str, CandidateModel] = {
     model.name: model for model in (LightGCNCandidate(), DeepCoNNCandidate())
 }
+
+
+class ReviewEmbeddingsCandidate(CandidateModel):
+    """OpenRouter review-profile retrieval; invoked by the dedicated CLI."""
+
+    name = "review_embeddings"
+    title = "OpenRouter 리뷰 임베딩"
+    letter = "E"
+    needs_review_texts = True
+    default_max_epochs = 1
+    default_eval_every = 1
+    default_patience = 1
+    packages = ("numpy", "aiohttp", "tokenizers")
+    loss_description = "외부 임베딩 모델을 사용하므로 학습 loss 없음(0으로 표시)"
+    description = (
+        "사용자는 cutoff 이전의 최근 평점 4점 이상 리뷰 5개, 식당은 같은 시점까지의 최근 평점 4점 이상 리뷰 10개를 선택한다. concat은 본문을 묶어 인코딩하고 review_mean은 리뷰별 벡터를 평균한 뒤 정규화한다. 본문 외의 메뉴·상호·지역 정보는 넣지 않는다.",
+        "OpenRouter Liquid LFM2.5-Embedding-350M 무료 모델의 1,024차원 벡터로 코사인 검색한다. own_reviews는 사용자 query: / 식당 document: 접두어를 쓴다. liked_items는 같은 사용자 리뷰 이벤트에서 방문한 식당의 document 벡터를 평균한다. 각 API 입력은 500토큰 이하이며 최신 리뷰부터 선택한다.",
+        "여러 입력을 한 요청에 묶고 제한된 동시성·호출 속도로 비동기 실행한다. 성공한 배치는 바로 캐시해 중단 후 재사용한다. 본문·모델·차원·프로필 버전으로 SHA-256 cache key를 만든다.",
+        "검증은 T1까지의 리뷰만, 테스트 재구성은 T2까지의 리뷰만 사용한다. 평점·리뷰가 없는 프로필은 후보를 반환하지 않는다.",
+    )
+    leakage_checks = {"profiles_from_historical_interactions_only": True}
+
+    def __init__(self) -> None:
+        self.query_users: tuple[int, ...] = ()
+
+    def config_type(self) -> type:
+        from rating_recsys.retrieval.review_embeddings import ReviewEmbeddingConfig
+
+        return ReviewEmbeddingConfig
+
+    def prepare_fit(self, queries: Sequence[WindowQuery]) -> None:
+        self.query_users = tuple(query.user_id for query in queries)
+
+    def fit(self, model_config, interactions, texts, callback=None):
+        from pathlib import Path
+        from time import perf_counter
+        from types import SimpleNamespace
+
+        from rating_recsys.config import PROJECT_ROOT
+        from rating_recsys.retrieval.review_embeddings import (
+            OpenRouterEmbeddingCache, ProfileFormatter, fit_review_profiles,
+        )
+
+        if texts is None:
+            raise ValueError("Review embeddings need review texts")
+        if model_config.epochs != 1:
+            raise ValueError("Review embeddings have one fixed fitting step; use --max-epochs 1")
+        started = perf_counter()
+        cache_path = Path(model_config.cache_path)
+        if not cache_path.is_absolute():
+            cache_path = PROJECT_ROOT / cache_path
+        formatter = ProfileFormatter(model_config, cache_path.parent / "tokenizers")
+        import sys
+        with OpenRouterEmbeddingCache(
+            cache_path, model_config, progress=lambda message: print(message, file=sys.stderr, flush=True),
+        ) as cache:
+            fitted = fit_review_profiles(
+                interactions, texts, self.query_users, model_config, formatter, cache,
+            )
+            fitted.api_usage = dict(cache.usage)
+            fitted.cache_totals = cache.totals()
+        fitted.edge_count = len(interactions)
+        stats = SimpleNamespace(epoch=1, loss=0.0, seconds=perf_counter() - started)
+        fitted.history = [stats]
+        if callback:
+            callback(stats, fitted)
+        return fitted
+
+    def diagnostics(self, model, model_config, queries) -> dict[str, float]:
+        return {"query_profile_coverage": len(model.user_ids) / len(queries) if queries else 0.0}
+
+    def model_summary(self, model) -> dict[str, object]:
+        return {
+            "training_interactions": model.edge_count,
+            "users_with_review_profiles": len(model.user_ids),
+            "restaurants_with_review_profiles": len(model.item_ids),
+            "openrouter_usage": model.api_usage,
+            "embedding_cache_totals": model.cache_totals,
+            "profile_preprocessing": model.profile_metadata,
+        }

@@ -14,6 +14,8 @@ dependencies = [
 
 [project.optional-dependencies]
 experiment = [
+    "aiohttp>=3.9,<4",
+    "tokenizers>=0.21,<0.23",
     "lightgbm>=4.5,<5",
     "matplotlib>=3.8,<4",
     "mlflow>=3,<4",
@@ -37,6 +39,7 @@ rating-recsys-ingest = "rating_recsys.ingestion.cli:main"
 rating-recsys-dataset = "rating_recsys.datasets.cli:main"
 rating-recsys-experiment = "rating_recsys.experiments.cli:console_main"
 rating-recsys-compare = "rating_recsys.experiments.compare_cli:console_main"
+rating-recsys-review-embeddings = "rating_recsys.experiments.review_embedding_cli:console_main"
 rating-recsys-dashboard = "rating_recsys.observability.cli:main"
 rating-recsys-prepare = "rating_recsys.experiments.prepared:main"
 

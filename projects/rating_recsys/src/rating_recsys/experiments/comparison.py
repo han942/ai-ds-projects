@@ -443,6 +443,7 @@ def run_candidate_comparison(
     # ---- Validation: learning curves, config and policy choice -------------
     grid_rows: list[dict[str, object]] = []
     best_rankings: list[dict[str, tuple[int, ...]]] = []
+    model.prepare_fit(validation_queries)
     for model_config in grid:
         row, ranked = train_with_curve(
             model, model_config, split.train, texts, validation_queries,
@@ -467,6 +468,7 @@ def run_candidate_comparison(
 
     # ---- Test: refit on train + validation window, evaluate once ------------
     refit_started = time.perf_counter()
+    model.prepare_fit(test_queries)
     refit = model.fit(chosen_config, test_history, texts)
     refit_summary = {
         "config": chosen_config.to_dict(),
