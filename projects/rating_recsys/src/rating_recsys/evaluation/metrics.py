@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from statistics import mean
+from itertools import combinations
 from typing import Iterable, Sequence
 
 
@@ -107,6 +108,50 @@ def evaluate_rankings(
                 all_observations, cutoff, item_regions
             )
     return metrics
+
+
+def evaluate_observed_pairs(observations: Iterable[RankingObservation]) -> dict[str, object]:
+    """Auxiliary macro accuracy of observed graded pairs in the supplied list.
+
+    Compare only actual window visits with differing relevance (0/1/2),
+    both present in the complete candidate ordering. Unobserved items,
+    equal grades and unretrieved targets never count as wins or losses.
+    An empty denominator is undefined (None), rather than zero accuracy.
+    This diagnostic is separate from ranking metrics and model selection.
+    """
+    queries = eligible_queries = eligible_pairs = compared_pairs = correct_pairs = 0
+    values: list[float] = []
+    for observation in observations:
+        queries += 1
+        grades = observation.relevance_by_item
+        if any(grade not in (0, 1, 2) for grade in grades.values()):
+            raise ValueError("Observed pair grades must use relevance 0/1/2")
+        ids = observation.ordered_restaurant_ids
+        if len(set(ids)) != len(ids):
+            raise ValueError("Observed pair ordering contains duplicate restaurants")
+        counts = [sum(grade == label for grade in grades.values()) for label in (0, 1, 2)]
+        available = sum(left * right for left, right in combinations(counts, 2))
+        eligible_queries += bool(available)
+        eligible_pairs += available
+        ordered_grades = [grades[item] for item in ids if item in grades]
+        compared = correct = 0
+        for earlier, later in combinations(ordered_grades, 2):
+            if earlier != later:
+                compared += 1
+                correct += earlier > later
+        compared_pairs += compared
+        correct_pairs += correct
+        if compared:
+            values.append(correct / compared)
+    return {
+        "accuracy": mean(values) if values else None,
+        "queries": queries,
+        "eligible_queries": eligible_queries,
+        "evaluated_queries": len(values),
+        "eligible_pairs": eligible_pairs,
+        "compared_pairs": compared_pairs,
+        "correct_pairs": correct_pairs,
+    }
 
 
 def _catalog_coverage(

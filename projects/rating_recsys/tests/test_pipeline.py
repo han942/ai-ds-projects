@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from rating_recsys.datasets.split import build_global_temporal_split
 from rating_recsys.evaluation.report import write_report
+from rating_recsys.evaluation.pair_diagnostics import backfill_run
 from rating_recsys.experiments.cli import build_parser, config_from_args
 from rating_recsys.experiments.config import ExperimentConfig
 from rating_recsys.experiments.queries import build_window_queries
@@ -182,6 +183,19 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("--lightgcn-checkpoint-months 1", report)
             self.assertIn("C5 C1+LightGCN RRF (Stage 1)", report)
             self.assertIn("참고 · C3 quota RRF (이전 기준선)", report)
+            self.assertIn("관측 만족도 쌍 순서 정확도 · 보조 진단", report)
+            # Saved full target ranks must reproduce live diagnostics exactly,
+            # leaving all conventional metrics and selection unchanged.
+            before = json.loads((result.run_dir / "metrics.json").read_text())
+            summary = backfill_run(result.run_dir)
+            for phase in ("validation", "test"):
+                self.assertEqual(summary["phases"][phase], metrics[phase]["observed_pair_diagnostics"])
+                diagnostic = summary["phases"][phase]
+                self.assertEqual(diagnostic["r0_candidate_order"]["compared_pairs"],
+                                 diagnostic["r1_lambdarank"]["compared_pairs"])
+            self.assertEqual(before, json.loads((result.run_dir / "metrics.json").read_text()))
+            self.assertEqual((result.run_dir / "report.md").read_text().count(
+                "관측 만족도 쌍 순서 정확도 · 보조 진단"), 1)
             with self.assertRaises(FileExistsError):
                 write_report(result.run_dir)
 

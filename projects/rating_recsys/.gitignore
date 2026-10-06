@@ -7,14 +7,11 @@ crawler/data/
 mlruns/
 legacy/v2_experiments.zip
 
-# Local experiment outputs. Only the folder guide and each run's report are
-# versioned; everything else under artifacts/ stays on this machine.
+# Version category overviews under reports/ and the current baseline reference.
+# Generated per-run reports, plots, data and archives stay local.
 artifacts/*
 !artifacts/README.md
 !artifacts/runs/
 artifacts/runs/*/*
-!artifacts/runs/*/report.md
-!artifacts/comparisons/
-artifacts/comparisons/*/*/*
-!artifacts/comparisons/*/*/report.md
-!artifacts/comparisons/*/*/learning_curve.png
+!artifacts/runs/20261004T125314601899Z-e7896add/
+!artifacts/runs/20261004T125314601899Z-e7896add/report.md

@@ -75,6 +75,10 @@ RQ1은 제품 목표다. RQ2는 같은 목표·데이터·평가 규칙 아래 �
 | 저평점 점검 | Top-K에 든 실제 3점 미만 test 방문의 수·비율 | 나중에 낮은 점수를 준 식당에 높은 만족 점수를 주는 경향이 있는가? |
 
 RQ1/RQ2의 주 비교 지표는 end-to-end Graded NDCG@10이다. Validation에서 이 지표로 설정을 고르고, test는 최종 비교에만 쓴다. 후보 Recall@100과 4점 이상 Recall@10은 검색·고평점 적중을 진단하며, 별점 MAE/RMSE는 보조 성과로 보고한다.
+전형적인 NDCG·Recall·Precision·MRR·MAP을 유지한다. 관측 만족도 쌍 순서 정확도는
+인사이트용 보조 진단으로만 추가하며, 학습 목표·모델 선택 기준으로 사용하지 않는다.
+같은 C5 후보 전체에서 실제 등급 0·1·2가 다른 관측 식당 쌍만 비교하고 사용자별 평균을 낸다.
+평가 사용자 수·비교 쌍 수를 함께 기록하며, 미관측·후보 밖·동일 등급 쌍은 제외한다.
 별점 예측 점수로 후보를 정렬할 수는 있지만, 낮은 MAE가 좋은 Top-K 순위를 보장하지 않는다.
 테스트 기간에 4점 이상 방문이 없는 사용자는 테스트에서 삭제하지 않는다. 별점·저평점 분석에는 포함하고, 4점 이상 정답을 전제로 하는 Recall의 대상 사용자 수와 제외 이유를 함께 기록한다.
 
@@ -120,7 +124,7 @@ validation/test 방문을 삭제하거나 같은 날짜 방문 전체를 버리�
 |---|---|---|---|
 | 0. 새 과제의 baseline | 개인별 만족도 정답 + Window + C5/LambdaRank | 선택한 과제에서의 기준 성능은 무엇인가? | 2026-10-04 구현·전체 실행·독립 지표 검증 완료 |
 | 1. 텍스트 없는 후보 모델 | Item-item, MF, Two-Tower, LightGCN, SASRec | 협업 관계·그래프·방문 순서 중 어떤 신호가 검색에 도움이 되는가? | Item-item·LightGCN 구현, 나머지 미구현 |
-| 2. 리뷰 텍스트 후보 검색 | BM25, 리뷰 임베딩 검색, C5와의 결합 | 어휘 검색·의미 검색이 C5의 후보 Recall을 보완하는가? | Liquid 임베딩 전체 실행 완료, BM25 미구현, 과거 DeepCoNN 결과 있음 |
+| 2. 리뷰 텍스트 후보 검색 | BM25, 리뷰 임베딩 검색, C5와의 결합 | 어휘 검색·의미 검색이 C5의 후보 Recall을 보완하는가? | Liquid 임베딩·Kiwi+BM25 전체 실행·검증 완료, 이번 Recall@100 기준 C5 유지 |
 | 3. 텍스트 학습·재랭킹 | 텍스트 feature·Two-Tower, LambdaRank와 Jev 비교 | 학습형 ranker와 decision-model 재랭커가 순위를 개선하는가? | 후속 설계 |
 | 4. Generative Retrieval | TIGER 계열의 Semantic ID 후보 생성 + 공통 ranker | 벡터 검색을 ID 생성으로 바꾸면 후보 품질·비용이 달라지는가? | 미구현 |
 | 5. 리스트 생성형 추천·OneRec | 추천 목록 생성, 검색·순위 통합, 선호 정렬 | 분리된 Two-stage와 통합된 생성형 모델은 어떻게 다른가? | 미구현 |
@@ -160,7 +164,11 @@ OpenRouter는 임베딩을 만드는 API 선택지이고, pgvector·Milvus·Astr
 기존 Two-stage에도 텍스트를 넣을 수 있으므로, 텍스트 검색·텍스트 ranker feature·Two-Tower를 별도 변경으로 비교한다.
 후보를 바꾸는 조건은 새 후보의 학습 행·feature를 만들고 ranker도 재학습한다.
 
-Liquid 무료 임베딩의 첫 전체 실험은 완료했다. 검증으로 고른 C5+임베딩 RRF의 test Recall@100은 16.5637%로 C5 20.1626%보다 낮았다. 입력 프로필·토큰 제한·비동기 호출·실제 비용·bootstrap 차이는 [실행 보고서](./artifacts/comparisons/review_embeddings/20261004T143348304525Z-e7896add/report.md)에 기록했다. 후보 Recall 기준으로 baseline을 유지하며 다음 텍스트 비교는 BM25다.
+Liquid 임베딩, Kiwi+BM25, BM25 추가 전처리 비교를 전체 실행·검증했다.
+이번 후보 Recall@100 기준은 C5를 유지한다. 조건별 수치·비용·검증·한계와 API 한도로
+중단된 개별 리뷰 집계 비교는 [BM25 overview](./reports/bm25.md)와 [리뷰 임베딩 overview](./reports/review_embeddings.md)에 묶었다.
+현재 판단은 [카테고리별 overview 목록](./reports/README.md)에서 확인한다.
+
 
 ### LambdaRank와 Jev 재랭킹 비교
 
@@ -229,7 +237,7 @@ Reward·선호 정렬은 관측 데이터로 확인할 수 있는 범위에서 �
 | 1 | 선택한 개인별 만족도 정답 구현 | 구현·검증 완료, 최소 이력 10건 | 학습·validation·test의 정답 정의 일치 |
 | 2 | 새 기준으로 Window baseline 측정 | 전체 실행 완료: NDCG@10 0.025467 | 선택한 과제의 기준 성능 기록 |
 | 3 | OpenRouter 리뷰 임베딩 / C5 결합 | Liquid 무료 모델 실행·검증 완료: 단독 3.28%, 결합 16.56% < C5 20.16% | 임베딩 단독 Recall 및 C5 보완 Recall |
-| 3b | BM25 식당 리뷰 검색 / C5+BM25 | 설계, 미구현 | BM25 단독 Recall 및 C5 보완 Recall |
+| 3b | BM25 식당 리뷰 검색 / C5+BM25 | 전체 실행·검증 완료: 단독 5.30%, 결합 17.42% < C5 20.16% | 후보 Recall 기준 C5 유지, NDCG@10 상승은 개선 미확인 |
 | 4 | Jev vs LambdaRank 같은 후보 재랭킹 | 설계, 미구현 | 공통 후보 NDCG·Recall과 API 비용·지연 |
 | 5 | dense/hybrid 검색·텍스트 Two-Tower | 설계, 전용 벡터 저장소 미선택 | lexical과 분리한 검색·순위 효과 |
 | 6 | Generative Retrieval + 공통 ranker | 미구현 | 벡터 검색과 생성 후보 비교 |
@@ -541,7 +549,7 @@ Train/refit summary·모든 C5 평가 후보가 2026-10-02 baseline과 일치했
 | 2026-10-01 | Ranker 동점 규칙 | 점수가 같은 후보의 순서 변경 | C5 순위 유지 |
 | 2026-10-02 | 평균 feature shrinkage λ=10 | Test NDCG@10: 0.029360 → 0.028207 | 기본 λ=0 유지 |
 
-[최신 shrinkage 보고서](./artifacts/comparisons/shrinkage/20261002T062004863532Z-e7896add/report.md)의 validation NDCG@10은 0.025151 → 0.027881였다.
+[Baseline overview의 과거 shrinkage 기록](./reports/baseline.md)의 validation NDCG@10은 0.025151 → 0.027881였다.
 Test 차이 −0.001153의 사용자별 paired bootstrap 2,000회 95% 신뢰구간은 [−0.005006, +0.002692]다.
 
 - **실험 범위:** λ·seed 각 1개, λ는 평가 전 고정. 평균 feature만 변경하고 후보·group·label은 공유했다. 같은 validation 규칙으로 baseline 1 tree, shrinkage 96 trees를 선택했다.
@@ -669,23 +677,42 @@ python crawler/diningcode_playwright.py --national-regions --max-restaurants 0 -
 
 </details>
 
+## 리뷰 속성 추출 선행 진단 — 2026-10-06 완료
+
+고정 snapshot의 이력 수 상위 15명·리뷰 2,139개를 무료 Nemotron 3 Super로 분석했다.
+속성 평균과 실제 평점의 사용자 평균 Spearman 0.507, 리뷰 쌍 순서 일치 74.2%였다.
+같은 리뷰에 대한 사후 진단이며 미래 추천 성능은 아직 검증하지 않았다.
+
+조건·근거 검증·사용자별 결과·비용·추출 보완 과제는
+[리뷰 속성 overview](./reports/review_aspects.md)에 묶었다. 원본 실행 리포트와
+사용자별 근거는 `detailed_reports.zip`, 생성 파일은 `review_aspects.zip`에 보관했다.
+API 없이 재계산하려면 [보관 안내](./artifacts/README.md)의 복원 명령을 먼저 실행한다.
+
+속성 추출 보완·추천 모델 결합·사용자 시뮬레이션은 아직 실행하지 않았다.
+
 ## 파일 관리
 
-문서 역할은 [README](./README.md)의 안내, [BASELINE_MODEL](./BASELINE_MODEL.md)의 현재 모델·수치, 이 PLAN의 실험·운영으로 나눈다.
-작성 기준은 [docs_style.md](./docs_style.md), 프로젝트 맥락은 [AGENTS.md](./AGENTS.md)에 있다. 자동 생성 보고서는 각 실행 결과와 함께 둔다.
+README는 현재 시스템·실행 안내, BASELINE_MODEL은 모델·평가 정의, PLAN은 이후
+실험·운영을 다룬다. 완료된 실험은 [주제별 리포트 모음](./reports/README.md)에서 확인한다.
 
 | 경로 | 내용 |
 |---|---|
-| `artifacts/snapshots/` | Interaction·리뷰 본문·적재 원본 |
-| `artifacts/prepared/` | 조건별 학습 행·baseline 후보 |
-| `artifacts/runs/` | 표준 baseline 실행: 2026-09-30 run 보존 |
-| `artifacts/comparisons/<model>/<run_id>/` | 비교 실행: 2026-10-02 shrinkage 보존 |
+| `reports/` | BM25·임베딩·리뷰 속성·baseline의 카테고리별 짧은 overview |
+| `artifacts/README.md` | 생성 파일 보관 범위·검증·복원 방법 |
+| `artifacts/snapshots/` | 고정 Interaction·리뷰 본문·적재 원본 |
+| `artifacts/prepared/` | 재사용 학습 행·baseline 후보 |
+| `artifacts/runs/` | 원본 baseline 리포트와 다음 비교에 필요한 실행 파일 |
+| `artifacts/comparisons/<model>/<run_id>/` | 새 실행 출력; Git 제외, 과거 상세 자료는 필요 시 복원 |
+| `artifacts/archive/` | 생성 파일 ZIP 5개와 상세 리포트 ZIP·파일별 hash와 검증 목록, 로컬 전용 |
+| `artifacts/review_embedding_cache.sqlite` | 완료 임베딩 재사용 캐시 |
 | `artifacts/mlflow.db` | 로컬 지표 저장소 |
 | `legacy/v1_rating_prediction/` | V1 notebook·데이터·모델·결과·개발 기록, [안내](./legacy/v1_rating_prediction/README.md) |
 | `legacy/v2_experiments.zip` | 과거 V2 결과·분석·로그·문서 140개, 로컬 전용 |
 
-결과 폴더는 `report.md`·`manifest.json`·`metrics.json`·모델·추천 파일을 가진다.
-Git에는 결과 report·후보 비교 learning_curve만 올리고 snapshot·모델·리뷰 본문은 로컬에 둔다.
+2026-10-06 비교 생성 파일 212개를 ZIP 5개로 보관했다. 전부 압축 해제해 크기·SHA-256
+일치를 확인한 뒤 생성 파일을 정리했다. 이후 상세 리포트도 복원 검증 후 별도 ZIP으로
+보관했다. 새 실행은 report·manifest·metrics·후보·모델 등을 만들지만 Git에는 카테고리별
+overview와 현재 baseline 리포트만 남긴다. Jev는 실행 결과가 생긴 뒤 overview를 만든다. snapshot·모델·API 응답·개인별 원문 근거·ZIP은 로컬 전용이다.
 
 과거 기록은 필요할 때 임시 폴더에 푼다. 보관 MLflow 경로는 당시 위치이므로 원본을 확인하고, 재현 시 당시 commit·평가 프로토콜을 맞춘다.
 

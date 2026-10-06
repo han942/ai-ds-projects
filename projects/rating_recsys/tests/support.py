@@ -107,6 +107,7 @@ def texts_for(rows) -> dict[int, str]:
 # Every registered model needs one small config row, not a new test/CLI file.
 # Parameters not listed here retain the model's default config values.
 MODEL_CASES = {
+    "bm25": {"epochs": 1, "threads": 1},
     "lightgcn": {
         "dimension": 8, "layers": 2, "epochs": 12,
         "batch_size": 64, "learning_rate": 0.01,

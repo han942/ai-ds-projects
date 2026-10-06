@@ -134,6 +134,7 @@ def render_report(manifest: dict, metrics: dict) -> str:
             f"({_pct(diagnostics[f'low_rating_visit_inclusion_rate_at_{k}'])}). "
             "미관측 식당은 이 분모에 넣지 않는다.",
         ]
+    lines += observed_pair_lines(test)
     lines += [
         "",
         "## 6. 해석 (작성자 기입)",
@@ -157,6 +158,34 @@ def render_report(manifest: dict, metrics: dict) -> str:
         "`model.txt`(최종 ranker)가 이 보고서의 원본이다.",
     ]
     return "\n".join(lines) + "\n"
+
+
+def observed_pair_lines(phase_metrics: dict) -> list[str]:
+    diagnostics = phase_metrics.get("observed_pair_diagnostics")
+    if not diagnostics:
+        return []
+    rows = []
+    for stage, label in (("r0_candidate_order", "R0 C5 순서"), ("r1_lambdarank", "R1 LambdaRank")):
+        row = diagnostics[stage]
+        rows.append([
+            label, _pct(row["accuracy"]), str(row["evaluated_queries"]),
+            str(row["compared_pairs"]), str(row["correct_pairs"]),
+        ])
+    reference = diagnostics["r0_candidate_order"]
+    return [
+        "", "### 관측 만족도 쌍 순서 정확도 · 보조 진단", "",
+        "같은 사용자가 실제 평가한 식당 중 만족도 등급(0·1·2)이 서로 다른 쌍에서, "
+        "더 높은 등급의 식당을 앞에 배치한 비율이다. 사용자별 비율을 동일 가중 평균한다.",
+        "C5 후보 전체에서 두 식당이 모두 검색된 동일 쌍을 R0/R1으로 비교한다. "
+        "Top-10 지표가 아니며, 모델 선택·학습 목표에는 사용하지 않는다. "
+        "동일 등급·미관측 식당·후보 밖 식당은 제외하고, 평가 가능한 쌍이 없으면 ‘–’로 표시한다.",
+        "",
+        _table(["순서", "정확도", "평가 사용자", "비교 쌍", "올바른 순서 쌍"], rows),
+        "",
+        f"전체 관측 등급 차이 쌍은 {reference['eligible_pairs']:,}개 "
+        f"({reference['eligible_queries']:,}명)이며, 표의 비교 쌍은 둘 다 C5에 포함된 부분집합이다. "
+        "작은 표본의 탐색적 인사이트이며 전체 추천 성능이나 저평점 회피를 증명하지 않는다.",
+    ]
 
 
 def _data_lines(manifest: dict, metrics: dict) -> list[str]:

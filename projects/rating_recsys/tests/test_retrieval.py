@@ -4,6 +4,7 @@ import unittest
 from dataclasses import replace
 from datetime import date
 from importlib.util import find_spec
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -557,29 +558,34 @@ class DeepCoNNModelTests(unittest.TestCase):
 
 @pytest.mark.parametrize("model", CANDIDATE_MODELS.values(), ids=lambda model: model.name)
 def test_candidate_model_contract(model):
-    """Every registered candidate supports stopping, exclusions and repeatable ranks."""
+    """Candidates support fitting callbacks, exclusions and repeatable ranks."""
 
     if model not in available_models():
         pytest.skip(f"{model.name} optional dependencies are not installed")
     rows = synthetic_interactions()
-    config = replace(tiny_grid(model)[0], epochs=4)
+    # A one-step index has no training epochs to stop at epoch 2.
+    single_step = model.default_max_epochs == 1
+    config = replace(tiny_grid(model)[0], epochs=1 if single_step else 4)
+    stop_epoch = 1 if single_step else 2
+    model.prepare_fit([SimpleNamespace(user_id=uid) for uid in sorted({row.user_id for row in rows})])
     texts = texts_for(rows) if model.needs_review_texts else None
     epochs = []
 
     def stop(stats, fitted):
         epochs.append(stats.epoch)
-        return stats.epoch == 2
+        return stats.epoch == stop_epoch
 
     first = model.fit(config, rows, texts, callback=stop)
-    assert epochs == [1, 2]
-    assert len(first.history) == 2
-    second = model.fit(config, list(reversed(rows)), texts, callback=lambda s, _: s.epoch == 2)
+    assert epochs == list(range(1, stop_epoch + 1))
+    assert len(first.history) == stop_epoch
+    second = model.fit(config, list(reversed(rows)), texts, callback=lambda s, _: s.epoch == stop_epoch)
     seen = {}
     for row in rows:
         seen.setdefault(row.user_id, []).append(row.restaurant_id)
     ranked = first.recommend(list(seen), seen, 5)
     assert ranked == second.recommend(list(seen), seen, 5)
     assert set(ranked) == set(seen)
+    assert any(ranked.values())
     catalog = {row.restaurant_id for row in rows}
     for user, items in ranked.items():
         assert len(items) <= 5

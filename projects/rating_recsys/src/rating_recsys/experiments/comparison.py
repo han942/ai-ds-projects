@@ -30,7 +30,7 @@ from typing import Callable, Iterable, Mapping, Sequence
 
 from rating_recsys.datasets.models import Interaction
 from rating_recsys.datasets.split import build_global_temporal_split
-from rating_recsys.evaluation.metrics import evaluate_rankings
+from rating_recsys.evaluation.metrics import evaluate_observed_pairs, evaluate_rankings
 from rating_recsys.experiments.artifacts import read_json, read_jsonl, write_json, write_jsonl
 from rating_recsys.experiments.candidate_models import CandidateModel
 from rating_recsys.experiments.config import ExperimentConfig
@@ -478,6 +478,9 @@ def run_candidate_comparison(
             {"epoch": stats.epoch, **model.loss_fields(stats)} for stats in refit.history
         ],
     }
+    saved = model.save_artifacts(refit, run_dir)
+    if saved:
+        refit_summary["artifacts"] = saved
     lap("04_refit_train_plus_validation")
     test_candidates, _ = prepared.window("test", test_history, test_queries)
     test_ranked = source_rankings(refit, test_queries, config.candidate_k)
@@ -507,19 +510,13 @@ def run_candidate_comparison(
             {name: test_stages[name] for name in dict.fromkeys((model.name, chosen_policy))},
             test_candidates, config,
         )
-    write_jsonl(
-        run_dir / "candidates_test.jsonl",
-        (
-            {
-                "query_id": q.query_id,
-                "user_id": q.user_id,
-                model.name: test_stages[model.name][q.query_id],
-                chosen_policy: test_stages[chosen_policy][q.query_id],
-                STAGE1: test_stages[STAGE1][q.query_id],
-            }
-            for q in test_queries
-        ),
-    )
+    for phase, queries, stages in (("validation", validation_queries, validation_stages),
+                                   ("test", test_queries, test_stages)):
+        write_jsonl(run_dir / f"candidates_{phase}.jsonl", (
+            {"query_id": q.query_id, "user_id": q.user_id,
+             **{stage: stages[stage][q.query_id] for stage in (STAGE1, *policies(model))}}
+            for q in queries
+        ))
     lap("05_single_test_evaluation")
 
     metrics = {
@@ -547,6 +544,12 @@ def run_candidate_comparison(
             "chosen_policy": chosen_policy,
         },
         "refit": refit_summary,
+        "observed_pair_diagnostics": {
+            phase: {stage: evaluate_observed_pairs(observations(queries, stages[stage]))
+                    for stage in (STAGE1, *policies(model))}
+            for phase, queries, stages in (("validation", validation_queries, validation_stages),
+                                           ("test", test_queries, test_stages))
+        },
     }
     environment = environment_manifest()
     wanted = {"lightgbm", "rating-recsys", *model.packages}

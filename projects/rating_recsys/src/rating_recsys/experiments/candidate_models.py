@@ -23,6 +23,7 @@ import argparse
 import math
 from dataclasses import fields
 from itertools import product
+from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from rating_recsys.datasets.models import Interaction
@@ -157,6 +158,10 @@ class CandidateModel:
         """Size of what the model was fitted on; ``training_interactions`` is required."""
 
         return {"training_interactions": int(model.edge_count)}
+
+    def save_artifacts(self, model: Any, run_dir: Path) -> dict[str, str]:
+        """Optionally persist a fitted index in the comparison run."""
+        return {}
 
     def references(
         self,
@@ -324,8 +329,56 @@ def mean_rating_rmse(train: Iterable[Interaction], queries: Sequence[WindowQuery
     return math.sqrt(sum((mean - r) ** 2 for r in visits) / len(visits)) if visits else float("nan")
 
 
+class BM25Candidate(CandidateModel):
+    name = "bm25"
+    title = "Kiwi + BM25"
+    letter = "B"
+    needs_review_texts = True
+    default_max_epochs = 1
+    default_eval_every = 1
+    default_patience = 1
+    packages = ("numpy", "scipy", "bm25s", "kiwipiepy", "kiwipiepy_model")
+    loss_description = "BM25는 비학습 검색이며 1은 색인 생성 단계, loss 0은 자리표시자"
+    description = (
+        "사용자 query는 cutoff 이전의 최근 평점 4점 이상 리뷰 최대 5개, 식당 문서는 같은 시점까지의 최근 평점 4점 이상 리뷰 최대 10개다. 리뷰당 공백을 정리한 본문 240자를 사용하며 메뉴·상호·지역 메타데이터는 추가하지 않는다.",
+        "Kiwi cong 모델을 로컬 CPU에서 실행한다. 명사 NNG·NNP, 동사 VV, 형용사 VA, 어근 XR, 외국어 SL의 형태를 소문자로 추출한다. 사용자 query의 중복 단어는 제거하고 식당 문서의 단어 빈도는 유지한다.",
+        "preprocessing=baseline은 기존 처리만 적용한다. clean은 같은 리뷰·240자 선택 이후 URL·HTML·이모티콘·반복 웃음/울음 문자를 정리하고 Unicode NFKC를 적용한다. clean_stopwords는 추가로 고정된 공통 칭찬·방문 표현을 Kiwi 형태 단위로 제거한다. 정확한 버전·불용어 목록·원본/처리 프로필 hash는 retriever_preprocessing에 기록한다.",
+        "bm25s의 Lucene 방식, k1=1.2·b=0.75를 첫 고정 설정으로 사용한다(실제 값은 config에 기록). cutoff별 식당 문서만으로 IDF·평균 문서 길이를 새로 계산하며, 점수가 같은 식당은 ID 오름차순이다.",
+        "기존 Liquid 실험과 리뷰 선택 기준은 같지만, BM25에는 500 BPE 토큰 제한을 적용하지 않는다. 따라서 Liquid와의 차이는 검색 방식과 입력 잘림 차이를 함께 포함한다.",
+        "이미 방문한 식당과 점수 0인 식당은 후보에서 뺀다. query·식당 토큰이 없으면 빈 후보를 반환하되 평가 사용자에서 제외하지 않는다. 최대 100개로 평가하며 후보가 모자라도 임의로 채우지 않는다. 임베딩·외부 API·신경망 학습은 없다.",
+    )
+    leakage_checks = {"profiles_from_historical_interactions_only": True,
+                      "bm25_statistics_from_historical_restaurant_documents_only": True}
+
+    def __init__(self):
+        self.query_users: tuple[int, ...] = ()
+
+    def config_type(self):
+        from rating_recsys.retrieval.bm25 import BM25Config
+        return BM25Config
+
+    def prepare_fit(self, queries):
+        self.query_users = tuple(query.user_id for query in queries)
+
+    def fit(self, model_config, interactions, texts, callback=None):
+        from rating_recsys.retrieval.bm25 import BM25Retriever
+        if texts is None:
+            raise ValueError("BM25 needs review texts")
+        return BM25Retriever(model_config).fit(interactions, texts, self.query_users, callback)
+
+    def model_summary(self, model):
+        return {**model.metadata, "retriever_preprocessing": dict(model.metadata)}
+
+    def diagnostics(self, model, model_config, queries):
+        return {"query_profile_coverage": sum(q.user_id in model.user_tokens for q in queries)
+                / len(queries) if queries else 0.0}
+
+    def save_artifacts(self, model, run_dir):
+        return model.save(run_dir / "bm25_index_test")
+
+
 CANDIDATE_MODELS: dict[str, CandidateModel] = {
-    model.name: model for model in (LightGCNCandidate(), DeepCoNNCandidate())
+    model.name: model for model in (LightGCNCandidate(), DeepCoNNCandidate(), BM25Candidate())
 }
 
 

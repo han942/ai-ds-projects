@@ -188,6 +188,20 @@ def render_report(manifest: dict, metrics: dict, *, has_plot: bool = False) -> s
     if chosen.get("profile_preprocessing"):
         position = lines.index("## 3. 학습 곡선 (validation)")
         lines[position:position] = _embedding_notes(chosen, refit)
+    if chosen.get("retriever_preprocessing"):
+        position = lines.index("## 3. 학습 곡선 (validation)")
+        lines[position:position] = [
+            "### 로컬 BM25 색인과 프로필", "",
+            "| 구간 | 검색 사용자 | query 토큰 있음 | query 토큰 없음 | 색인 식당 | 색인 토큰 | 어휘 수 |",
+            "|---|---:|---:|---:|---:|---:|---:|",
+            *[f"| {phase} | {row['input_users']:,} | {row['users_with_query_tokens']:,} | "
+              f"{row['users_without_query_tokens']:,} | {row['indexed_restaurants']:,} | "
+              f"{row['indexed_tokens']:,} | {row['vocabulary_size']:,} |"
+              for phase, row in (("Validation", chosen), ("Test", refit))],
+            "", "학습 loss나 반복 학습은 없다. epoch 1은 cutoff별 색인 생성 한 번을 나타낸다. "
+            "본문·색인 토큰 hash와 전처리는 metrics.json에 기록했다. "
+            "Test 색인·식당 ID 대응·사용자 query 토큰은 bm25_index_test/에 저장했다.", "",
+        ]
     if has_plot:
         lines += [f"![learning curve]({CURVE_FILE})", ""]
     has_rmse = any("rmse" in p for p in chosen["curve"])
@@ -257,6 +271,27 @@ def render_report(manifest: dict, metrics: dict, *, has_plot: bool = False) -> s
             + f" | {_num(row[f'ndcg_at_{rk}'])} | {_pct(row[f'catalog_coverage_at_{k}'])} | "
             f"{_float(row.get(f'novelty_at_{k}'))} |"
         )
+
+    lines += ["", f"후보 순서의 Top-{rk} 추가 지표 (재랭킹 없음):", "",
+              f"| 후보 | Precision@{rk} | MRR@{rk} | MAP@{rk} |",
+              "|---|---:|---:|---:|"]
+    for stage in (STAGE1, name, *manifest["fusions"]):
+        row = test[stage]
+        lines.append(f"| {labels[stage]} | {_pct(row[f'precision_at_{rk}'])} | "
+                     f"{_num(row[f'mrr_at_{rk}'])} | {_num(row[f'map_at_{rk}'])} |")
+    pairs = metrics.get("observed_pair_diagnostics", {}).get("test")
+    if pairs:
+        lines += ["", "### 관측 만족도 쌍 순서 정확도 · 보조 진단", "",
+                  f"실제 미래 방문 중 만족도 등급이 다른 두 식당이 모두 Top-{k} 후보에 있을 때만 "
+                  "비교한다. 사용자별 정확도의 평균이며, 미검색·미방문 식당의 순서는 추정하지 않는다. "
+                  "설정·결합 선택에는 사용하지 않는다. 각 후보의 평가 가능한 사용자 집합이 다르므로 "
+                  "이 수치만으로 후보 전체의 우열을 판단하지 않는다.", "",
+                  "| 후보 | 쌍 순서 정확도 | 비교 사용자 | 비교 쌍 | 올바른 쌍 |",
+                  "|---|---:|---:|---:|---:|"]
+        for stage, row in pairs.items():
+            lines.append(f"| {labels[stage]} | {_pct(row['accuracy'])} | "
+                         f"{row['evaluated_queries']:,} | {row['compared_pairs']:,} | "
+                         f"{row['correct_pairs']:,} |")
 
     lines += [
         "",

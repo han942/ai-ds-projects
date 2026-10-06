@@ -45,6 +45,7 @@ from rating_recsys.datasets.models import Interaction
 from rating_recsys.datasets.split import build_global_temporal_split
 from rating_recsys.evaluation.metrics import (
     RankingObservation,
+    evaluate_observed_pairs,
     evaluate_rankings,
     query_scores,
 )
@@ -653,6 +654,15 @@ def stage_metrics(
         STAGE1: rating_diagnostics(queries, candidates.ordered[STAGE1], config.candidate_cutoffs),
         "r0_candidate_order": rating_diagnostics(queries, candidates.ordered[STAGE1], config.ranking_cutoffs),
         "r1_lambdarank": rating_diagnostics(queries, ranked_ids(ranked), config.ranking_cutoffs),
+    }
+    # Same complete C5 candidate pool before/after ranking, diagnostic only.
+    metrics["observed_pair_diagnostics"] = {
+        "r0_candidate_order": evaluate_observed_pairs(
+            observations(queries, candidates.ordered[STAGE1])
+        ),
+        "r1_lambdarank": evaluate_observed_pairs(
+            observations(queries, ranked_ids(ranked))
+        ),
     }
     return metrics
 

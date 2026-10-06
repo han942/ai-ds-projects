@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from rating_recsys.datasets.split import build_global_temporal_split
-from rating_recsys.evaluation.metrics import RankingObservation, evaluate_rankings
+from rating_recsys.evaluation.metrics import RankingObservation, evaluate_observed_pairs, evaluate_rankings
 from rating_recsys.experiments.config import ExperimentConfig
 from rating_recsys.experiments.pipeline import _generator, build_context, window_training_arrays
 from rating_recsys.experiments.queries import build_prefix_queries, build_training_windows
@@ -73,6 +73,40 @@ class RankingMetricTests(unittest.TestCase):
 
 def window_config(**kwargs):
     return replace(SMALL, **{"ranker_training_mode": "window", "ranker_label_mode": "rating", **kwargs})
+
+
+def test_observed_pair_accuracy_macro_grades_and_missing_targets():
+    result = evaluate_observed_pairs((
+        # Three pairs; two correct (2 > 0, 2 > 1), one inversion (0 < 1).
+        RankingObservation("q1", 1, {1: 2, 2: 0, 3: 1}, (1, 99, 2, 3)),
+        # One inverted pair; same-grade pair is excluded. Item 7 was not retrieved.
+        RankingObservation("q2", 2, {4: 2, 5: 2, 6: 0, 7: 1}, (6, 4)),
+        RankingObservation("q3", 3, {8: 0, 9: 0}, (8, 9)),
+        RankingObservation("q4", 4, {10: 2, 11: 0}, (10, 90)),
+    ))
+    assert result == {
+        "accuracy": (2 / 3) / 2, "queries": 4, "eligible_queries": 3,
+        "evaluated_queries": 2, "eligible_pairs": 9,
+        "compared_pairs": 4, "correct_pairs": 2,
+    }
+
+
+def test_observed_pairs_use_delivered_order_when_scores_tie():
+    grades = {1: 2, 2: 0}
+    assert evaluate_observed_pairs((RankingObservation("a", 1, grades, (1, 2)),))["accuracy"] == 1
+    assert evaluate_observed_pairs((RankingObservation("a", 1, grades, (2, 1)),))["accuracy"] == 0
+
+
+def test_observed_pairs_without_comparable_pairs_are_undefined():
+    assert evaluate_observed_pairs(())["accuracy"] is None
+    assert evaluate_observed_pairs((RankingObservation("q", 1, {1: 2, 2: 0}, (1,)),))["accuracy"] is None
+
+
+def test_observed_pairs_reject_duplicate_order_and_invalid_grades():
+    with pytest.raises(ValueError, match="duplicate"):
+        evaluate_observed_pairs((RankingObservation("q", 1, {1: 2}, (1, 1)),))
+    with pytest.raises(ValueError, match="0/1/2"):
+        evaluate_observed_pairs((RankingObservation("q", 1, {1: 3}, (1,)),))
 
 
 def test_raw_rating_labels_preserve_half_stars_without_changing_evaluation():

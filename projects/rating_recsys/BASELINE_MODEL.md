@@ -42,7 +42,7 @@ paired bootstrap 95% CI [−0.005053, +0.002694]는 0을 포함한다. 이번 �
 | 최종 NDCG@10 | 0.029360 | 기존 graded relevance 기준의 순위 품질 지표 |
 | 최종 Recall@10 | 4.1284% | 기존 positive(3점 이상) test 식당 중 최종 추천 10개에 포함된 비율 |
 
-출처: [2026-10-02 shrinkage 비교의 baseline 조건](./artifacts/comparisons/shrinkage/20261002T062004863532Z-e7896add/report.md).
+출처: [Baseline overview의 과거 shrinkage 기록](./reports/baseline.md).
 확정한 연구 질문·test label·평가 지표와 다음 실험은 [PLAN.md](./PLAN.md#연구-질문과-평가-기준)에 있다.
 
 현재 baseline은 선택한 개인별 만족도 정답을 구현한 Window 모델이다. 모든 후속 모델도

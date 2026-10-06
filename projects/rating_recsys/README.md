@@ -89,8 +89,20 @@ Test는 T2 이후 약 145일 동안의 여러 실제 방문으로 구성된다. 
 | 고평점 추천 진단 | 4점 이상 Recall@10 | 실제 고평점 식당이 Top-10에 포함됐는가? |
 | 별점 예측 모델만 해당 | 모든 test 평점의 MAE/RMSE | 방문한 식당에 줄 평점을 얼마나 정확히 예측했는가? |
 | 저평점 진단 | 실제 3점 미만 방문의 Top-K 포함 수·비율 | 나중에 낮은 점수를 준 식당을 상위에 둔 사례는 얼마인가? |
+| 순서 보조 진단 | 관측 만족도 쌍 순서 정확도 | 같은 C5 후보에 포함된 실제 평가 식당 쌍에서 더 높은 만족도 등급을 위에 두었는가? |
 
 Validation Graded NDCG@10으로 설정을 고르고, test Graded NDCG@10은 최종 비교에 한 번 사용한다. MAE/RMSE는 별점 예측값을 출력하는 모델에만 적용한다. 낮은 MAE가 좋은 추천 순위를 보장하지 않으므로 순위 지표와 따로 해석한다.
+
+관측 만족도 쌍 순서 정확도는 **인사이트용 보조 지표**이며 학습·설정 선택에는 사용하지 않는다.
+기존 등급 0·1·2가 서로 다른 실제 평가 식당 둘이 모두 C5 후보에 있는 경우만 비교한다.
+사용자별 정확도를 동일 가중 평균하며, 평가 사용자 수·비교 쌍 수·전체 관측 등급 차이 쌍 수를 함께 기록한다.
+동일 등급과 미관측·후보 밖 식당은 제외한다. 비교 쌍이 없으면 0% 대신 미정의(‘–’)로 표시한다.
+Top-10 전체 성능이나 저평점 회피의 증거로 확대 해석하지 않는다.
+향후 baseline 실행은 자동으로 기록하며, 기존 실행은 저장된 순위만으로 계산할 수 있다.
+
+```bash
+python -m rating_recsys.evaluation.pair_diagnostics --run-dir artifacts/runs/20261004T125314601899Z-e7896add
+```
 
 선택한 공통 만족도 기준은 **이력이 적으면 기존 기준을 유지하고, 충분하면 사용자의 과거 평균
 평점도 활용하는 것**이다. 이 기준은 구현·검증됐으며 Window baseline과 후속 모델을 모두
@@ -108,6 +120,7 @@ Validation Graded NDCG@10으로 설정을 고르고, test Graded NDCG@10은 최�
 | 최종 Recall@10 | 3.6502% | 등급 > 0 test 식당 |
 | 4점 이상 Recall@10 | 3.5105% | 4점 이상 방문이 있는 사용자 |
 | 실제 3점 미만 방문의 Top-10 포함 | 3 / 43 (6.98%) | 관측된 저평점 방문 |
+| 관측 만족도 쌍 순서 정확도 · 보조 | 50.88% | 동일 C5 후보 안의 실제 등급 차이 쌍; 사용자별 평균 |
 
 선택된 ranker는 leaves 63 / min_child_samples 100 / trees 76이다. Test 이력 사용자
 1,580명 중 862명에게 개인 기준을 적용했다. R0 후보 순서의 NDCG@10은 0.026590이며,
@@ -115,6 +128,11 @@ R1 − R0의 95% CI가 0을 포함해 이번 실행에서는 재정렬의 이득
 현재 ranker는 별점을 출력하지 않아 MAE/RMSE는 없다. 과거 2026-10-02 수치는
 평가 등급·학습 방식이 달라 직접 비교하지 않는다.
 출처: [실행 보고서](./artifacts/runs/20261004T125314601899Z-e7896add/report.md).
+
+쌍 순서 보조 지표는 2026-10-05에 기존 저장 순위로 사후 계산했다. Test 91명·234쌍에서
+R0 C5 순서 54.11%, R1 LambdaRank 50.88%다. 전체 관측 등급 차이 5,566쌍 중 둘 다 C5에
+검색된 부분집합으로, 전형적인 지표를 대체하거나 새로운 학습 목표로 사용하지 않는다.
+Validation 결과·입력 hash·계산 출처는 같은 run의 `observed_pair_diagnostics.json`에 기록했다.
 
 ## 실험 비교 범위
 
@@ -125,30 +143,62 @@ R1 − R0의 95% CI가 0을 포함해 이번 실행에서는 재정렬의 이득
 | 재정렬 | R0 기준 순서, LambdaRank, Jev decision model |
 | 추천 구조 (RQ2) | Two-stage, Two-Tower, Generative Retrieval, 리스트 생성형 추천 |
 
-현재 baseline은 C5 + LambdaRank다. 리뷰 임베딩 후보 비교는 Liquid 무료 모델로 전체 실행·검증했다. 이번 조건의 후보 Recall은 C5보다 낮아 baseline은 유지한다. BM25·Two-Tower·Jev·생성형 추천은 비교 계획이며, 상태와 실험 순서는 [PLAN.md](./PLAN.md)에 정리한다. baseline의 feature·label·설정·평가 절차는 [BASELINE_MODEL.md](./BASELINE_MODEL.md)에서 확인할 수 있다.
+현재 baseline은 C5 + LambdaRank다. Liquid 리뷰 임베딩과 Kiwi+BM25 후보 비교를 전체 실행·검증했다. 두 실험의 단독·선택 결합 Recall@100은 C5보다 낮아 baseline을 유지한다. Two-Tower·Jev·생성형 추천은 비교 계획이다. 상태와 실험 순서는 [PLAN.md](./PLAN.md)에 정리한다. baseline의 feature·label·설정·평가 절차는 [BASELINE_MODEL.md](./BASELINE_MODEL.md)에서 확인할 수 있다.
 
-### 리뷰 임베딩 후보 실험
+### 지금까지의 실험 리포트
 
-사용자의 cutoff 이전 **최근 평점 4점 이상 리뷰 최대 5개**와 식당에 cutoff 이전에 달린 **최근 평점 4점 이상 리뷰 최대 10개**를 각각 하나의 문서로 묶는다. 리뷰 본문만 넣으며 메뉴·상호·지역 정보는 넣지 않는다. Liquid LFM2.5-Embedding-350M 무료 모델의 1,024차원 벡터로 방문하지 않은 식당 후보를 찾고, C5 및 C1/C4와의 RRF 결합을 같은 검증·테스트 분할에서 비교한다. 모델·차원·프로필 버전·본문 hash로 임베딩을 캐시한다. 현재 비교는 후보 단계만이며 새 후보용 LambdaRank 재학습은 후속 작업이다.
+실험 결과는 [리포트 모음](./reports/README.md)에서 주제별로 확인한다. README는
+현재 구성과 실행 방법을 안내하고, 핵심 결과와 판단은 카테고리별 overview에 모았다.
 
-사용자에는 `query: `, 식당에는 `document: `를 붙인다. 모델의 512토큰 한도를 지키기 위해 고정 revision의 토크나이저로 각 입력을 최대 500토큰까지 보존하며, 최신 리뷰를 먼저 넣는다. 한 요청에 최대 **128개 입력**, **동시 요청 2개**, **분당 18회**로 제한해 비동기 처리한다. 응답 순서가 달라도 입력별 벡터를 맞춰 저장하고, 일시적 오류는 재시도하며 완료 배치는 즉시 캐시한다. 제공자의 최대 배치 크기 128은 실제 API 호출로 확인했다.
+| 주제 | 결과·한계·원본 실행 링크 |
+|---|---|
+| BM25·Kiwi·전처리 | [BM25 overview](./reports/bm25.md) |
+| Liquid 리뷰 임베딩·집계 | [리뷰 임베딩 overview](./reports/review_embeddings.md) |
+| 15명 리뷰 속성과 실제 평점 | [리뷰 표현 일치성 리포트](./reports/review_aspects.md) |
+| C1·LightGCN·LambdaRank·지역 피처 | [Baseline 진단 리포트](./reports/baseline.md) |
 
-| 후보 | Test Recall@100 |
-|---|---:|
-| C5 | 20.1626% |
-| Liquid 리뷰 임베딩 단독 | 3.2757% |
-| C1+C4+임베딩 RRF | 16.5637% |
+카테고리별 짧은 overview를 유지한다. Jev는 아직 미실행이므로 목록에만 표시한다.
+실행별 상세 리포트·생성 파일·API 응답은 로컬 ZIP으로 보관했고, 입력 데이터·
+baseline 파일·임베딩 캐시는 재사용을 위해 유지했다. [보관 위치와 복원 방법](./artifacts/README.md).
 
-검증으로 선택한 결합은 C5 대비 **−3.5989%p**이며 paired bootstrap 95% 구간은 −4.4422~−2.8003%p다. 임베딩 프로필이 없는 테스트 사용자 35명도 평가 모수에 유지했다. 캐시에 저장된 고유 입력 10,505개, API 성공 배치 83회, 3,604,868토큰의 실제 기록 비용은 **$0**이다. [실행 보고서](./artifacts/comparisons/review_embeddings/20261004T143348304525Z-e7896add/report.md)에 전체 조건·후보 지표·입력 잘림·API 사용량을 정리했다.
+### Kiwi + BM25 실행
 
-프로젝트 `.env`의 `OPENROUTER_API_KEY=`에 본인의 키를 넣는다. 이 값이 있으면 이전 셸 환경변수보다 우선한다. 값은 Git에 올리지 않는다.
+사용자의 과거 선호 리뷰와 식당 리뷰를 Kiwi로 토큰화하고 BM25로 후보를 검색한다.
+토큰화·색인·검색은 로컬 CPU에서 수행한다. 리뷰 선택·전처리·평가 조건과 결과는
+[BM25 overview](./reports/bm25.md)에 있다.
+
+```bash
+.venv/bin/python -m rating_recsys.experiments.compare_cli bm25 \
+  --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl \
+  --baseline-run artifacts/runs/20261004T125314601899Z-e7896add \
+  --satisfaction-mode history-aware --satisfaction-min-history 10 --no-plot
+```
+
+과거 BM25를 참조하는 전처리 비교·검증에는 `bm25.zip`을 먼저 복원한다.
+새 실행의 출력은 `artifacts/comparisons/bm25/<run_id>/`에 저장된다.
+
+### 리뷰 임베딩 실행
+
+사용자의 과거 선호 리뷰와 식당 리뷰를 각각 문서로 묶어 Liquid 무료 모델로
+임베딩한다. 요청당 최대 128개 입력·동시 요청 2개·분당 18회로 실행하고 완료된
+벡터를 캐시한다. 현재 기본값과 개별 리뷰 집계 비교의 중단 상태는
+[리뷰 임베딩 overview](./reports/review_embeddings.md)에 있다.
+
+프로젝트 `.env`의 `OPENROUTER_API_KEY=`에 키를 넣는다. 이 값이 있으면 이전 셸
+환경변수보다 우선한다. 키는 Git에 올리지 않는다.
 
 ```bash
 .venv/bin/python -m rating_recsys.experiments.review_embedding_cli --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl --satisfaction-mode history-aware --satisfaction-min-history 10 --dry-run
 .venv/bin/python -m rating_recsys.experiments.review_embedding_cli --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl --satisfaction-mode history-aware --satisfaction-min-history 10 --label liquid-free-async-128
 ```
 
-`--dry-run`은 API를 호출하지 않고 시점별 프로필 수와 캐시 누락량을 출력한다. 실제 실행은 `artifacts/comparisons/review_embeddings/<run_id>/report.md`에 후보 비교를 기록한다. 무료 API 호출 제한이나 일시적 실패로 중단되면 저장된 벡터는 다음 실행에서 재사용한다. [모델 사양](https://openrouter.ai/liquid/lfm-2.5-embedding-350m:free)과 [공식 query/document 사용법](https://huggingface.co/LiquidAI/LFM2.5-Embedding-350M)을 참고했다.
+`--dry-run`은 API 호출 없이 시점별 프로필 수와 캐시 누락량을 출력한다. 실제
+실행은 API를 호출하고 `artifacts/comparisons/review_embeddings/<run_id>/`에 저장한다.
+
+### 리뷰 속성 결과 재계산
+
+완료된 15명 속성 진단은 [리뷰 속성 overview](./reports/review_aspects.md)에 정리했다.
+과거 추출 응답을 재검토하거나 API 없이 재계산할 때는 [복원 안내](./artifacts/README.md)를 따른다.
 
 ## 제한 사항
 
@@ -168,7 +218,8 @@ R1 − R0의 95% CI가 0을 포함해 이번 실행에서는 재정렬의 이득
 | [`src/rating_recsys/`](./src/rating_recsys/) | 데이터·후보 검색·순위 학습·평가 코드 |
 | [`artifacts/snapshots/`](./artifacts/snapshots/) | 고정 interaction·리뷰 입력 |
 | [`artifacts/prepared/`](./artifacts/prepared/) | 재사용 학습 feature·label·group·후보 자료 |
-| [`artifacts/runs/`](./artifacts/runs/) · [`artifacts/comparisons/`](./artifacts/comparisons/) | 실행·비교 결과와 추천 목록 |
+| [리포트 모음](./reports/README.md) | BM25·임베딩·리뷰 속성·baseline 주제별 결과 |
+| [실험 파일 안내](./artifacts/README.md) | 상세 리포트·생성 파일의 로컬 보관·복원 방법 |
 | [`migrations/`](./migrations/) · [`queries/`](./queries/) | DB schema 변경과 데이터 검증 SQL |
 | [`crawler/`](./crawler/) | 데이터 수집 코드·수집 상태 |
 | [Legacy V1 README](./legacy/v1_rating_prediction/README.md) | 이전 평점 예측 프로젝트 |
