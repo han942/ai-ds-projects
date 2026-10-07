@@ -71,8 +71,8 @@ class LightGBMLambdaRanker:
         """Fit one row per candidate; ``groups`` holds the row count per query.
 
         ``eval_set`` is ``(features, labels, groups)``. Early stopping monitors
-        NDCG at ``ranking_k`` only, so the chosen iteration optimizes the
-        reported cutoff.
+        candidate-normalized NDCG at ``ranking_k`` only. Its IDCG uses the
+        candidate labels, not unretrieved positives used by end-to-end metrics.
         """
 
         if not len(groups):

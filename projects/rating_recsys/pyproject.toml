@@ -29,6 +29,13 @@ experiment = [
 deepconn = [
     "torch==2.5.1",
 ]
+# Frozen E5 CPU inference; install with the CPU wheel index used above.
+local-embeddings = [
+    "torch==2.5.1",
+    "transformers==4.56.2",
+    "sentence-transformers==5.1.1",
+    "tokenizers>=0.21,<0.23",
+]
 # Local Korean lexical retrieval (rating-recsys-compare bm25).
 bm25 = [
     "bm25s==0.2.14",

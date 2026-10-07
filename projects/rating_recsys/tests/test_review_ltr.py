@@ -115,7 +115,7 @@ def test_interrupted_extraction_records_partial_progress(tmp_path, monkeypatch):
     monkeypatch.setattr(review_ltr, "load_snapshot", lambda _: [])
     monkeypatch.setattr(review_ltr, "load_review_texts", lambda *args: ({}, {}))
     monkeypatch.setattr(review_ltr, "ProfileFormatter", lambda *args: LocalFormatter())
-    monkeypatch.setattr(review_ltr, "OpenRouterEmbeddingCache", lambda *args, **kwargs: cache)
+    monkeypatch.setattr(review_ltr, "create_embedding_cache", lambda *args, **kwargs: cache)
     monkeypatch.setattr(review_ltr, "profile_preflight", lambda *args, **kwargs: (
         ["query: a", "document: b"], {"unique_inputs": 2, "unique_cache_misses": 2},
     ))
@@ -123,6 +123,7 @@ def test_interrupted_extraction_records_partial_progress(tmp_path, monkeypatch):
     result = review_ltr.main([
         "--snapshot", str(tmp_path / "snapshot.jsonl"),
         "--artifacts-dir", str(tmp_path), "--embed-only",
+        "--embedding-model", "liquid/lfm-2.5-embedding-350m:free",
     ])
     diagnostic = json.loads((tmp_path / "diagnostics/review_ltr_preflight.json").read_text())
     assert result == 130

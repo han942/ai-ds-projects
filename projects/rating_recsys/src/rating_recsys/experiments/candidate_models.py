@@ -420,7 +420,7 @@ class ReviewEmbeddingsCandidate(CandidateModel):
 
         from rating_recsys.config import PROJECT_ROOT
         from rating_recsys.retrieval.review_embeddings import (
-            OpenRouterEmbeddingCache, ProfileFormatter, fit_review_profiles,
+            create_embedding_cache, ProfileFormatter, fit_review_profiles,
         )
 
         if texts is None:
@@ -433,7 +433,7 @@ class ReviewEmbeddingsCandidate(CandidateModel):
             cache_path = PROJECT_ROOT / cache_path
         formatter = ProfileFormatter(model_config, cache_path.parent / "tokenizers")
         import sys
-        with OpenRouterEmbeddingCache(
+        with create_embedding_cache(
             cache_path, model_config, progress=lambda message: print(message, file=sys.stderr, flush=True),
         ) as cache:
             fitted = fit_review_profiles(

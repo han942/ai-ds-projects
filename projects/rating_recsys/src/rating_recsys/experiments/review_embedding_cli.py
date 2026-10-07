@@ -19,7 +19,7 @@ from rating_recsys.experiments.candidate_models import ReviewEmbeddingsCandidate
 from rating_recsys.experiments.compare_cli import build_parser, configs_from_args, load_or_fetch_texts
 from rating_recsys.experiments.queries import build_window_queries
 from rating_recsys.experiments.snapshot import review_texts_path
-from rating_recsys.retrieval.review_embeddings import OpenRouterEmbeddingCache, ProfileFormatter, profile_api_inputs
+from rating_recsys.retrieval.review_embeddings import create_embedding_cache, ProfileFormatter, profile_api_inputs
 
 
 def main(argv: Sequence[str] | None = None) -> dict[str, object]:
@@ -54,7 +54,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
         cache_path = Path(grid[0].cache_path)
         if not cache_path.is_absolute():
             cache_path = PROJECT_ROOT / cache_path
-        with OpenRouterEmbeddingCache(cache_path, grid[0]) as cache:
+        with create_embedding_cache(cache_path, grid[0]) as cache:
             all_inputs = []
             for phase, history, window, cutoff in phases:
                 queries, _ = build_window_queries(

@@ -26,6 +26,8 @@ LIQUID_MODEL = "liquid/lfm-2.5-embedding-350m:free"
 TOKENIZER_REVISION = "bf1712f052040a2af193db0fe1e98c6f0df2da0f"
 NEMOTRON_MODEL = "nvidia/nemotron-3-embed-1b:free"
 NEMOTRON_TOKENIZER_REVISION = "c0c9fea93ea424587517f2c59e20db9f1d6bf615"
+E5_MODEL = "intfloat/multilingual-e5-small"
+E5_REVISION = "614241f622f53c4eeff9890bdc4f31cfecc418b3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,8 +57,22 @@ class ReviewEmbeddingConfig:
     tokenizer_repo: str = "LiquidAI/LFM2.5-Embedding-350M"
     tokenizer_revision: str = TOKENIZER_REVISION
     cache_path: str = "artifacts/review_embedding_cache.sqlite"
+    backend: str = "openrouter"
+    model_revision: str | None = None
+    local_model_cache: str | None = None
+    cpu_threads: int = 6
 
     def __post_init__(self) -> None:
+        if self.backend not in ("openrouter", "local"):
+            raise ValueError("Unknown embedding backend")
+        if self.backend == "local":
+            if self.model != E5_MODEL or not self.model_revision or self.api_role_mode:
+                raise ValueError("Local embeddings require pinned E5 without API roles")
+            if self.dimensions != 384 or self.max_document_tokens > 512:
+                raise ValueError("E5 requires 384 dimensions and at most 512 tokens")
+            object.__setattr__(self, "profile_version", "positive-recent-local-e5-prefix-v1")
+        elif self.model == E5_MODEL:
+            raise ValueError("E5 must use the local backend")
         if self.api_role_mode:
             # Invalidate prefix-only probes: API roles change the representation.
             object.__setattr__(self, "profile_version", "positive-recent-token-budget-api-roles-v3")
@@ -69,7 +85,7 @@ class ReviewEmbeddingConfig:
         if self.user_profile == "liked_items" and self.aggregation != "review_mean":
             raise ValueError("liked_items requires review_mean aggregation")
         for name in ("dimensions", "batch_size", "concurrency", "max_user_reviews",
-                     "max_item_reviews", "max_review_chars", "max_document_tokens"):
+                     "max_item_reviews", "max_review_chars", "max_document_tokens", "cpu_threads"):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be positive")
         if self.requests_per_minute <= 0 or self.max_retries < 0:
@@ -93,6 +109,12 @@ def model_embedding_config(model: str, cache_path: str) -> ReviewEmbeddingConfig
             tokenizer_repo="nvidia/Nemotron-3-Embed-1B-BF16",
             tokenizer_revision=NEMOTRON_TOKENIZER_REVISION, cache_path=cache_path,
         )
+    if model == E5_MODEL:
+        return ReviewEmbeddingConfig(
+            model=model, backend="local", model_revision=E5_REVISION,
+            dimensions=384, batch_size=8, concurrency=1, document_prefix="passage",
+            tokenizer_repo=E5_MODEL, tokenizer_revision=E5_REVISION, cache_path=cache_path,
+        )
     raise ValueError(f"Unsupported review embedding model: {model}")
 
 
@@ -113,10 +135,21 @@ class ProfileFormatter:
             directory.mkdir(parents=True, exist_ok=True)
             path = directory / f"{config.tokenizer_revision}.tokenizer.json"
             if not path.exists():
-                url = (f"https://huggingface.co/{config.tokenizer_repo}/resolve/"
-                       f"{config.tokenizer_revision}/tokenizer.json")
-                with urllib.request.urlopen(url, timeout=60) as response:
-                    data = response.read()
+                if config.backend == "local":
+                    from huggingface_hub import try_to_load_from_cache
+
+                    cached = try_to_load_from_cache(
+                        config.tokenizer_repo, "tokenizer.json", revision=config.tokenizer_revision,
+                        cache_dir=config.local_model_cache,
+                    )
+                    if not isinstance(cached, str):
+                        raise RuntimeError("Pinned E5 tokenizer is missing from the local model cache")
+                    data = Path(cached).read_bytes()
+                else:
+                    url = (f"https://huggingface.co/{config.tokenizer_repo}/resolve/"
+                           f"{config.tokenizer_revision}/tokenizer.json")
+                    with urllib.request.urlopen(url, timeout=60) as response:
+                        data = response.read()
                 staging = path.with_suffix(".staging")
                 staging.write_bytes(data)
                 staging.replace(path)
@@ -290,8 +323,8 @@ class AsyncRequestLimiter:
             self.next_at = time.monotonic() + self.interval
 
 
-class OpenRouterEmbeddingCache:
-    """Content-addressed cache with bounded async batches and durable progress."""
+class EmbeddingCache:
+    """Shared SQLite persistence; backend implementations generate missing vectors."""
 
     def __init__(self, path: Path, config: ReviewEmbeddingConfig,
                  progress: Callable[[str], None] | None = None):
@@ -317,7 +350,7 @@ class OpenRouterEmbeddingCache:
     def close(self) -> None:
         self.db.close()
 
-    def __enter__(self) -> OpenRouterEmbeddingCache:
+    def __enter__(self) -> EmbeddingCache:
         return self
 
     def __exit__(self, *_: object) -> None:
@@ -332,6 +365,14 @@ class OpenRouterEmbeddingCache:
         keys = {self._key(text) for text in texts}
         return sum(self.db.execute("SELECT 1 FROM vectors WHERE key=?", (key,)).fetchone() is None
                    for key in keys)
+
+class OpenRouterEmbeddingCache(EmbeddingCache):
+    """Content-addressed cache with bounded async batches and durable progress."""
+
+    def __init__(self, path, config, progress=None):
+        if config.backend != "openrouter":
+            raise ValueError("OpenRouter cache cannot generate local embeddings")
+        super().__init__(path, config, progress)
 
     def totals(self) -> dict[str, object]:
         row = self.db.execute(
@@ -479,6 +520,148 @@ class OpenRouterEmbeddingCache:
                     await asyncio.gather(*tasks, return_exceptions=True)
                     raise
         return {text: found[self._key(text)] for text in texts} if materialize else {}
+
+
+class LocalEmbeddingCache(EmbeddingCache):
+    """Pinned float32 E5 on CPU; load once and commit every missing batch."""
+
+    def __init__(self, path, config, progress=None):
+        if config.backend != "local":
+            raise ValueError("Local cache requires a local embedding config")
+        super().__init__(path, config, progress)
+        self.encoder = None
+        self.identity = {
+            "model": config.model, "model_revision": config.model_revision,
+            "tokenizer_revision": config.tokenizer_revision,
+            "profile_version": config.profile_version, "dimensions": config.dimensions,
+            "max_tokens": config.max_document_tokens, "dtype": "float32", "device": "cpu",
+        }
+        self.identity_hash = hashlib.sha256(json.dumps(self.identity, sort_keys=True).encode()).hexdigest()
+        self.usage.update(local_batches=0, local_documents=0, local_seconds=0.0)
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS local_batches "
+            "(id INTEGER PRIMARY KEY, created_at TEXT, identity TEXT, documents INTEGER, seconds REAL)"
+        )
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS local_encoders (identity TEXT PRIMARY KEY, metadata TEXT)"
+        )
+        self.db.commit()
+
+    def _key(self, text):
+        return hashlib.sha256(json.dumps([self.identity, text], ensure_ascii=False,
+                                        sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    def _load_encoder(self):
+        import importlib.metadata
+
+        try:
+            import torch
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:
+            raise RuntimeError("Install the local-embeddings extra to run E5") from exc
+        torch.set_num_threads(self.config.cpu_threads)
+        if torch.get_num_interop_threads() != 1:
+            try:
+                torch.set_num_interop_threads(1)
+            except RuntimeError:
+                # Other ranker/retrieval work may have initialized this global pool.
+                if self.progress:
+                    self.progress("[local embeddings] retaining the initialized inter-op thread pool")
+        try:
+            encoder = SentenceTransformer(
+                self.config.model, revision=self.config.model_revision, device="cpu",
+                cache_folder=self.config.local_model_cache, local_files_only=True,
+                trust_remote_code=False, model_kwargs={"torch_dtype": torch.float32},
+            )
+        except OSError as exc:
+            raise RuntimeError("Pinned E5 weights are missing; restore the local model cache") from exc
+        if encoder.get_sentence_embedding_dimension() != self.config.dimensions:
+            raise RuntimeError("Unexpected E5 embedding dimension")
+        encoder.max_seq_length = self.config.max_document_tokens
+        metadata = {**self.identity, "cpu_threads": self.config.cpu_threads,
+                    "interop_threads": torch.get_num_interop_threads(),
+                    "packages": {name: importlib.metadata.version(name) for name in
+                                 ("torch", "transformers", "sentence-transformers", "tokenizers")}}
+        self.db.execute("INSERT OR REPLACE INTO local_encoders VALUES (?,?)",
+                        (self.identity_hash, json.dumps(metadata)))
+        self.db.commit()
+        return encoder
+
+    def totals(self):
+        row = self.db.execute(
+            "SELECT COUNT(*),COALESCE(SUM(documents),0),COALESCE(SUM(seconds),0) "
+            "FROM local_batches WHERE identity=?", (self.identity_hash,),
+        ).fetchone()
+        return {**dict(zip(("local_batches", "local_documents", "local_seconds"), row)),
+                "api_requests": 0, "cost_usd": 0.0}
+
+    def prefill(self, texts):
+        self._fill(texts, materialize=False)
+
+    def embed(self, texts):
+        return self._fill(texts, materialize=True)
+
+    def _fill(self, texts, *, materialize):
+        unique = {self._key(text): text for text in texts}
+        found, missing = {}, []
+        for digest, text in unique.items():
+            column = "vector" if materialize else "1"
+            row = self.db.execute(f"SELECT {column} FROM vectors WHERE key=?", (digest,)).fetchone()
+            if row:
+                self.usage["cache_hits"] += 1
+                if materialize:
+                    found[digest] = json.loads(row[0])
+            else:
+                missing.append((digest, text))
+        if missing and self.encoder is None:
+            self.encoder = self._load_encoder()
+        if self.config.batch_size > 1:
+            # Group similar lengths within bounded windows to reduce CPU padding.
+            window = self.config.batch_size * 32
+            missing = [pair for offset in range(0, len(missing), window)
+                       for pair in sorted(missing[offset:offset + window],
+                                          key=lambda pair: len(pair[1]), reverse=True)]
+        started, last_log = time.perf_counter(), 0.0
+        for start in range(0, len(missing), self.config.batch_size):
+            batch = missing[start:start + self.config.batch_size]
+            before = time.perf_counter()
+            output = self.encoder.encode(
+                [text for _, text in batch], batch_size=self.config.batch_size,
+                normalize_embeddings=True, show_progress_bar=False, convert_to_numpy=True, prompt="",
+            )
+            elapsed = time.perf_counter() - before
+            if output.shape != (len(batch), self.config.dimensions):
+                raise RuntimeError("Unexpected local embedding dimensions or row count")
+            try:
+                vectors = [_unit(vector) for vector in output]
+            except ValueError as exc:
+                raise RuntimeError("Local encoder returned an invalid embedding") from exc
+            # Vectors and usage commit together, so interruptions cannot overstate progress.
+            with self.db:
+                self.db.executemany(
+                    "INSERT INTO vectors(key,vector,model,dimensions) VALUES (?,?,?,?)",
+                    [(digest, json.dumps(vector), self.config.model, self.config.dimensions)
+                     for (digest, _), vector in zip(batch, vectors)],
+                )
+                self.db.execute("INSERT INTO local_batches(created_at,identity,documents,seconds) VALUES (?,?,?,?)",
+                                (datetime.now(timezone.utc).isoformat(), self.identity_hash, len(batch), elapsed))
+            self.usage["local_batches"] += 1
+            self.usage["local_documents"] += len(batch)
+            self.usage["local_seconds"] += elapsed
+            if materialize:
+                found.update((digest, vector) for (digest, _), vector in zip(batch, vectors))
+            now = time.perf_counter()
+            completed = start + len(batch)
+            if self.progress and (start == 0 or now - last_log >= 30 or completed == len(missing)):
+                self.progress(f"[local embeddings] {completed}/{len(missing)} inputs cached; "
+                              f"{completed / (now - started):.1f} inputs/s; API requests=0")
+                last_log = now
+        return {text: found[self._key(text)] for text in texts} if materialize else {}
+
+
+def create_embedding_cache(path, config, progress=None):
+    backend = LocalEmbeddingCache if config.backend == "local" else OpenRouterEmbeddingCache
+    return backend(path, config, progress=progress)
 
 
 class ReviewEmbeddingCandidates:

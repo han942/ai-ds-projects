@@ -1,8 +1,10 @@
-# Baseline 진단 overview
+# Baseline: 후보 검색과 재정렬
 
 질문: 현재 성능은 어떤 신호에서 나오며 지역에 얼마나 집중되는가?
 
 **현재 판단: C1과 LightGCN의 결합은 후보 회수를 보완했다. LambdaRank의 test 재정렬 이득과 전국 취향 추천은 확인하지 못했다.**
+
+## 결과
 
 | 구성 | Test Recall@100 | NDCG@10 |
 |---|---:|---:|
@@ -13,6 +15,8 @@
 
 2026-10-04~05, snapshot `e7896add5b4b5939`, Window 학습·history-aware 만족도·최소 이력 10건, seed=42, 후보 K=100, 주 지표 test 사용자 1,573명이다. 입력·정답 정의와 현재 모델은 [BASELINE_MODEL](../BASELINE_MODEL.md)에 있다.
 
+## 해석
+
 C5−C1 Recall 차이는 +2.35%p [1.22, 3.43]%p, C5−C4는 +1.41%p [0.27, 2.52]%p였다. C4 단독과 C1 단독의 차이 구간은 0을 포함한다. LambdaRank−C5 순서의 NDCG 차이 −0.001124도 구간이 0을 포함한다.
 
 지역 피처의 gain 비중은 7.25%지만 성능 기여율을 뜻하지 않는다. 제거 재학습의 NDCG는 0.025467→0.024286이며 차이 구간은 0을 포함한다. 주 활동 지역 비중은 C5 Top-10 82.24%, LambdaRank 84.14%, 지역 피처 제거 후에도 78.57%다. 지역은 방문·공동 방문 신호에도 담길 수 있다.
@@ -21,4 +25,6 @@ C5−C1 Recall 차이는 +2.35%p [1.22, 3.43]%p, C5−C4는 +1.41%p [0.27, 2.52]
 
 과거 Prefix/절대 등급의 shrinkage λ=10은 test NDCG 0.029360→0.028207로 개선을 확인하지 못했다. Validation은 0.025151→0.027881이었다. 현재 Window/개인별 정답과 직접 비교하지 않는다.
 
-근거: [현재 baseline 실행](../artifacts/runs/20261004T125314601899Z-e7896add/report.md), 진단 run `20261005T140007795282Z-e7896add`, shrinkage run `20261002T062004863532Z-e7896add`. 상세 생성 파일은 `baseline_features.zip`·`shrinkage.zip`, 과거 리포트는 `detailed_reports.zip`에 보관했다. [보관·복원 안내](../artifacts/README.md).
+## 근거
+
+[현재 baseline 실행](../artifacts/runs/20261004T125314601899Z-e7896add/report.md), 진단 run `20261005T140007795282Z-e7896add`, shrinkage run `20261002T062004863532Z-e7896add`. 상세 생성 파일은 `baseline_features.zip`·`shrinkage.zip`, 과거 리포트는 `detailed_reports.zip`에 보관했다. [보관·복원 안내](../artifacts/README.md).

@@ -27,8 +27,8 @@ from rating_recsys.experiments.snapshot import (
     load_review_texts, review_texts_path,
 )
 from rating_recsys.retrieval.review_embeddings import (
-    EmbeddingAPIError, OpenRouterEmbeddingCache, ProfileFormatter,
-    LIQUID_MODEL, NEMOTRON_MODEL, model_embedding_config, profile_api_inputs,
+    EmbeddingAPIError, create_embedding_cache, ProfileFormatter,
+    E5_MODEL, LIQUID_MODEL, NEMOTRON_MODEL, model_embedding_config, profile_api_inputs,
 )
 from rating_recsys.ranking.review_features import REVIEW_FEATURE_NAMES, ReviewFeatureBuilder
 
@@ -68,7 +68,9 @@ def profile_preflight(rows, texts, config, embedding, formatter, cache, *, log=l
     return list(docs), {
         "embedding": embedding.to_dict(), "windows": audit, "unique_inputs": len(docs),
         "unique_cache_misses": misses, "missing_by_role": missing_by_role,
-        "estimated_requests": sum(math.ceil(count / embedding.batch_size) for count in missing_by_role.values()),
+        "estimated_requests": (sum(math.ceil(count / embedding.batch_size) for count in missing_by_role.values())
+                               if embedding.backend == "openrouter" else 0),
+        "estimated_local_batches": math.ceil(misses / embedding.batch_size) if embedding.backend == "local" else 0,
         "preprocessing": formatter.metadata(),
         "inputs_sha256": hashlib.sha256(json.dumps(sorted(docs), ensure_ascii=False).encode()).hexdigest(),
     }
@@ -227,10 +229,12 @@ def main(argv=None):
     parser.add_argument("--review-texts", type=Path)
     parser.add_argument("--artifacts-dir", type=Path, default=PROJECT_ROOT / "artifacts")
     parser.add_argument("--embedding-cache", type=Path)
-    parser.add_argument("--embedding-model", choices=(LIQUID_MODEL, NEMOTRON_MODEL), default=LIQUID_MODEL)
+    parser.add_argument("--embedding-model", choices=(E5_MODEL, LIQUID_MODEL, NEMOTRON_MODEL), default=E5_MODEL)
     parser.add_argument("--embedding-batch-size", type=int)
     parser.add_argument("--embedding-concurrency", type=int)
     parser.add_argument("--embedding-request-timeout", type=float)
+    parser.add_argument("--local-model-cache", type=Path)
+    parser.add_argument("--cpu-threads", type=int)
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--dry-run", action="store_true")
     action.add_argument("--embed-only", action="store_true")
@@ -238,21 +242,28 @@ def main(argv=None):
     rows = load_snapshot(args.snapshot)
     texts, texts_meta = load_review_texts(args.review_texts or review_texts_path(args.snapshot), rows)
     config = ExperimentConfig(ranker_training_mode="window", satisfaction_mode="history-aware")
-    cache_name = "nemotron_review_embedding_cache.sqlite" if args.embedding_model == NEMOTRON_MODEL else "review_embedding_cache.sqlite"
+    cache_name = {E5_MODEL: "e5_review_embedding_cache.sqlite",
+                  NEMOTRON_MODEL: "nemotron_review_embedding_cache.sqlite",
+                  LIQUID_MODEL: "review_embedding_cache.sqlite"}[args.embedding_model]
     cache_path = args.embedding_cache or args.artifacts_dir / cache_name
     embedding = model_embedding_config(args.embedding_model, str(cache_path))
     overrides = {name: value for name, value in (
         ("batch_size", args.embedding_batch_size), ("concurrency", args.embedding_concurrency),
         ("request_timeout_seconds", args.embedding_request_timeout),
+        ("cpu_threads", args.cpu_threads),
     ) if value is not None}
+    if embedding.backend == "local":
+        overrides["local_model_cache"] = str(args.local_model_cache or args.artifacts_dir / "local_models")
     embedding = replace(embedding, **overrides)
     formatter = ProfileFormatter(embedding, args.artifacts_dir / "tokenizers")
     log = lambda s: print(s, file=sys.stderr, flush=True)
-    with OpenRouterEmbeddingCache(cache_path, embedding, progress=log) as cache:
+    with create_embedding_cache(cache_path, embedding, progress=log) as cache:
         if args.dry_run or args.embed_only:
             docs, preflight = profile_preflight(rows, texts, config, embedding, formatter, cache, log=log)
             preflight["api_requests_sent"] = 0
-            diagnostic = "review_ltr_nemotron_preflight.json" if args.embedding_model == NEMOTRON_MODEL else "review_ltr_preflight.json"
+            diagnostic = {E5_MODEL: "review_ltr_e5_preflight.json",
+                          NEMOTRON_MODEL: "review_ltr_nemotron_preflight.json",
+                          LIQUID_MODEL: "review_ltr_preflight.json"}[args.embedding_model]
             path = args.artifacts_dir / "diagnostics" / diagnostic
             write_json(path, preflight)
             if args.embed_only:
@@ -265,7 +276,7 @@ def main(argv=None):
                     preflight["embedding_status"] = "blocked_api"
                     preflight["error"] = {"http_status": exc.status, "daily_limit": exc.daily_limit}
                 except RuntimeError as exc:
-                    preflight["embedding_status"] = "blocked_request"
+                    preflight["embedding_status"] = "blocked_local" if embedding.backend == "local" else "blocked_request"
                     preflight["error"] = {"message": str(exc)}
                 preflight["usage"] = cache.usage
                 preflight["api_requests_sent"] = cache.usage["api_requests"]
@@ -274,7 +285,7 @@ def main(argv=None):
             print(json.dumps({k: v for k, v in preflight.items() if k not in ("windows", "preprocessing")}, ensure_ascii=False, indent=2))
             if preflight.get("embedding_status") == "paused":
                 return 130
-            return 2 if preflight.get("embedding_status") in {"blocked_api", "blocked_request"} else 0
+            return 2 if preflight.get("embedding_status") in {"blocked_api", "blocked_request", "blocked_local"} else 0
         # Fail before expensive graph fitting when vectors have not been restored.
         _, preflight = profile_preflight(rows, texts, config, embedding, formatter, cache, log=log)
         if preflight["unique_cache_misses"]:

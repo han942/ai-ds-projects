@@ -153,13 +153,13 @@ Validation 결과·입력 hash·계산 출처는 같은 run의 `observed_pair_di
 | 주제 | 결과·한계·원본 실행 링크 |
 |---|---|
 | BM25·Kiwi·전처리 | [BM25 overview](./reports/bm25.md) |
-| Liquid 리뷰 임베딩·집계 | [리뷰 임베딩 overview](./reports/review_embeddings.md) |
+| E5 CPU·LTR·재검증·과거 임베딩 | [리뷰 임베딩](./reports/review_embeddings.md) |
 | 15명 리뷰 속성과 실제 평점 | [리뷰 표현 일치성 리포트](./reports/review_aspects.md) |
 | C1·LightGCN·LambdaRank·지역 피처 | [Baseline 진단 리포트](./reports/baseline.md) |
 
 카테고리별 짧은 overview를 유지한다. Jev는 아직 미실행이므로 목록에만 표시한다.
 실행별 상세 리포트·생성 파일·API 응답은 로컬 ZIP으로 보관했고, 입력 데이터·
-baseline 파일·임베딩 캐시는 재사용을 위해 유지했다. [보관 위치와 복원 방법](./artifacts/README.md).
+현재 baseline 파일·E5 모델과 본 캐시는 재사용을 위해 유지한다. 이전 Liquid 설치·벡터 캐시와 불필요한 V1 실행 파일은 사용자 요청으로 삭제했다. [현재 보존 범위](./artifacts/README.md).
 
 ### Kiwi + BM25 실행
 
@@ -179,21 +179,17 @@ baseline 파일·임베딩 캐시는 재사용을 위해 유지했다. [보관 �
 
 ### 리뷰 임베딩 실행
 
-사용자의 과거 선호 리뷰와 식당 리뷰를 각각 문서로 묶어 Liquid 무료 모델로
-임베딩한다. 요청당 최대 128개 입력·동시 요청 2개·분당 18회로 실행하고 완료된
-벡터를 캐시한다. 현재 기본값과 개별 리뷰 집계 비교의 중단 상태는
-[리뷰 임베딩 overview](./reports/review_embeddings.md)에 있다.
-
-프로젝트 `.env`의 `OPENROUTER_API_KEY=`에 키를 넣는다. 이 값이 있으면 이전 셸
-환경변수보다 우선한다. 키는 Git에 올리지 않는다.
+현재 리뷰 LTR의 기본 encoder는 로컬 E5 Small이다. 완료된 59,455개 입력 캐시를
+읽으며 API 키가 필요 없다. 전체 결과·CPU 비용·재검증·미실행 후속 실험은
+[리뷰 임베딩](./reports/review_embeddings.md)에 모았다. 이전 Liquid 설치와 캐시는 삭제했다.
 
 ```bash
-.venv/bin/python -m rating_recsys.experiments.review_embedding_cli --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl --satisfaction-mode history-aware --satisfaction-min-history 10 --dry-run
-.venv/bin/python -m rating_recsys.experiments.review_embedding_cli --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl --satisfaction-mode history-aware --satisfaction-min-history 10 --label liquid-free-async-128
+.venv/bin/python -m rating_recsys.experiments.review_ltr \
+  --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl --dry-run
 ```
 
-`--dry-run`은 API 호출 없이 시점별 프로필 수와 캐시 누락량을 출력한다. 실제
-실행은 API를 호출하고 `artifacts/comparisons/review_embeddings/<run_id>/`에 저장한다.
+`--dry-run`은 입력·캐시 점검만 수행한다. 원 조건의 LTR 재학습과 저장 결과의
+읽기 전용 재검증은 [재현 안내](./reports/review_embeddings.md#재현)를 따른다.
 
 ### 리뷰 속성 결과 재계산
 
@@ -222,7 +218,7 @@ baseline 파일·임베딩 캐시는 재사용을 위해 유지했다. [보관 �
 | [실험 파일 안내](./artifacts/README.md) | 상세 리포트·생성 파일의 로컬 보관·복원 방법 |
 | [`migrations/`](./migrations/) · [`queries/`](./queries/) | DB schema 변경과 데이터 검증 SQL |
 | [`crawler/`](./crawler/) | 데이터 수집 코드·수집 상태 |
-| [Legacy V1 README](./legacy/v1_rating_prediction/README.md) | 이전 평점 예측 프로젝트 |
+| [V1 수집 원본 안내](./legacy/v1_rating_prediction/README.md) | 적재용 CSV 보존; 이전 실행 코드·모델·캐시는 삭제 |
 
 ## 실행
 
