@@ -365,6 +365,8 @@ MF(Matrix Factorization)의 기본 관계는 `μ + b_u + b_i + p_u·q_i`다.
 
 텍스트 표현과 결합 원칙:
 
+- 2026-10-06 요청에 따라 후보 성능과 별도로, **C5를 고정한 리뷰 임베딩 LTR 비교**를 구현했다. 기존 16개 피처에 cosine·프로필 존재 여부·선택 리뷰 수 6개를 추가하며 Window마다 과거 리뷰만 사용한다. 이전 Liquid 캐시는 현재 환경에 없다. 사용자 지정 `nvidia/nemotron-3-embed-1b:free`의 2,048차원과 query/passage API 역할을 검증했고, 2026-10-07 v3 입력 8,960개를 저장한 뒤 사용자 요청으로 추출을 보류했다. 코드와 부분 캐시는 보존했으며 전체 임베딩과 LTR 성능 평가는 미완료다. [조건과 실행 방법](./reports/review_ltr.md).
+
 - 첫 OpenRouter 후보 실험은 `liquid/lfm-2.5-embedding-350m:free` 1,024차원, 사용자 최근 긍정 리뷰 5개·식당 최근 긍정 리뷰 10개로 고정해 실행했다. Query/document 접두어와 최대 500토큰, 배치 128·동시성 2·분당 18회로 처리했다. 후보 Recall은 단독 3.28%, C5 결합 16.56%로 C5 20.16%보다 낮아 채택하지 않았다. 다른 encoder 비교는 후속 실험이다.
 - Cutoff 이전 리뷰로 학습하는 글자 n-gram TF-IDF 또는 자체 학습 표현도 비교한다. TF-IDF는 표현의 겹침을 측정하며 문장 의미를 이해하는 모델로 해석하지 않는다.
 - 좋아한/싫어한 식당의 프로필을 구분한다. 본인 리뷰와 방문 식당의 다른 사용자 리뷰를 비교하며, 이력이 부족하면 공통 프로필을 쓴다.
@@ -688,7 +690,7 @@ python crawler/diningcode_playwright.py --national-regions --max-restaurants 0 -
 사용자별 근거는 `detailed_reports.zip`, 생성 파일은 `review_aspects.zip`에 보관했다.
 API 없이 재계산하려면 [보관 안내](./artifacts/README.md)의 복원 명령을 먼저 실행한다.
 
-속성 추출 보완·추천 모델 결합·사용자 시뮬레이션은 아직 실행하지 않았다.
+근거 문장 번호를 선택하는 v4 코드와 입력 준비는 완료했다. 새 방식의 실제 추출·표본 검토·v3/v4 품질 비교는 아직 실행하지 않았다. [보완 내용과 실행 방법](./reports/review_aspects.md#근거-추출-v4-보완). 추천 모델 결합·사용자 시뮬레이션도 아직 미실행이다.
 
 ## 파일 관리
 

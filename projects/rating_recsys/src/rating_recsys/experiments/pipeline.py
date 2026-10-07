@@ -466,6 +466,7 @@ def window_training_arrays(
     through: date,
     phase: str = "train",
     log: Callable[[str], None] = lambda _: None,
+    feature_transform: Callable | None = None,
 ) -> TrainingArrays:
     """Multiple observed restaurants per query, with cutoff-safe real candidates.
 
@@ -491,6 +492,13 @@ def window_training_arrays(
             feature_names=config.feature_names, training_config=config,
             rating_shrinkage_strength=config.rating_shrinkage_strength,
         )
+        if feature_transform is not None:
+            # Retrieval/labels are already fixed. Only append past-only features.
+            transformed = feature_transform(rows[:index], queries, candidates)
+            if (transformed.ndim != 2 or len(transformed) != len(candidates.features)
+                    or not np.array_equal(transformed[:, :len(config.feature_names)], candidates.features)):
+                raise ValueError("Training feature transform must preserve all baseline rows and columns")
+            candidates.features = transformed
         offset = 0
         catalog_ids = set(builder.context.item_counts)
         for query, size in zip(queries, candidates.group_sizes, strict=True):

@@ -6,6 +6,7 @@
 |---|---|---|
 | BM25·한국어 토큰화·전처리 | [BM25](./bm25.md) | 완료, 이번 조건 미채택 |
 | OpenRouter 리뷰 임베딩·집계 | [리뷰 임베딩](./review_embeddings.md) | 문서 임베딩 완료·미채택, 개별 집계는 한도 중단 |
+| 리뷰 임베딩 LTR 피처 | [리뷰 LTR](./review_ltr.md) | 사용자 요청으로 보류, 부분 캐시 보존, LTR 성능 미평가 |
 | LLM 리뷰 속성 추출 | [리뷰 속성](./review_aspects.md) | 선행 진단 완료, 추천 결합 미실행 |
 | Baseline·협업·지역·평점 보정 | [Baseline 진단](./baseline.md) | 현재 기준과 진단 정리 |
 | Jev 재랭킹 | 실행 결과가 생기면 overview 작성 | 계획, 미실행 |

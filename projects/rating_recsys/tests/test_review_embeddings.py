@@ -14,6 +14,7 @@ from rating_recsys.experiments.candidate_models import ReviewEmbeddingsCandidate
 from rating_recsys.experiments.comparison import run_candidate_comparison
 from rating_recsys.retrieval.review_embeddings import (
     OpenRouterEmbeddingCache, ProfileFormatter, ReviewEmbeddingCandidates, ReviewEmbeddingConfig, build_profiles,
+    LIQUID_MODEL, NEMOTRON_MODEL, model_embedding_config,
 )
 from support import SMALL, _interaction, synthetic_interactions, texts_for
 
@@ -56,6 +57,27 @@ def test_cache_reuses_content_and_recommendation_excludes_history():
                 assert cache.usage["api_requests"] == 0
                 assert cache.usage["cache_hits"] == 2
         assert len(calls) == 3
+
+
+def test_prefill_saves_vectors_and_warm_prefill_does_not_decode_or_request_again():
+    with TemporaryDirectory() as directory:
+        config = ReviewEmbeddingConfig(dimensions=2)
+        calls = []
+
+        async def fake_request(self, session, texts, limiter):
+            calls.extend(texts)
+            return [[1, 0] for _ in texts]
+
+        with OpenRouterEmbeddingCache(Path(directory) / "vectors.sqlite", config) as cache:
+            with patch.object(OpenRouterEmbeddingCache, "_request", fake_request), \
+                 patch("rating_recsys.retrieval.review_embeddings.configured_api_key", return_value="local-test"):
+                assert cache.prefill(["first", "second", "first"]) is None
+            assert cache.missing_count(["first", "second"]) == 0
+            with patch("rating_recsys.retrieval.review_embeddings.json.loads", side_effect=AssertionError("prefill must not decode")), \
+                 patch("rating_recsys.retrieval.review_embeddings.configured_api_key", side_effect=AssertionError("no API")):
+                cache.prefill(["first", "second"])
+            assert cache.embed(["first"]) == {"first": [1, 0]}
+        assert calls == ["first", "second"]
 
 
 @pytest.mark.parametrize('aggregation,user_profile', [
@@ -110,6 +132,71 @@ def test_token_budget_keeps_role_prefix_and_counts_untruncated_source():
     assert len(tokenizer.encode(query).ids) <= 8
     assert formatter.stats["max_original_tokens"] == 31
     assert formatter.stats["truncated_profiles"] == 1
+
+
+def test_model_defaults_use_correct_tokenizer_dimensions_prefixes_and_distinct_cache_keys():
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "vectors.sqlite"
+        liquid = model_embedding_config(LIQUID_MODEL, str(path))
+        nemotron = model_embedding_config(NEMOTRON_MODEL, str(path))
+        assert liquid.dimensions == 1024
+        assert nemotron.dimensions == 2048
+        assert nemotron.api_role_mode
+        assert nemotron.tokenizer_repo == "nvidia/Nemotron-3-Embed-1B-BF16"
+        formatter = ProfileFormatter(nemotron, Path("unused"), tokenizer=toy_tokenizer())
+        assert formatter.format("profile", "query") == "query: profile"
+        assert formatter.format("profile", "document") == "passage: profile"
+        with OpenRouterEmbeddingCache(path, liquid) as first, OpenRouterEmbeddingCache(path, nemotron) as second:
+            assert first._key("query: profile") != second._key("query: profile")
+            old = ReviewEmbeddingConfig(cache_path=str(path))
+            with OpenRouterEmbeddingCache(path, old) as historical:
+                assert first._key("query: profile") == historical._key("query: profile")
+
+
+def test_nemotron_api_roles_are_batched_separately_and_cache_invalidates_prefix_only_vectors():
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "vectors.sqlite"
+        config = replace(model_embedding_config(NEMOTRON_MODEL, str(path)), dimensions=2, batch_size=8)
+        prefix_only = replace(config, api_role_mode=False)
+        # replace keeps init=False fields at defaults; v2 differs from API-role v3.
+        requests = []
+
+        async def fake_request(self, session, texts, limiter):
+            requests.append([self._api_input(text) for text in texts])
+            assert len({self._api_input(text)[0] for text in texts}) == 1
+            return [[1, 0] for _ in texts]
+
+        with OpenRouterEmbeddingCache(path, config) as cache, OpenRouterEmbeddingCache(path, prefix_only) as old:
+            assert cache._key("query: profile") != old._key("query: profile")
+            with patch.object(OpenRouterEmbeddingCache, "_request", fake_request), \
+                 patch("rating_recsys.retrieval.review_embeddings.configured_api_key", return_value="local-test"):
+                cache.embed(["passage: doc", "query: user", "passage: another", "query: other"])
+        assert requests == [[("query", "user"), ("query", "other")],
+                            [("passage", "doc"), ("passage", "another")]]
+
+
+def test_nemotron_request_sends_role_and_raw_text_without_double_prefix():
+    with TemporaryDirectory() as directory:
+        config = replace(model_embedding_config(NEMOTRON_MODEL, str(Path(directory) / "vectors.sqlite")), dimensions=2)
+        sent = []
+
+        class Response:
+            status = 200
+            async def __aenter__(self): return self
+            async def __aexit__(self, *_): pass
+            async def json(self, **_): return {"data": [{"index": 0, "embedding": [1, 0]}]}
+
+        class Session:
+            def post(self, url, *, json):
+                sent.append(json)
+                return Response()
+
+        class Limiter:
+            async def acquire(self): pass
+
+        with OpenRouterEmbeddingCache(Path(config.cache_path), config) as cache:
+            asyncio.run(cache._request(Session(), ["passage: restaurant profile"], Limiter()))
+        assert sent == [{"model": NEMOTRON_MODEL, "input": ["restaurant profile"], "input_type": "passage"}]
 
 
 def test_async_batches_are_bounded_and_out_of_order_responses_keep_mapping():

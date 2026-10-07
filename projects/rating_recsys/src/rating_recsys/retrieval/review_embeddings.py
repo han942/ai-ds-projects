@@ -13,6 +13,7 @@ import urllib.request
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from itertools import zip_longest
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
@@ -23,6 +24,8 @@ from rating_recsys.retrieval.review_profiles import _selected_reviews, build_pro
 PROFILE_VERSION = "positive-recent-token-budget-prefix-v2"
 LIQUID_MODEL = "liquid/lfm-2.5-embedding-350m:free"
 TOKENIZER_REVISION = "bf1712f052040a2af193db0fe1e98c6f0df2da0f"
+NEMOTRON_MODEL = "nvidia/nemotron-3-embed-1b:free"
+NEMOTRON_TOKENIZER_REVISION = "c0c9fea93ea424587517f2c59e20db9f1d6bf615"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +41,7 @@ class ReviewEmbeddingConfig:
     concurrency: int = 2
     requests_per_minute: float = 18.0
     max_retries: int = 3
+    request_timeout_seconds: float = 120.0
     aggregation: str = "concat"
     user_profile: str = "own_reviews"
     max_user_reviews: int = 5
@@ -45,11 +49,19 @@ class ReviewEmbeddingConfig:
     max_review_chars: int = 240
     max_document_tokens: int = 500
     min_rating: float = 4.0
+    query_prefix: str = "query"
+    document_prefix: str = "document"
+    api_role_mode: bool = False
     tokenizer_repo: str = "LiquidAI/LFM2.5-Embedding-350M"
     tokenizer_revision: str = TOKENIZER_REVISION
     cache_path: str = "artifacts/review_embedding_cache.sqlite"
 
     def __post_init__(self) -> None:
+        if self.api_role_mode:
+            # Invalidate prefix-only probes: API roles change the representation.
+            object.__setattr__(self, "profile_version", "positive-recent-token-budget-api-roles-v3")
+        if not self.query_prefix.strip() or not self.document_prefix.strip():
+            raise ValueError("embedding role prefixes must be nonempty")
         if self.aggregation not in ("concat", "review_mean"):
             raise ValueError("aggregation must be concat or review_mean")
         if self.user_profile not in ("own_reviews", "liked_items"):
@@ -62,11 +74,26 @@ class ReviewEmbeddingConfig:
                 raise ValueError(f"{name} must be positive")
         if self.requests_per_minute <= 0 or self.max_retries < 0:
             raise ValueError("requests_per_minute must be positive and max_retries nonnegative")
+        if not math.isfinite(self.request_timeout_seconds) or self.request_timeout_seconds <= 0:
+            raise ValueError("request_timeout_seconds must be finite and positive")
         if self.model == LIQUID_MODEL and self.max_document_tokens > 500:
             raise ValueError("Liquid inputs use at most 500 tokens, reserving space below its 512-token limit")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+def model_embedding_config(model: str, cache_path: str) -> ReviewEmbeddingConfig:
+    """Verified model defaults; preserve Liquid's historical input/cache keys."""
+    if model == LIQUID_MODEL:
+        return ReviewEmbeddingConfig(cache_path=cache_path)
+    if model == NEMOTRON_MODEL:
+        return ReviewEmbeddingConfig(
+            model=model, dimensions=2048, document_prefix="passage", api_role_mode=True,
+            tokenizer_repo="nvidia/Nemotron-3-Embed-1B-BF16",
+            tokenizer_revision=NEMOTRON_TOKENIZER_REVISION, cache_path=cache_path,
+        )
+    raise ValueError(f"Unsupported review embedding model: {model}")
 
 
 class ProfileFormatter:
@@ -106,7 +133,8 @@ class ProfileFormatter:
     def format(self, text: str, role: str) -> str:
         if role not in ("query", "document"):
             raise ValueError("role must be query or document")
-        value = f"{role}: {text}"
+        prefix = self.config.query_prefix if role == "query" else self.config.document_prefix
+        value = f"{prefix}: {text}"
         encoded = self.tokenizer.encode(value)
         original_count = len(encoded.ids)
         limit = self.config.max_document_tokens
@@ -133,6 +161,9 @@ class ProfileFormatter:
     def metadata(self) -> dict[str, object]:
         return {"tokenizer_repo": self.config.tokenizer_repo,
                 "tokenizer_revision": self.config.tokenizer_revision,
+                "query_prefix": self.config.query_prefix,
+                "document_prefix": self.config.document_prefix,
+                "api_role_mode": self.config.api_role_mode,
                 "tokenizer_sha256": self.tokenizer_sha256, **self.stats}
 
 
@@ -313,6 +344,13 @@ class OpenRouterEmbeddingCache:
         import aiohttp
 
         payload = {"model": self.config.model, "input": list(texts)}
+        if self.config.api_role_mode:
+            roles = {self._api_input(text)[0] for text in texts}
+            if len(roles) != 1:
+                raise ValueError("An embedding request must have one API input role")
+            payload["input_type"] = roles.pop()
+            # API adds its model-specific role prompt; do not double-prefix.
+            payload["input"] = [self._api_input(text)[1] for text in texts]
         if self.config.send_dimensions:
             payload["dimensions"] = self.config.dimensions
         for attempt in range(self.config.max_retries + 1):
@@ -371,28 +409,49 @@ class OpenRouterEmbeddingCache:
     def embed(self, texts: Sequence[str]) -> dict[str, list[float]]:
         return asyncio.run(self.embed_async(texts))
 
-    async def embed_async(self, texts: Sequence[str]) -> dict[str, list[float]]:
+    def prefill(self, texts: Sequence[str]) -> None:
+        """Persist missing batches without holding the whole corpus in RAM."""
+        asyncio.run(self.embed_async(texts, materialize=False))
+
+    def _api_input(self, text: str) -> tuple[str, str]:
+        for prefix, role in ((self.config.query_prefix, "query"),
+                             (self.config.document_prefix, "passage")):
+            marker = f"{prefix}: "
+            if text.startswith(marker):
+                return role, text[len(marker):]
+        raise ValueError("Embedding input has no recognized role prefix")
+
+    async def embed_async(self, texts: Sequence[str], *, materialize: bool = True) -> dict[str, list[float]]:
         import aiohttp
 
         unique = {self._key(text): text for text in texts}
         found: dict[str, list[float]] = {}
         missing: list[tuple[str, str]] = []
         for digest, text in unique.items():
-            row = self.db.execute("SELECT vector FROM vectors WHERE key=?", (digest,)).fetchone()
+            column = "vector" if materialize else "1"
+            row = self.db.execute(f"SELECT {column} FROM vectors WHERE key=?", (digest,)).fetchone()
             if row:
-                found[digest] = json.loads(row[0])
+                if materialize:
+                    found[digest] = json.loads(row[0])
                 self.usage["cache_hits"] += 1
             else:
                 missing.append((digest, text))
-        batches = [missing[start:start + self.config.batch_size]
-                   for start in range(0, len(missing), self.config.batch_size)]
+        role_groups = ([missing] if not self.config.api_role_mode else [
+            [pair for pair in missing if self._api_input(pair[1])[0] == role]
+            for role in ("query", "passage")
+        ])
+        grouped_batches = [[group[start:start + self.config.batch_size]
+                            for start in range(0, len(group), self.config.batch_size)]
+                           for group in role_groups]
+        # A quota interruption should leave both user and item roles cached.
+        batches = [batch for pair in zip_longest(*grouped_batches) for batch in pair if batch]
         if batches:
             limiter = AsyncRequestLimiter(self.config.requests_per_minute)
             semaphore = asyncio.Semaphore(self.config.concurrency)
             completed = 0
             async with aiohttp.ClientSession(
                 headers={"Authorization": f"Bearer {configured_api_key()}", "X-Title": "rating_recsys"},
-                timeout=aiohttp.ClientTimeout(total=120),
+                timeout=aiohttp.ClientTimeout(total=self.config.request_timeout_seconds),
             ) as session:
                 async def process(batch):
                     nonlocal completed
@@ -404,7 +463,8 @@ class OpenRouterEmbeddingCache:
                              for (digest, _), vector in zip(batch, vectors)],
                         )
                         self.db.commit()
-                        found.update((digest, vector) for (digest, _), vector in zip(batch, vectors))
+                        if materialize:
+                            found.update((digest, vector) for (digest, _), vector in zip(batch, vectors))
                         completed += 1
                         if self.progress:
                             self.progress(f"[embeddings] {completed}/{len(batches)} batches cached; "
@@ -418,7 +478,7 @@ class OpenRouterEmbeddingCache:
                         task.cancel()
                     await asyncio.gather(*tasks, return_exceptions=True)
                     raise
-        return {text: found[self._key(text)] for text in texts}
+        return {text: found[self._key(text)] for text in texts} if materialize else {}
 
 
 class ReviewEmbeddingCandidates:
