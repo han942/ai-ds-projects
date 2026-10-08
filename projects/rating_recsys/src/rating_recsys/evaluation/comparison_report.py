@@ -75,6 +75,8 @@ def write_learning_curve(run_dir: Path, manifest: dict, metrics: dict) -> Path |
                 marker="o", markersize=3, label=row["name"], **style,
             )
     for stage, name, style in ((STAGE1, "C5", "--"), ("c1_item_item", "C1", ":")):
+        if stage not in validation:
+            continue
         value = 100 * validation[stage][f"recall_at_{k}"]
         recall_axis.axhline(value, color="gray", linestyle=style, label=f"{name} {value:.2f}%")
     loss_axis.set(title="Train loss / epoch-1 loss", xlabel="epoch", ylabel="relative loss")
@@ -152,6 +154,8 @@ def render_report(manifest: dict, metrics: dict, *, has_plot: bool = False) -> s
         f"- Validation으로 고른 결합: {labels[policy]} → test Recall@{k} "
         f"{_pct(test[policy][f'recall_at_{k}'])} ({_ci(policy_vs_c5, percent=True)} vs C5)",
     ]
+    if manifest.get("evidence_status") == "exploratory-reused-holdout":
+        lines += ["- Evidence: exploratory only. This historical test was seen in earlier experiments; bootstrap does not undo holdout reuse."]
     rmse = [float(p["rmse"]) for row in rows for p in row["curve"] if "rmse" in p]
     if rmse and "validation_mean_rating_rmse" in references:
         lines.append(
@@ -250,6 +254,7 @@ def render_report(manifest: dict, metrics: dict, *, has_plot: bool = False) -> s
         ]
 
     stages = [STAGE1, *REFERENCE_STAGES[:2], name, *manifest["fusions"], *REFERENCE_STAGES[2:]]
+    stages = [stage for stage in stages if stage in test]
     lines += [
         "",
         "## 5. 후보 결과",
@@ -298,7 +303,7 @@ def render_report(manifest: dict, metrics: dict, *, has_plot: bool = False) -> s
         "## 6. Test 비교 (paired bootstrap)",
         "",
         f"같은 사용자끼리 짝지은 bootstrap {config['bootstrap_samples']:,}회, 95% CI. "
-        "CI가 0을 포함하면 차이가 없다고 본다.",
+        "CI가 0을 포함하면 개선·악화를 확정할 근거가 부족하다. 차이 없음의 증명은 아니다.",
         "",
         f"| 후보 − C5 | Recall@20 | Recall@{k} | 이긴/진 사용자 (@{k}) |",
         "|---|---|---|---:|",

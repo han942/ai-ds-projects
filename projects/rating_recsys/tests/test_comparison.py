@@ -12,8 +12,8 @@ from unittest.mock import patch
 
 from rating_recsys.datasets.split import build_global_temporal_split
 from rating_recsys.experiments import compare_cli
-from rating_recsys.experiments.candidate_models import CANDIDATE_MODELS, CandidateModel
-from rating_recsys.experiments.comparison import policies, run_candidate_comparison
+from rating_recsys.experiments.candidate_models import CANDIDATE_MODELS, CandidateModel, LightGCNCandidate
+from rating_recsys.experiments.comparison import fusions, policies, require_prepared_window, run_candidate_comparison
 from rating_recsys.experiments.snapshot import write_review_texts, write_snapshot
 from support import (
     MODEL_CASES, SMALL, _without_timing, available_models, run_small,
@@ -27,7 +27,8 @@ def run_tiny(model, rows, root: Path, **kwargs):
     root.mkdir(parents=True, exist_ok=True)
     if model.needs_review_texts:
         kwargs.setdefault("texts", texts_for(rows))
-    kwargs.setdefault("grid", tiny_grid(model)[:1])
+    if "grid" not in kwargs:
+        kwargs["grid"] = tiny_grid(model)[:1]
     kwargs.setdefault("eval_every", 1)
     return run_candidate_comparison(
         model,
@@ -43,6 +44,39 @@ def run_tiny(model, rows, root: Path, **kwargs):
 
 
 class RegistryTests(unittest.TestCase):
+    def test_prepared_preflight_fails_closed_on_corrupt_files(self):
+        from types import SimpleNamespace
+        from rating_recsys.experiments.prepared import _digest, _file_digest
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            identity = {"fixture": "baseline", "kind": "validation"}
+            folder = root / f"validation-{_digest(identity)[:16]}"
+            folder.mkdir()
+            (folder / "data.npz").write_bytes(b"fixture arrays")
+            metadata = {"identity": identity, "arrays_sha256": _file_digest(folder / "data.npz")}
+            metadata["metadata_sha256"] = _digest(metadata)
+            (folder / "manifest.json").write_text(json.dumps(metadata))
+            cache = SimpleNamespace(enabled=True, rebuild=False, identity={"fixture": "baseline"}, root=root)
+            require_prepared_window(cache, "validation")
+            (folder / "data.npz").write_bytes(b"corrupt arrays")
+            with self.assertRaisesRegex(ValueError, "integrity"):
+                require_prepared_window(cache, "validation")
+            cache.rebuild = True
+            with self.assertRaisesRegex(ValueError, "existing prepared"):
+                require_prepared_window(cache, "validation")
+
+    def test_two_tower_scope_is_exactly_three_conditions(self):
+        model = CANDIDATE_MODELS["two_tower"]
+        self.assertEqual(model.comparison_sources, ("c5_c1_lightgcn_rrf",))
+        self.assertEqual(policies(model), ("two_tower", "rrf_c1_two_tower"))
+        self.assertEqual(fusions(model), {"rrf_c1_two_tower": ("c1_item_item", "two_tower")})
+        args = compare_cli.build_parser(model).parse_args(["--snapshot", "x.jsonl"])
+        config, grid = compare_cli.configs_from_args(model, args)
+        self.assertEqual(config.satisfaction_mode, "history-aware")
+        self.assertEqual(config.ranker_training_mode, "window")
+        self.assertEqual(len(grid), 1)
+        self.assertEqual(grid[0].epochs, 12)
+
     def test_every_registered_model_has_a_small_case(self) -> None:
         self.assertEqual(set(MODEL_CASES), set(CANDIDATE_MODELS))
 
@@ -72,6 +106,24 @@ class RegistryTests(unittest.TestCase):
 
 
 class ComparisonRunTests(unittest.TestCase):
+    def test_limited_sources_produce_only_requested_three_conditions(self):
+        class Limited(LightGCNCandidate):
+            name, title, letter = "limited", "Limited", "T"
+            comparison_sources = ("c5_c1_lightgcn_rrf",)
+            fusion_sources = (("c1_item_item",),)
+            evidence_status = "exploratory-reused-holdout"
+
+        rows = synthetic_interactions()
+        with tempfile.TemporaryDirectory() as directory:
+            result = run_tiny(Limited(), rows, Path(directory), grid=tiny_grid(LIGHTGCN)[:1])
+            expected = {"c5_c1_lightgcn_rrf", "limited", "rrf_c1_limited"}
+            for phase in ("validation", "test"):
+                self.assertEqual(set(result.metrics[phase]), expected)
+            self.assertEqual(set(result.manifest["fusions"]), {"rrf_c1_limited"})
+            self.assertNotIn("RRF C1+C4+T", (result.run_dir / "report.md").read_text())
+            self.assertIn("exploratory only", (result.run_dir / "report.md").read_text())
+            self.assertEqual(json.loads((result.run_dir / "status.json").read_text())["status"], "complete")
+
     def test_new_model_reuses_pipeline_baseline_candidates(self):
         rows = synthetic_interactions()
         with tempfile.TemporaryDirectory() as directory:

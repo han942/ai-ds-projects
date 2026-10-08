@@ -143,7 +143,7 @@ Validation 결과·입력 hash·계산 출처는 같은 run의 `observed_pair_di
 | 재정렬 | R0 기준 순서, LambdaRank, Jev decision model |
 | 추천 구조 (RQ2) | Two-stage, Two-Tower, Generative Retrieval, 리스트 생성형 추천 |
 
-현재 baseline은 C5 + LambdaRank다. Liquid 리뷰 임베딩과 Kiwi+BM25 후보 비교를 전체 실행·검증했다. 두 실험의 단독·선택 결합 Recall@100은 C5보다 낮아 baseline을 유지한다. Two-Tower·Jev·생성형 추천은 비교 계획이다. 상태와 실험 순서는 [PLAN.md](./PLAN.md)에 정리한다. baseline의 feature·label·설정·평가 절차는 [BASELINE_MODEL.md](./BASELINE_MODEL.md)에서 확인할 수 있다.
+현재 baseline은 C5 + LambdaRank다. Liquid·BM25·E5 Two-Tower 후보 비교를 실행·검증했다. 이번 단독·선택 결합 Recall@100은 C5보다 낮아 baseline을 유지한다. E5 Two-Tower는 기존 test를 재사용한 탐색 비교다. Jev·생성형 추천은 비교 계획이며 상태와 순서는 [PLAN.md](./PLAN.md)에 정리한다. baseline의 feature·label·설정·평가 절차는 [BASELINE_MODEL.md](./BASELINE_MODEL.md)에서 확인할 수 있다.
 
 ### 지금까지의 실험 리포트
 
@@ -153,7 +153,7 @@ Validation 결과·입력 hash·계산 출처는 같은 run의 `observed_pair_di
 | 주제 | 결과·한계·원본 실행 링크 |
 |---|---|
 | BM25·Kiwi·전처리 | [BM25 overview](./reports/bm25.md) |
-| E5 CPU·LTR·재검증·과거 임베딩 | [리뷰 임베딩](./reports/review_embeddings.md) |
+| E5 CPU·LTR·Two-Tower·재검증 | [리뷰 임베딩](./reports/review_embeddings.md) |
 | 15명 리뷰 속성과 실제 평점 | [리뷰 표현 일치성 리포트](./reports/review_aspects.md) |
 | C1·LightGCN·LambdaRank·지역 피처 | [Baseline 진단 리포트](./reports/baseline.md) |
 
@@ -190,6 +190,19 @@ Validation 결과·입력 hash·계산 출처는 같은 run의 `observed_pair_di
 
 `--dry-run`은 입력·캐시 점검만 수행한다. 원 조건의 LTR 재학습과 저장 결과의
 읽기 전용 재검증은 [재현 안내](./reports/review_embeddings.md#재현)를 따른다.
+
+### E5 Two-Tower 후보 비교
+
+동결된 E5 캐시로 C5, Two-Tower 단독, C1+Two-Tower RRF의 세 조건만 비교한다.
+기존 후보 캐시나 E5 입력·토크나이저 검증에 실패하면 중단하며, 새 임베딩·API·LTR 학습은 없다.
+아래는 소형 신경망을 다시 학습하는 명령이다. 결과·한계·CPU 비용은 [리뷰 임베딩 리포트](./reports/review_embeddings.md#two-tower-후보-비교)에 있다.
+
+```bash
+env OPENBLAS_NUM_THREADS=4 OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 \
+  .venv/bin/python -m rating_recsys.experiments.compare_cli two_tower \
+  --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl \
+  --max-epochs 12 --patience 3 --threads 4 --label e5-three-conditions --no-plot
+```
 
 ### 리뷰 속성 결과 재계산
 

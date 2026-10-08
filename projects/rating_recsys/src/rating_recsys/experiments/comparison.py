@@ -87,10 +87,9 @@ class ComparisonResult:
 def fusions(model: CandidateModel) -> dict[str, tuple[str, ...]]:
     """RRF policies tried with the new source: with C1, and with C1 + C4."""
 
-    return {
-        f"rrf_c1_{model.name}": ("c1_item_item", model.name),
-        f"rrf_c1_c4_{model.name}": ("c1_item_item", "c4_lightgcn", model.name),
-    }
+    sources = getattr(model, "fusion_sources", (("c1_item_item",), ("c1_item_item", "c4_lightgcn")))
+    return {"rrf_" + "_".join(member.split("_")[0] for member in members) + f"_{model.name}":
+            (*members, model.name) for members in sources}
 
 
 def policies(model: CandidateModel) -> tuple[str, ...]:
@@ -108,6 +107,20 @@ def stage_labels(model: CandidateModel) -> dict[str, str]:
 
 def candidate_cutoffs(config: ExperimentConfig) -> tuple[int, ...]:
     return tuple(sorted({config.ranking_k, *config.candidate_cutoffs}))
+
+
+def require_prepared_window(prepared: PreparedData, phase: str) -> None:
+    """Fail closed rather than rebuilding an expensive baseline graph."""
+    from rating_recsys.experiments.prepared import _digest, _file_digest
+    if not prepared.enabled or prepared.rebuild:
+        raise ValueError("This bounded experiment requires existing prepared candidates")
+    identity = {**prepared.identity, "kind": phase}
+    folder = prepared.root / f"{phase}-{_digest(identity)[:16]}"
+    manifest = read_json(folder / "manifest.json")
+    checksum = manifest.pop("metadata_sha256")
+    if (_digest(manifest) != checksum or manifest["identity"] != identity
+            or _file_digest(folder / "data.npz") != manifest["arrays_sha256"]):
+        raise ValueError(f"Prepared {phase} candidates failed integrity checks")
 
 
 def source_rankings(
@@ -130,7 +143,8 @@ def policy_rankings(
     """C0-C5, the new source alone and every fusion, keyed by stage then query."""
 
     sources = {**candidates.ordered, model.name: ranked}
-    stages = {name: dict(sources[name]) for name in (*BASE_STAGES, model.name)}
+    baselines = getattr(model, "comparison_sources", BASE_STAGES)
+    stages = {name: dict(sources[name]) for name in (*baselines, model.name)}
     for name, members in fusions(model).items():
         stages[name] = {
             q.query_id: rrf(
@@ -402,6 +416,7 @@ def run_candidate_comparison(
 
     source = code_manifest(project_root, allow_dirty=True)
     snapshot_path, snapshot = freeze_snapshot(all_interactions, artifacts_root / "snapshots")
+    model.prepare_experiment(config, snapshot, texts_meta)
     try:
         snapshot_location = str(snapshot_path.resolve().relative_to(project_root.resolve()))
     except ValueError:
@@ -413,6 +428,7 @@ def run_candidate_comparison(
     )
     run_dir = artifacts_root / "comparisons" / model.name / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
+    write_json(run_dir / "status.json", {"status": "running"})
     dirty_diff = str(source.pop("git_diff", ""))
     if dirty_diff:
         (run_dir / "source.diff").write_text(dirty_diff, encoding="utf-8")
@@ -434,6 +450,9 @@ def run_candidate_comparison(
     )
     prepared = PreparedData(artifacts_root, snapshot["dataset_snapshot_id"], split, config,
                             enabled=use_cache, rebuild=rebuild_cache, log=emit)
+    if getattr(model, "require_prepared_candidates", False):
+        for phase in ("validation", "test"):
+            require_prepared_window(prepared, phase)
     lap("01_split_and_window_queries")
 
     # ---- Validation: C0-C5 with the pipeline's fixed LightGCN --------------
@@ -487,7 +506,7 @@ def run_candidate_comparison(
     test_stages = policy_rankings(model, test_queries, test_candidates, test_ranked, config)
     test_metrics = evaluate_stages(test_queries, test_stages, test_candidates, config)
     refit_summary["test_diagnostics"] = model.diagnostics(refit, chosen_config, test_queries)
-    cutoffs = sorted({20, config.candidate_k} & set(range(1, config.candidate_k + 1)))
+    cutoffs = sorted({config.ranking_k, 20, config.candidate_k} & set(range(1, config.candidate_k + 1)))
     comparisons: dict[str, object] = {
         "vs_stage1": {
             name: {
@@ -514,6 +533,7 @@ def run_candidate_comparison(
                                    ("test", test_queries, test_stages)):
         write_jsonl(run_dir / f"candidates_{phase}.jsonl", (
             {"query_id": q.query_id, "user_id": q.user_id,
+             "cutoff": q.cutoff.isoformat(), "relevance_by_item": dict(q.relevance_by_item),
              **{stage: stages[stage][q.query_id] for stage in (STAGE1, *policies(model))}}
             for q in queries
         ))
@@ -556,6 +576,7 @@ def run_candidate_comparison(
     manifest = {
         "run_id": run_id,
         "kind": "candidate-comparison",
+        "evidence_status": getattr(model, "evidence_status", "single-holdout"),
         "prepared_data": prepared.manifest,
         "label": label,
         "created_at": created_at.isoformat(),
@@ -606,4 +627,5 @@ def run_candidate_comparison(
     if plot:
         write_learning_curve(run_dir, manifest, metrics)
     write_report(run_dir)
+    write_json(run_dir / "status.json", {"status": "complete"})
     return ComparisonResult(run_id=run_id, run_dir=run_dir, metrics=metrics, manifest=manifest)

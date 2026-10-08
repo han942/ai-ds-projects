@@ -83,6 +83,7 @@ def build_parser(model: CandidateModel) -> argparse.ArgumentParser:
     )
     model.add_arguments(parser.add_argument_group(f"{model.title} grid"))
     add_cache_arguments(parser)
+    parser.set_defaults(**getattr(model, "experiment_defaults", {}))
     return parser
 
 
@@ -90,6 +91,7 @@ def configs_from_args(
     model: CandidateModel, args: argparse.Namespace
 ) -> tuple[ExperimentConfig, tuple[object, ...]]:
     config = ExperimentConfig(
+        ranker_training_mode=getattr(model, "ranker_training_mode", "prefix"),
         **satisfaction_config_from_args(args),
         train_fraction=args.train_fraction,
         validation_fraction=args.validation_fraction,

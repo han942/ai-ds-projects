@@ -117,12 +117,16 @@ MODEL_CASES = {
         "doc_length": 60, "max_review_length": 20, "batch_size": 32,
         "epochs": 3, "threads": 1, "dropout": 0.0, "learning_rate": 0.01,
     },
+    "two_tower": {"epochs": 2, "threads": 1},
 }
 
 
 def available_models():
     models = []
     for model in CANDIDATE_MODELS.values():
+        # Frozen-cache models have dedicated fixtures, not synthetic text encoders.
+        if getattr(model, "requires_embedding_cache", False):
+            continue
         try:
             for package in model.packages:
                 version(package)

@@ -142,6 +142,9 @@ class CandidateModel:
     ) -> Any:
         raise NotImplementedError
 
+    def prepare_experiment(self, config, snapshot, texts_meta) -> None:
+        """Validate external frozen inputs before model fitting."""
+
     def loss_fields(self, stats: Any) -> dict[str, float]:
         """Curve fields of one epoch; ``loss`` is plotted and tabulated."""
 
@@ -380,6 +383,118 @@ class BM25Candidate(CandidateModel):
 CANDIDATE_MODELS: dict[str, CandidateModel] = {
     model.name: model for model in (LightGCNCandidate(), DeepCoNNCandidate(), BM25Candidate())
 }
+
+
+class TwoTowerCandidate(CandidateModel):
+    name = "two_tower"
+    title = "E5 Two-Tower"
+    letter = "T"
+    needs_review_texts = True
+    requires_embedding_cache = True
+    require_prepared_candidates = True
+    ranker_training_mode = "window"
+    default_max_epochs = 12
+    default_patience = 3
+    packages = ("numpy", "torch", "tokenizers")
+    comparison_sources = ("c5_c1_lightgcn_rrf",)
+    fusion_sources = (("c1_item_item",),)
+    experiment_defaults = {"satisfaction_mode": "history-aware"}
+    evidence_status = "exploratory-reused-holdout"
+    loss_description = "cutoff-safe window positives versus sampled eligible negatives (sampled softmax)"
+    description = (
+        "Frozen multilingual E5-small review vectors + learned ID embeddings feed separate small user/item MLPs. Normalized dot products rank restaurants; E5 is never trained or loaded.",
+        "Training rebuilds calendar-aligned historical windows, using only pre-window profiles and catalogs. All eligible positive targets are used, independent of baseline candidate hits.",
+        "Seen restaurants and all same-window positive targets are excluded from sampled negatives. Missing text uses a zero vector and an explicit presence feature.",
+        "Exactly three conditions: current C5, Two-Tower alone, and equal-weight RRF(C1, Two-Tower). No LTR retraining or hyperparameter grid.",
+    )
+    leakage_checks = {"historical_window_profiles": True, "frozen_embedding_cache_read_only": True,
+                      "training_targets_independent_of_c5": True}
+
+    def __init__(self):
+        self.query_users = ()
+        self.embedding_run = None
+
+    def config_type(self):
+        from rating_recsys.retrieval.two_tower import TwoTowerConfig
+        return TwoTowerConfig
+
+    def add_arguments(self, group):
+        from rating_recsys.config import PROJECT_ROOT
+        super().add_arguments(group)
+        group.add_argument("--embedding-run", type=Path,
+                           default=PROJECT_ROOT / "artifacts/comparisons/review_ltr/20261007T060016724659Z-e7896add",
+                           help="Completed E5 run whose frozen cache, tokenizer and input hashes are reused")
+
+    def grid_from_args(self, args):
+        self.embedding_run = args.embedding_run
+        return super().grid_from_args(args)
+
+    def prepare_experiment(self, config, snapshot, texts_meta):
+        import hashlib
+        import json
+        from dataclasses import fields
+        from tokenizers import Tokenizer
+        from rating_recsys.config import PROJECT_ROOT
+        from rating_recsys.retrieval.review_embeddings import ReviewEmbeddingConfig, ProfileFormatter
+
+        run = self.embedding_run or PROJECT_ROOT / "artifacts/comparisons/review_ltr/20261007T060016724659Z-e7896add"
+        manifest = json.loads((run / "manifest.json").read_text())
+        if json.loads((run / "status.json").read_text())["status"] != "complete":
+            raise ValueError("E5 source run is incomplete")
+        if snapshot["dataset_snapshot_id"] != manifest["snapshot"]["dataset_snapshot_id"]:
+            raise ValueError("E5 source snapshot differs")
+        if not texts_meta or texts_meta["artifact_sha256"] != manifest["review_texts"]["artifact_sha256"]:
+            raise ValueError("E5 source review text hash differs")
+        for name in ("train_fraction", "validation_fraction", "candidate_k", "rrf_constant",
+                     "satisfaction_mode", "satisfaction_min_history", "satisfaction_mean_weight",
+                     "satisfaction_max_shift", "relevance_high_threshold", "relevance_low_threshold"):
+            if getattr(config, name) != manifest["config"][name]:
+                raise ValueError(f"E5 source experiment differs: {name}")
+        self.experiment_config = config
+        self.embedding = ReviewEmbeddingConfig(**{
+            field.name: manifest["embedding"][field.name]
+            for field in fields(ReviewEmbeddingConfig) if field.init
+        })
+        if self.embedding.backend != "local" or self.embedding.aggregation != "concat":
+            raise ValueError("Two-Tower requires local concat E5 profiles")
+        tokenizer_path = Path(self.embedding.cache_path).parent / "tokenizers" / f"{self.embedding.tokenizer_revision}.tokenizer.json"
+        data = tokenizer_path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != manifest["preprocessing"]["tokenizer_sha256"]:
+            raise ValueError("Frozen E5 tokenizer hash differs")
+        self.formatter = ProfileFormatter(self.embedding, tokenizer_path.parent,
+                                         tokenizer=Tokenizer.from_str(data.decode()))
+        self.provenance = {"source_run": str(run), "embedding": self.embedding.to_dict(),
+                           "tokenizer_sha256": manifest["preprocessing"]["tokenizer_sha256"],
+                           "embedding_requests": 0, "encoder_loaded": False}
+
+    def prepare_fit(self, queries):
+        self.query_users = tuple(query.user_id for query in queries)
+
+    def fit(self, model_config, interactions, texts, callback=None):
+        from contextlib import closing
+        from rating_recsys.retrieval.two_tower import CachedProfiles, TwoTower
+        if texts is None:
+            raise ValueError("Two-Tower needs review texts")
+        with closing(CachedProfiles(self.embedding, self.formatter)) as profiles:
+            return TwoTower(model_config, embedding_config=self.embedding, formatter=self.formatter,
+                            profiles=profiles, eval_user_ids=self.query_users,
+                            experiment_config=self.experiment_config).fit(interactions, texts, callback=callback)
+
+    def model_summary(self, model):
+        return {"training_interactions": model.edge_count, "users": len(model.user_ids),
+                "restaurants": len(model.item_ids), "training_audit": model.training_audit,
+                "training_positives": model.metadata["training_positives"],
+                "evaluation_bank": model.metadata["evaluation_bank"],
+                "negative_policy": model.metadata["negative_policy"],
+                "trainable_parameters": sum(p.numel() for tower in (model.user_tower, model.item_tower)
+                                            for p in tower.parameters()),
+                "frozen_embedding": self.provenance}
+
+    def save_artifacts(self, model, run_dir):
+        return model.save(run_dir / "two_tower_test.pt")
+
+
+CANDIDATE_MODELS["two_tower"] = TwoTowerCandidate()
 
 
 class ReviewEmbeddingsCandidate(CandidateModel):

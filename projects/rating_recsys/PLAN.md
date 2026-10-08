@@ -1,7 +1,7 @@
 # V2 Plan & Experiment Notes
 
 기준일: 2026-10-04. **전체 범위는 Two-stage baseline → 후보 모델 비교 → 텍스트 결합 → 생성형 추천·OneRec 통합 실험이다.**
-현재 구현은 [C5 후보 검색 + R1 LambdaRank](./BASELINE_MODEL.md)이며 텍스트·Two-Tower는 미적용이다.
+현재 baseline은 [C5 후보 검색 + R1 LambdaRank](./BASELINE_MODEL.md)다. 리뷰 LTR와 E5 Two-Tower는 별도 실험을 완료했지만 미채택했으며, 현재 baseline 입력에는 텍스트를 넣지 않는다.
 학습 방향은 **기준 날짜 이전 이력 → 이후 일정 기간의 모든 방문을 한 정답 목록으로 묶는 Window 방식**이다.
 개인별 만족도 기준은 구현했다. 최소 이력 10건은 train의 평균 안정성과 적용 범위를 보고 정했다.
 규칙·분석 근거·실행 결과는 [SATISFACTION_BASELINE.md](./SATISFACTION_BASELINE.md)에 기록한다.
@@ -125,7 +125,7 @@ validation/test 방문을 삭제하거나 같은 날짜 방문 전체를 버리�
 | 0. 새 과제의 baseline | 개인별 만족도 정답 + Window + C5/LambdaRank | 선택한 과제에서의 기준 성능은 무엇인가? | 2026-10-04 구현·전체 실행·독립 지표 검증 완료 |
 | 1. 텍스트 없는 후보 모델 | Item-item, MF, Two-Tower, LightGCN, SASRec | 협업 관계·그래프·방문 순서 중 어떤 신호가 검색에 도움이 되는가? | Item-item·LightGCN 구현, 나머지 미구현 |
 | 2. 리뷰 텍스트 후보 검색 | BM25, 리뷰 임베딩 검색, C5와의 결합 | 어휘 검색·의미 검색이 C5의 후보 Recall을 보완하는가? | Liquid 임베딩·Kiwi+BM25 전체 실행·검증 완료, 이번 Recall@100 기준 C5 유지 |
-| 3. 텍스트 학습·재랭킹 | 텍스트 feature·Two-Tower, LambdaRank와 Jev 비교 | 학습형 ranker와 decision-model 재랭커가 순위를 개선하는가? | 후속 설계 |
+| 3. 텍스트 학습·재랭킹 | 텍스트 feature·Two-Tower, LambdaRank와 Jev 비교 | 학습형 ranker와 decision-model 재랭커가 순위를 개선하는가? | E5 LTR·소형 Two-Tower 3조건 완료·미채택, Jev 미구현 |
 | 4. Generative Retrieval | TIGER 계열의 Semantic ID 후보 생성 + 공통 ranker | 벡터 검색을 ID 생성으로 바꾸면 후보 품질·비용이 달라지는가? | 미구현 |
 | 5. 리스트 생성형 추천·OneRec | 추천 목록 생성, 검색·순위 통합, 선호 정렬 | 분리된 Two-stage와 통합된 생성형 모델은 어떻게 다른가? | 미구현 |
 
@@ -140,7 +140,7 @@ OneRec은 생성형 추천의 한 방식이다. 단순 후보 생성과 검색·
 | 시간 분할 | 과거 정보로 미래를 평가하는 데이터 구성 | 전역 T1/T2 사용 |
 | 순차 모델링 | 방문 순서·전이·최근 행동을 모델 입력으로 학습 | 방문 집합·정적 그래프·집계 feature 사용 |
 | Two-stage | 후보 검색과 최종 순위를 별도 단계로 계산 | 적용 |
-| Two-Tower | 사용자·식당 encoder로 벡터를 따로 계산하고 매칭 | 미적용 |
+| Two-Tower | 사용자·식당 encoder로 벡터를 따로 계산하고 매칭 | baseline 미적용; 별도 E5 모델 실험 완료·미채택 |
 | 입력 정보 | 행동·평점·텍스트 등 사용할 신호 | 행동·평점만 사용 |
 
 다음 방문을 정답으로 학습한다고 방문 순서까지 학습하는 것은 아니다.
@@ -239,7 +239,7 @@ Reward·선호 정렬은 관측 데이터로 확인할 수 있는 범위에서 �
 | 3 | OpenRouter 리뷰 임베딩 / C5 결합 | Liquid 무료 모델 실행·검증 완료: 단독 3.28%, 결합 16.56% < C5 20.16% | 임베딩 단독 Recall 및 C5 보완 Recall |
 | 3b | BM25 식당 리뷰 검색 / C5+BM25 | 전체 실행·검증 완료: 단독 5.30%, 결합 17.42% < C5 20.16% | 후보 Recall 기준 C5 유지, NDCG@10 상승은 개선 미확인 |
 | 4 | Jev vs LambdaRank 같은 후보 재랭킹 | 설계, 미구현 | 공통 후보 NDCG·Recall과 API 비용·지연 |
-| 5 | dense/hybrid 검색·텍스트 Two-Tower | 설계, 전용 벡터 저장소 미선택 | lexical과 분리한 검색·순위 효과 |
+| 5 | dense/hybrid 검색·텍스트 Two-Tower | E5 소형 CPU 3조건 완료·미채택, 전용 벡터 저장소 미선택 | lexical과 분리한 검색·순위 효과 |
 | 6 | Generative Retrieval + 공통 ranker | 미구현 | 벡터 검색과 생성 후보 비교 |
 | 7 | 목록 생성·OneRec 통합·선호 정렬 | 미구현 | 구조 통합과 선호 정렬 효과 분리 |
 | 8 | 새 미래 holdout·seed 반복 | 미실행 | 반복 확인한 test의 탐색 결과 검증 |
@@ -366,6 +366,7 @@ MF(Matrix Factorization)의 기본 관계는 `μ + b_u + b_i + p_u·q_i`다.
 텍스트 표현과 결합 원칙:
 
 - 현재 로컬 encoder는 E5 Small이다. 전체 입력 59,455개 캐시와 실제 C5 고정 LTR 학습·평가·독립 재검증을 완료했다. 이번 긍정 concat + 6피처 조건의 개선은 확인하지 못해 기존 ranker를 유지한다. 결과·CPU 측정·과거 모델 이력은 [리뷰 임베딩 리포트](./reports/review_embeddings.md)에 모았다.
+- E5 동결·ID 연결·소형 Two-Tower와 C1 RRF 결합을 2026-10-08 CPU에서 비교했다. 사용자 요청대로 C5/단독/C1 결합 세 조건만 실행했고 LTR 재학습은 없다. Recall@100 20.16%/9.12%/16.09%로 이번 설정은 미채택했다. 기존 test 재사용에 따른 탐색 결과이며 E5만의 효과는 분리하지 않았다.
 - 다음 우선순위는 early stopping/보고 NDCG 정규화 정렬과 validation-only 피처 분리 비교다. 아직 이 조건으로 재학습하지 않았다. 이후 리뷰 집계·긍정/부정 표현과 후보 회수 보완을 각각 검증한다. [진단과 후속](./reports/review_embeddings.md#진단과-후속).
 - Liquid 후보 검색은 미채택이고 Nemotron의 전체 LTR 평가는 미완료다. Liquid 캐시·설치와 Gemma 설치·측정 코드는 사용자 요청으로 삭제했으며 E5 캐시·모델·원본·현재 평가만 유지한다. 모델별 속도·추천 품질·완료 상태를 혼동하지 않는다.
 - Cutoff 이전 리뷰로 학습하는 글자 n-gram TF-IDF 또는 자체 학습 표현도 비교한다. TF-IDF는 표현의 겹침을 측정하며 문장 의미를 이해하는 모델로 해석하지 않는다.
