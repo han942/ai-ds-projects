@@ -23,8 +23,9 @@ experiment = [
     "pandas>=2.2,<3",
     "scipy>=1.11,<2",
     "streamlit>=1.40,<2",
+    "threadpoolctl>=3,<4",
 ]
-# DeepCoNN candidate model (rating-recsys-compare deepconn) only. CPU wheels:
+# DeepCoNN and the RLMRec alignment projector. CPU wheels:
 # pip install -e '.[deepconn]' --extra-index-url https://download.pytorch.org/whl/cpu
 deepconn = [
     "torch==2.5.1",
@@ -55,6 +56,8 @@ rating-recsys-compare = "rating_recsys.experiments.compare_cli:console_main"
 rating-recsys-review-embeddings = "rating_recsys.experiments.review_embedding_cli:console_main"
 rating-recsys-dashboard = "rating_recsys.observability.cli:main"
 rating-recsys-prepare = "rating_recsys.experiments.prepared:main"
+rating-recsys-review-transformer = "rating_recsys.experiments.review_transformer_cli:console_main"
+rating-recsys-rlmrec = "rating_recsys.experiments.rlmrec_cli:console_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
