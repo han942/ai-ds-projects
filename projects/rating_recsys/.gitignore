@@ -1,5 +1,6 @@
 .env
 .venv/
+.venv-rqvae/
 *.pyc
 __pycache__/
 .pytest_cache/

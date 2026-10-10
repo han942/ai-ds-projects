@@ -126,7 +126,7 @@ validation/test 방문을 삭제하거나 같은 날짜 방문 전체를 버리�
 | 1. 텍스트 없는 후보 모델 | Item-item, MF, Two-Tower, LightGCN, SASRec | 협업 관계·그래프·방문 순서 중 어떤 신호가 검색에 도움이 되는가? | Item-item·LightGCN 구현, 나머지 미구현 |
 | 2. 리뷰 텍스트 후보 검색 | BM25, 리뷰 임베딩 검색, C5와의 결합 | 어휘 검색·의미 검색이 C5의 후보 Recall을 보완하는가? | Liquid 임베딩·Kiwi+BM25 전체 실행·검증 완료, 이번 Recall@100 기준 C5 유지 |
 | 3. 텍스트 학습·재랭킹 | 텍스트 feature·Two-Tower, LambdaRank와 Jev 비교 | 학습형 ranker와 decision-model 재랭커가 순위를 개선하는가? | E5 LTR·Two-Tower·리뷰 Transformer validation 완료·미채택, Jev 미구현 |
-| 4. Generative Retrieval | TIGER 계열의 Semantic ID 후보 생성 + 공통 ranker | 벡터 검색을 ID 생성으로 바꾸면 후보 품질·비용이 달라지는가? | 미구현 |
+| 4. Generative Retrieval | TIGER 계열의 Semantic ID 후보 생성 + 공통 ranker | 벡터 검색을 ID 생성으로 바꾸면 후보 품질·비용이 달라지는가? | 리뷰 임베딩→RQ-VAE 이산 코드·표현/validation 비교 완료; 식당 ID 생성·생성형 검색 모델은 미구현 |
 | 5. 리스트 생성형 추천·OneRec | 추천 목록 생성, 검색·순위 통합, 선호 정렬 | 분리된 Two-stage와 통합된 생성형 모델은 어떻게 다른가? | 미구현 |
 
 이 순서는 실험의 확장 경로이며 성능 향상을 전제하지 않는다.
@@ -193,6 +193,8 @@ TypeSafe의 예제도 BM25로 shortlist를 만든 뒤 후보를 재랭킹한다.
 2. 생성 후보를 공통 ranker로 재정렬해, 기존 벡터 retrieval과 후보 품질·최종 순위를 비교한다.
 3. 후보 생성과 별도 ranker를 분리한 구성을 기준으로, 추천 목록을 직접 생성하는 모델을 비교한다.
 4. [OneRec](https://arxiv.org/abs/2502.18965)의 검색·순위 통합, session-wise 목록 생성, 선호 정렬(IPA/DPO)을 단계별로 검토·구현한다.
+
+2026-10-10 사용자 요청으로 **리뷰별** E5 임베딩→RQ-VAE 3단계 코드 실험을 완료했다. 과거 입력에서 학습·audit·validation을 분리했고 Supabase 본문 94,301개에 고정 모델로 코드 생성까지 수행했다. 저장 tensor payload는 줄었으나 이웃 구조 손실과 추천 개선 미확인으로 기존 baseline을 유지한다. 이 리뷰 코드는 식당 Semantic ID나 생성형 검색 모델을 대신하지 않는다. [RQ-VAE 결과](./reports/rqvae.md).
 
 OneRec 실험은 원논문 재현 범위, 모델 크기·학습 예산, 식당 데이터에 맞춘 변경을 명시한다.
 현재 데이터에는 세션·노출·클릭·watch-time이 없으므로 식당 방문 기간을 세션 대용으로 쓰는 변경과 관측 평점 기반 reward를 별도 조건으로 기록한다.

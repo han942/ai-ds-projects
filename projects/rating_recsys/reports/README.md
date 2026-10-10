@@ -10,12 +10,16 @@
 | 리뷰 임베딩 | RLMRec-Con/E5를 기존 LightGCN에 추가해 20epoch·가중치 3개·shuffle·전체 LambdaRank 재학습 완료. 최종 NDCG@10 0.027694→0.028022이나 Recall@10 감소·paired 구간 0 포함으로 미채택. 이전 LTR·Two-Tower·Transformer도 개선 미확인 | [E5·Transformer·RLMRec](./review_embeddings.md) |
 | 리뷰 검색·순위 결합 | BM25 단독·결합·전처리는 미채택. VDB·E5 하이브리드 설계와 RRF 한계 검토 | [BM25·하이브리드](./bm25.md) |
 | 리뷰 속성 추출 | 같은 리뷰와 평점의 표현 일치성 진단 완료. 미래 추천 효과는 미검증 | [리뷰 속성](./review_aspects.md) |
+| 리뷰 텍스트 데이터 | Supabase 96,922건 전체·첫 상호작용·학습 cutoff 프로파일 완료. 길이/결측/평점/이력 불균형/어휘/수집 출처 조사; interaction snapshot 일치 확인. RQ 실험에서 새 E5 입력 토큰·표현 보존을 추가 측정; 의미 주석은 미실행 | [텍스트 특징·조사 이유](./text_data.md) |
+| 리뷰 이산 코드 | 과거 리뷰 E5→RQ-VAE 3단계 코드 학습·validation 및 Supabase 본문 94,301개 코드 생성 완료. 과거 코드+공유 모델 tensor payload 144.63배 축소, 원래 이웃 overlap 10.42%; 추천 개선 미확인으로 기준 모델 유지 | [RQ-VAE](./rqvae.md) |
 
 텍스트 표현의 다음 비교는 [임베딩 방법 조사](./review_embeddings.md#텍스트-임베딩-방법-조사)에서 확인한다. TF-IDF·단어 벡터·한국어 SBERT·E5·BGE·Qwen·API encoder, 리뷰 집계·속성 표현·추천 목적 학습을 나눠 정리한 문헌 조사이며 새 추천 실험은 아니다.
 
 [다른 추천 모델과의 결합](./review_embeddings.md#리뷰-텍스트와-다른-추천-모델의-결합)에는 HFT·EFM·NARRE·MPCN·CARP·UniSRec·APH의 원문 결과와 조건, 리뷰·문장·의견별 분할, 근거 추출, 여러 벡터의 실제 입력 구조를 정리했다. C5에 의존하지 않는 설계안이며 프로젝트 성능은 아직 측정하지 않았다.
 
 [두 안의 구현 설계](./review_embeddings.md#두-안의-구체적-구현-설계)는 입력 bank, attention·ID 결합, 학습·검색 순서를 설명한다. 첫 안의 코드·초기 validation은 [실행 결과](./review_embeddings.md#1안-전체-validation-결과), 동일 설정 10epoch의 정확도·표현 변화와 다음 검증은 [원인 조사](./review_embeddings.md#3epoch-판단과-식당-쏠림의-원인-조사)에 정리했다. 둘째 안은 미실행 설계다.
+
+[RAG와 multi-stage 추천의 공통 방법론](./bm25.md#rag와-multi-stage-추천에서-공유할-방법론)에는 하이브리드 검색·리뷰별 근거 선택·다중 벡터 matching·실제 후보 기반 재정렬을 추천에 적용할 아이디어와 검증 기준을 기록했다. 생성 단계를 추가해야만 사용할 수 있는 아이디어는 아니다.
 
 ## 다음 실험
 
