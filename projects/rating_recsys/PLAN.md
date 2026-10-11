@@ -124,7 +124,7 @@ validation/test 방문을 삭제하거나 같은 날짜 방문 전체를 버리�
 |---|---|---|---|
 | 0. 새 과제의 baseline | 개인별 만족도 정답 + Window + C5/LambdaRank | 선택한 과제에서의 기준 성능은 무엇인가? | 2026-10-04 구현·전체 실행·독립 지표 검증 완료 |
 | 1. 텍스트 없는 후보 모델 | Item-item, MF, Two-Tower, LightGCN, SASRec | 협업 관계·그래프·방문 순서 중 어떤 신호가 검색에 도움이 되는가? | Item-item·LightGCN 구현, 나머지 미구현 |
-| 2. 리뷰 텍스트 후보 검색 | BM25, 리뷰 임베딩 검색, C5와의 결합 | 어휘 검색·의미 검색이 C5의 후보 Recall을 보완하는가? | Liquid 임베딩·Kiwi+BM25 전체 실행·검증 완료, 이번 Recall@100 기준 C5 유지 |
+| 2. 리뷰 텍스트 후보 검색 | BM25, 리뷰 임베딩 검색, C5와의 결합 | 어휘 검색·의미 검색이 C5의 후보 Recall을 보완하는가? | BM25·리뷰 matching·속성/감정 채널 4×20epoch·취향 K1/K3 validation 완료. 채널+C1 Recall@100 19.4210%, 그래프 취향 quota 19.4779%로 C5 19.4769% 대비 개선 불확실. 재랭커 변경 없음 |
 | 3. 텍스트 학습·재랭킹 | 텍스트 feature·Two-Tower, LambdaRank와 Jev 비교 | 학습형 ranker와 decision-model 재랭커가 순위를 개선하는가? | E5 LTR·Two-Tower·리뷰 Transformer validation 완료·미채택, Jev 미구현 |
 | 4. Generative Retrieval | TIGER 계열의 Semantic ID 후보 생성 + 공통 ranker | 벡터 검색을 ID 생성으로 바꾸면 후보 품질·비용이 달라지는가? | 리뷰 임베딩→RQ-VAE 이산 코드·표현/validation 비교 완료; 식당 ID 생성·생성형 검색 모델은 미구현 |
 | 5. 리스트 생성형 추천·OneRec | 추천 목록 생성, 검색·순위 통합, 선호 정렬 | 분리된 Two-stage와 통합된 생성형 모델은 어떻게 다른가? | 미구현 |
@@ -162,7 +162,7 @@ OneRec은 생성형 추천의 한 방식이다. 단순 후보 생성과 검색·
 BM25는 임베딩 없이 단어 일치로 후보를 찾는다. 임베딩 검색은 표현이 달라도 의미가 가까운 리뷰를 찾는다.
 OpenRouter는 임베딩을 만드는 API 선택지이고, pgvector·Milvus·Astra DB는 벡터를 저장·검색하는 기반이다.
 기존 Two-stage에도 텍스트를 넣을 수 있으므로, 텍스트 검색·텍스트 ranker feature·Two-Tower를 별도 변경으로 비교한다.
-후보를 바꾸는 조건은 새 후보의 학습 행·feature를 만들고 ranker도 재학습한다.
+최종 파이프라인을 비교할 때 후보를 바꾸는 조건은 새 후보의 학습 행·feature를 만들고 ranker도 재학습한다. Candidate-only 비교는 후보 Recall을 평가하며 재랭커 변경 없이 실행한다.
 
 Liquid 임베딩, Kiwi+BM25, BM25 추가 전처리 비교를 전체 실행·검증했다.
 이번 후보 Recall@100 기준은 C5를 유지한다. 조건별 수치·비용·검증·한계와 API 한도로
@@ -372,7 +372,9 @@ MF(Matrix Factorization)의 기본 관계는 `μ + b_u + b_i + p_u·q_i`다.
 - 2026-10-09 리뷰별 블록 attention·Transformer·양방향 cross-attention·ID를 갖춘 1안을 구현했다. 2026-10-10 동일 설정을 10epoch까지 확인했고 쏠림·표현 민감도는 개선됐지만 최선은 epoch 2의 NDCG@10 0.007007로 유지됐다. 기존 16피처 LambdaRank 0.027694 대비 이번 설정은 미채택이며 구조 전체의 실패로 판단하지 않는다. 단계적 hard-negative 학습·검색 점수 잔차·ID-only 대조군은 미실행이다. [초기 실행 결과](./reports/review_embeddings.md#1안-전체-validation-결과)와 [장기 학습·원인 조사](./reports/review_embeddings.md#3epoch-판단과-식당-쏠림의-원인-조사)를 따른다.
 - 2026-10-10 baseline의 공동 방문 유사도·LightGCN 전파와 validation C1/C4/C5/R1 순위를 재확인했다. 새 리뷰 모델의 ID는 LightGCN 표현을 이어받지 않았다. 별도 미실행 잔차 점수 설계는 같은 C5 후보·행동 점수와 같은 리뷰 self/cross-attention을 유지하고, 본문 입력만 유무로 나눈 재학습 대조군이다. 아직 구현·학습하지 않았으며 [본문 추가효과 설계](./reports/review_embeddings.md#베이스라인을-유지한-텍스트-추가효과-검증)를 따른다.
 - 2026-10-10 사용자 요청으로 RLMRec-Con/E5 평균 프로필을 기존 LightGCN에 추가하는 비교를 먼저 완료했다. 같은 방문·BPR·20epoch에서 λ=0/0.001/0.01/0.1과 선택 λ의 profile shuffle을 비교했고, 과거 38개 graph·새 후보·16피처·7개 LambdaRank를 모두 재학습했다. λ=0은 기존 C4/C5를 정확히 재현했다. 최종 NDCG@10 0.027694→0.028022지만 Recall@10 4.1667→4.0645%와 paired 95% 구간 0 포함으로 기존 baseline을 유지한다. 새 E5 추론·LLM/API·test 평가 0회인 validation 탐색이며, 원문 LLM 프로필 생성·멀티벡터·새 holdout은 미실행이다. [전체 비교](./reports/review_embeddings.md#rlmrec-방식으로-베이스라인에-텍스트를-결합한-비교).
-- 다음 우선순위는 early stopping/보고 NDCG 정규화 정렬과 validation-only 피처 분리 비교다. 아직 이 조건으로 재학습하지 않았다. 이후 리뷰 집계·긍정/부정 표현과 후보 회수 보완을 각각 검증한다. [진단과 후속](./reports/review_embeddings.md#진단과-후속).
+- 2026-10-11 사용자 요청으로 재랭커를 그대로 두고 리뷰별 다중 벡터 candidate generation을 구현·실행했다. 동결 E5 블록→리뷰 벡터 목록을 유지해 전체 과거 식당에서 Top-3 matching 후 점수를 평균했다. 같은 bank 평균 대비 Recall@100 4.5032%→4.7866%는 paired 구간 0 포함으로 개선 불확실하다. C5 신규 후보 최대 10개 결합은 19.4769%→18.6186%, 새 정답 26개/탈락 72개로 C5를 유지한다. Ranker 학습·예측·새 E5 추론·API·test 평가 0회. 이는 리뷰별 검색 점수 비교이며 앞서 미실행이라 한 RLMRec 멀티벡터 정렬과 다르다. [이전 방식과 차이·결과](./reports/review_embeddings.md#리뷰별-다중-벡터-후보-검색).
+- 2026-10-11 사용자 요청으로 ① 원문 의견의 속성·긍정/부정 10채널 E5→LightGCN 대조 정렬과 ② 동결 리뷰 군집의 취향별 후보 검색을 모두 실행했다. ①은 같은 모델 크기의 평균·분리(λ=0.001/0.01)·shuffle 네 조건을 20epoch·700 update씩 학습했으며, 분리+C1 Recall@100 19.4210%는 평균 19.6042%·C5 19.4769% 대비 개선 불확실하다. ②는 텍스트 K1→K3 4.5032→5.5003%로 개선됐지만 그래프 K3 quota는 19.4779%, 새 정답 70/탈락 72로 C5 보완 이득을 확인하지 못했다. 새 로컬 E5 추론만 수행했고 재랭커·test·외부 API는 사용하지 않았다. 규칙 추출과 동결 군집의 적응판이며 학습형 ABSA/ComiRec 재현은 아니다. [전체 조건·신뢰구간·검증](./reports/review_embeddings.md#속성감정-채널과-여러-취향-후보-비교).
+- 다음 우선순위는 early stopping/보고 NDCG 정규화 정렬과 validation-only 피처 분리 비교다. 아직 이 조건으로 재학습하지 않았다. 규칙 추출의 의미 정확도·추천 목적 encoder 조정 등은 별도 후속 가설이다. [진단과 후속](./reports/review_embeddings.md#진단과-후속).
 - Liquid 후보 검색은 미채택이고 Nemotron의 전체 LTR 평가는 미완료다. Liquid 캐시·설치와 Gemma 설치·측정 코드는 사용자 요청으로 삭제했으며 E5 캐시·모델·원본·현재 평가만 유지한다. 모델별 속도·추천 품질·완료 상태를 혼동하지 않는다.
 - Cutoff 이전 리뷰로 학습하는 글자 n-gram TF-IDF 또는 자체 학습 표현도 비교한다. TF-IDF는 표현의 겹침을 측정하며 문장 의미를 이해하는 모델로 해석하지 않는다.
 - 좋아한/싫어한 식당의 프로필을 구분한다. 본인 리뷰와 방문 식당의 다른 사용자 리뷰를 비교하며, 이력이 부족하면 공통 프로필을 쓴다.

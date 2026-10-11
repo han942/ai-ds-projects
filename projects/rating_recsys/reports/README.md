@@ -1,13 +1,13 @@
 # 실험 결과
 
-현재 기준은 **C1 + LightGCN 후보 검색(C5) + LambdaRank**다. E5 Small 캐시는 유지한다. RLMRec/E5 결합까지 비교했지만 최종 정확도의 일관된 개선은 확인하지 못해 기존 모델을 유지한다.
+현재 기준은 **C1 + LightGCN 후보 검색(C5) + LambdaRank**다. E5 Small 캐시는 유지한다. 속성·감정 채널의 그래프 정렬과 여러 취향 후보 검색까지 비교했으며 기존 모델을 유지한다.
 
 ## 완료한 실험
 
 | 주제 | 결과와 현재 판단 | 리포트 |
 |---|---|---|
 | Baseline | C5 Recall@100 20.1626%; LTR NDCG@10 0.025467. Test 재정렬 이득은 미확인 | [Baseline](./baseline.md) |
-| 리뷰 임베딩 | RLMRec-Con/E5를 기존 LightGCN에 추가해 20epoch·가중치 3개·shuffle·전체 LambdaRank 재학습 완료. 최종 NDCG@10 0.027694→0.028022이나 Recall@10 감소·paired 구간 0 포함으로 미채택. 이전 LTR·Two-Tower·Transformer도 개선 미확인 | [E5·Transformer·RLMRec](./review_embeddings.md) |
+| 리뷰 임베딩 | 속성·감정 채널 4조건×20epoch 완료: C1 결합 Recall@100 19.4210%, C5 19.4769% 대비 개선 미확인. 취향 1→3개는 텍스트 단독 4.5032→5.5003%로 개선됐지만 그래프 취향 quota 19.4779%는 C5와 차이 불확실. 재랭커 변경 없음 | [속성·감정·여러 취향과 이전 실험](./review_embeddings.md) |
 | 리뷰 검색·순위 결합 | BM25 단독·결합·전처리는 미채택. VDB·E5 하이브리드 설계와 RRF 한계 검토 | [BM25·하이브리드](./bm25.md) |
 | 리뷰 속성 추출 | 같은 리뷰와 평점의 표현 일치성 진단 완료. 미래 추천 효과는 미검증 | [리뷰 속성](./review_aspects.md) |
 | 리뷰 텍스트 데이터 | Supabase 96,922건 전체·첫 상호작용·학습 cutoff 프로파일 완료. 길이/결측/평점/이력 불균형/어휘/수집 출처 조사; interaction snapshot 일치 확인. RQ 실험에서 새 E5 입력 토큰·표현 보존을 추가 측정; 의미 주석은 미실행 | [텍스트 특징·조사 이유](./text_data.md) |
@@ -17,19 +17,21 @@
 
 [다른 추천 모델과의 결합](./review_embeddings.md#리뷰-텍스트와-다른-추천-모델의-결합)에는 HFT·EFM·NARRE·MPCN·CARP·UniSRec·APH의 원문 결과와 조건, 리뷰·문장·의견별 분할, 근거 추출, 여러 벡터의 실제 입력 구조를 정리했다. C5에 의존하지 않는 설계안이며 프로젝트 성능은 아직 측정하지 않았다.
 
-[두 안의 구현 설계](./review_embeddings.md#두-안의-구체적-구현-설계)는 입력 bank, attention·ID 결합, 학습·검색 순서를 설명한다. 첫 안의 코드·초기 validation은 [실행 결과](./review_embeddings.md#1안-전체-validation-결과), 동일 설정 10epoch의 정확도·표현 변화와 다음 검증은 [원인 조사](./review_embeddings.md#3epoch-판단과-식당-쏠림의-원인-조사)에 정리했다. 둘째 안은 미실행 설계다.
+[두 안의 구현 설계](./review_embeddings.md#두-안의-구체적-구현-설계)는 입력 bank, attention·ID 결합, 학습·검색 순서를 설명한다. 첫 안의 코드·초기 validation은 [실행 결과](./review_embeddings.md#1안-전체-validation-결과), 동일 설정 10epoch의 정확도·표현 변화와 다음 검증은 [원인 조사](./review_embeddings.md#3epoch-판단과-식당-쏠림의-원인-조사)에 정리했다. 당시 둘째 안인 속성 Transformer 전체 설계는 미실행이며, 이번 규칙 기반 속성 채널→LightGCN 실험과 구분한다.
 
 [RAG와 multi-stage 추천의 공통 방법론](./bm25.md#rag와-multi-stage-추천에서-공유할-방법론)에는 하이브리드 검색·리뷰별 근거 선택·다중 벡터 matching·실제 후보 기반 재정렬을 추천에 적용할 아이디어와 검증 기준을 기록했다. 생성 단계를 추가해야만 사용할 수 있는 아이디어는 아니다.
+
+[리뷰별 다중 벡터 후보 검색](./review_embeddings.md#리뷰별-다중-벡터-후보-검색)은 전체 과거 catalog matching·같은 bank 평균 대조·C5 quota/RRF 결합의 실제 validation 결과다. 후속 [속성·감정 채널과 여러 취향 비교](./review_embeddings.md#속성감정-채널과-여러-취향-후보-비교)는 규칙 기반 의견 분리·새 E5 추론·LightGCN 정렬과 동결 군집 검색을 모두 실행했다. 리뷰 수 보정과 학습형 ABSA·신경망 multi-interest는 미실행이다.
 
 ## 다음 실험
 
 아래는 **아직 실행하지 않은 작업**이다. 순서는 [리뷰 임베딩 후속 계획](./review_embeddings.md#진단과-후속)을 따른다.
 
-[RLMRec/E5 비교](./review_embeddings.md#rlmrec-방식으로-베이스라인에-텍스트를-결합한-비교)는 완료했다. 같은 그래프 결합에서 긍정·부정·속성별 프로필을 분리하는 후속은 미실행이며, [행동 후보·점수를 유지한 본문 유무 대조](./review_embeddings.md#베이스라인을-유지한-텍스트-추가효과-검증)도 미실행 설계로 유지한다. 독립 리뷰 Transformer의 학습 분포 개선은 [학습 후보·검색 점수·표현 분리](./review_embeddings.md#다음에-바꿀-것은-무엇인가)를 따른다. 이 학습 분포 변경도 미실행이다. 기준 모델의 신호와 보완 근거는 [baseline 점검](./baseline.md#왜-리뷰-모델보다-강하게-나타나는가)에 있다.
+[RLMRec/E5 비교](./review_embeddings.md#rlmrec-방식으로-베이스라인에-텍스트를-결합한-비교)와 규칙 기반 긍정·부정·속성 채널 정렬 후속은 완료했다. [행동 후보·점수를 유지한 본문 유무 대조](./review_embeddings.md#베이스라인을-유지한-텍스트-추가효과-검증)는 미실행 설계로 유지한다. 독립 리뷰 Transformer의 학습 분포 개선은 [학습 후보·검색 점수·표현 분리](./review_embeddings.md#다음에-바꿀-것은-무엇인가)를 따른다. 이 학습 분포 변경도 미실행이다. 기준 모델의 신호와 보완 근거는 [baseline 점검](./baseline.md#왜-리뷰-모델보다-강하게-나타나는가)에 있다.
 
 1. Early stopping의 NDCG 정규화 기준을 최종 평가와 맞춘다.
 2. Validation에서 리뷰 유사도 피처와 존재 여부·개수 피처의 효과를 분리한다.
-3. 이후 리뷰 집계·긍정/부정 표현이나 후보 검색 보완을 한 조건씩 검증한다.
+3. 이번 규칙 추출의 의미 정확도를 별도로 평가한 뒤 학습형 추출·추천 목적 encoder 조정 등을 한 조건씩 검증한다.
 
 ## 문서 역할
 

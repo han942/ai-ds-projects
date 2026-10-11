@@ -66,6 +66,8 @@ rating-recsys-prepare = "rating_recsys.experiments.prepared:main"
 rating-recsys-review-transformer = "rating_recsys.experiments.review_transformer_cli:console_main"
 rating-recsys-rlmrec = "rating_recsys.experiments.rlmrec_cli:console_main"
 rating-recsys-rqvae = "rating_recsys.experiments.rqvae_cli:main"
+rating-recsys-review-multivector = "rating_recsys.experiments.review_multivector_cli:console_main"
+rating-recsys-text-candidate-views = "rating_recsys.experiments.text_candidate_views_cli:console_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
