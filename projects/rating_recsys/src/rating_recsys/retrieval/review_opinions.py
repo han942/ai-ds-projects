@@ -12,7 +12,7 @@ import re
 
 
 CATEGORIES = ("taste", "value", "service", "atmosphere", "portion")
-VERSION = "raw-multi-opinion-rules-v3"
+VERSION = "raw-multi-opinion-rules-v4"
 POLARITIES = ("positive", "negative", "neutral", "unknown")
 
 # These boundaries retain their connective in the preceding evidence. In
@@ -81,7 +81,9 @@ _RULES = (
     _Rule("uncertain-judgement", re.compile(r"애매하|애매했|모르겠|고민되"), "unknown"),
 )
 
-_NEG_BEFORE = re.compile(r"(?:안|못)\s*$")
+# A negator can touch its predicate ("안맛있다"), but cannot be the
+# suffix of a preceding word ("그동안 맛있다", "한동안 좋았다").
+_NEG_BEFORE = re.compile(r"(?<!\w)(?:안|못)\s*$")
 _NEG_ENDING = r"(?:하|했|았|었)?(?:습니다|는다|아요|어요|에요|네요|지만|는데|다|음|아|어|고|라)?"
 # These patterns must start immediately after this predicate. A later negative
 # about another food, service or quantity cannot invert its sentiment. Qualified

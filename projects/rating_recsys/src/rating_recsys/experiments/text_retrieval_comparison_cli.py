@@ -25,10 +25,14 @@ from rating_recsys.config import PROJECT_ROOT
 from rating_recsys.datasets.split import build_global_temporal_split
 from rating_recsys.evaluation.metrics import RankingObservation, evaluate_rankings, query_scores
 from rating_recsys.evaluation.segments import analyze_segments
-from rating_recsys.experiments.artifacts import read_json, write_json, write_jsonl
+from rating_recsys.experiments.artifacts import read_json, write_jsonl
 from rating_recsys.experiments.config import ExperimentConfig
 from rating_recsys.experiments.prepared import _file_digest
 from rating_recsys.experiments.queries import build_window_queries
+from rating_recsys.experiments.retrieval_resume import (
+    atomic_write_json as write_json, check_completed_metrics,
+    load_completed_arm, quarantine_uncommitted_bank,
+)
 from rating_recsys.experiments.review_multivector_cli import (
     find_prepared, load_prepared, protect_ranker, validate_rankings,
 )
@@ -131,7 +135,8 @@ def parser():
     p.add_argument("--baseline-run", type=Path, default=PROJECT_ROOT/"artifacts/runs/20261004T125314601899Z-e7896add")
     p.add_argument("--frozen-checkpoint", type=Path, default=PROJECT_ROOT/"artifacts/comparisons/review_transformer/20261009T155837960566Z-e7896add/review_transformer_validation.pt")
     p.add_argument("--output-dir", type=Path, default=PROJECT_ROOT/"artifacts/comparisons/text_retrieval_families")
-    p.add_argument("--resume-dir", type=Path)
+    p.add_argument("--resume-dir", type=Path,
+                   help="Reuse verified completed arms; restart an interrupted arm from epoch 1")
     p.add_argument("--reuse-graph-run", type=Path,
                    help="Reuse completed same-settings graph/C4 checkpoints and retrain only review arms")
     p.add_argument("--prepare-only", action="store_true")
@@ -211,6 +216,9 @@ def main(argv=None):
         write_json(run/"progress.json", state)
     print(f"[retrieval-only comparison] {run}", flush=True)
     bank_path = run/"review_bank.npz"
+    quarantined = quarantine_uncommitted_bank(run, state)
+    if quarantined is not None:
+        print(f"Uncommitted bank preserved as {quarantined.name}; preparing it again", flush=True)
     if args.reuse_graph_run:
         previous = read_json(args.reuse_graph_run/"metrics.json")
         expected_settings = {k: v for k, v in settings.items() if k != "balance_text_presence"}
@@ -268,6 +276,61 @@ def main(argv=None):
     return train(args, exp, split, queries, bank, c5, fixed_c4, run, state, protected, started)
 
 
+def restore_graph_backbone(path, config, *, expected_user_ids, expected_item_ids):
+    """Restore the frozen baseline used by review arms, without fitting it."""
+    model = LightGCN(config)
+    with np.load(path, allow_pickle=False) as saved:
+        users, items = saved["user_ids"], saved["item_ids"]
+        if not np.array_equal(users, expected_user_ids) or not np.array_equal(items, expected_item_ids):
+            raise ValueError("Completed baseline checkpoint axes differ from past graph")
+        uv, iv, ego = saved["user_vectors"], saved["item_vectors"], saved["ego"]
+        shapes = ((len(users), config.dimension), (len(items), config.dimension),
+                  (len(users) + len(items), config.dimension))
+        if any(value.shape != shape or not np.isfinite(value).all()
+               for value, shape in zip((uv, iv, ego), shapes, strict=True)):
+            raise ValueError("Invalid completed baseline checkpoint vectors")
+        model.user_ids = {int(key): n for n, key in enumerate(users)}
+        model.item_ids = {int(key): n for n, key in enumerate(items)}
+        model.item_keys = items
+        model._ego = ego
+        model._final = np.concatenate([uv, iv])
+    return model
+
+
+def record_training_source(run, state):
+    """Preserve the original source and record each subsequent execution."""
+    training_files = ("retrieval/text_item_graph.py", "retrieval/learned_review_retrieval.py",
+                      "retrieval/lightgcn.py", "retrieval/review_multivector.py")
+    if state["arms"]:
+        for name in training_files:
+            saved = run/"source"/name
+            current = PROJECT_ROOT/"src/rating_recsys"/name
+            if not saved.exists() or _file_digest(saved) != _file_digest(current):
+                raise ValueError("Completed arms use different training code; start a separate run")
+    source = code_manifest(PROJECT_ROOT, allow_dirty=True)
+    diff = source.pop("git_diff")
+    attempt = run/"source_attempts"/datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    attempt.mkdir(parents=True, exist_ok=False)
+    (attempt/"source.diff").write_text(diff)
+    names = (*training_files, "experiments/text_retrieval_comparison_cli.py", "experiments/retrieval_resume.py")
+    for name in names:
+        target = attempt/name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(PROJECT_ROOT/"src/rating_recsys"/name, target)
+        original = run/"source"/name
+        if not original.exists():
+            original.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(target, original)
+    if not (run/"source.diff").exists():
+        (run/"source.diff").write_text(diff)
+    state.setdefault("code", source)
+    state.setdefault("execution_attempts", []).append({
+        "source_directory": str(attempt.relative_to(run)), "code": source,
+        "completed_arms_at_start": sorted(state["arms"]),
+        "resume_policy": "completed arms verified and reused; incomplete arms restart from epoch 1",
+    })
+
+
 def train(args, exp, split, queries, bank, c5, fixed_c4, run, state, protected, started):
     import torch
     from rating_recsys.retrieval.text_item_graph import TextItemGraph
@@ -282,14 +345,7 @@ def train(args, exp, split, queries, bank, c5, fixed_c4, run, state, protected, 
     evaluate = lambda ranks: evaluate_rankings(
         [RankingObservation(q.query_id, q.user_id, q.relevance_by_item, tuple(ranks[q.query_id])) for q in queries],
         cutoffs=(10, 20, 50, 100), catalog_ids=item_ids)
-    source = code_manifest(PROJECT_ROOT, allow_dirty=True)
-    (run/"source.diff").write_text(source.pop("git_diff"))
-    state["code"] = source
-    for name in ("retrieval/text_item_graph.py", "retrieval/learned_review_retrieval.py", "retrieval/lightgcn.py",
-                 "retrieval/review_multivector.py", "experiments/text_retrieval_comparison_cli.py"):
-        target = run/"source"/name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(PROJECT_ROOT/"src/rating_recsys"/name, target)
+    record_training_source(run, state)
     state.update(status="training", baseline_metrics={"c5": evaluate(c5), "fixed_c4": evaluate(fixed_c4)})
     write_json(run/"progress.json", state)
 
@@ -316,6 +372,26 @@ def train(args, exp, split, queries, bank, c5, fixed_c4, run, state, protected, 
             base = None
             for condition in ("baseline", "actual", "rewired"):
                 name = f"graph_{condition}_seed{seed}"
+                completed = load_completed_arm(run, state, name, user_ids, item_ids)
+                if completed is not None:
+                    scores, arm = completed
+                    ranks = ranks_from_scores(scores, user_ids, item_ids, queries)
+                    validate_rankings(queries, {name: ranks}, set(item_ids), 100)
+                    recomputed = evaluate(ranks)
+                    check_completed_metrics(name, arm.get("metrics"), recomputed)
+                    state["arms"][name] = {**arm, "metrics": recomputed}
+                    all_ranks[name] = ranks
+                    if condition == "baseline":
+                        base = restore_graph_backbone(run/arm["checkpoint"], cf,
+                            expected_user_ids=sorted({r.user_id for r in split.train}),
+                            expected_item_ids=item_ids)
+                    if seed == exp.random_seed and condition == "baseline" and args.graph_epochs == exp.lightgcn_epochs:
+                        if ranks != fixed_c4:
+                            raise ValueError("Completed baseline differs from prepared C4")
+                        state["baseline_reproduced_exactly"] = True
+                    print(f"{name}: reused completed checkpoint and scores", flush=True)
+                    del scores
+                    continue
                 if args.reuse_graph_run:
                     previous = read_json(args.reuse_graph_run/"metrics.json")
                     old = previous["arms"][name]
@@ -334,14 +410,10 @@ def train(args, exp, split, queries, bank, c5, fixed_c4, run, state, protected, 
                     metadata["reused_checkpoint_from"] = str(old_checkpoint.resolve())
                     ranks = finish_arm(name, None, scores, metadata, old["fit_seconds"], old["curve"], model_path)
                     if condition == "baseline":
-                        base = LightGCN(cf)
-                        with np.load(model_path, allow_pickle=False) as saved:
-                            base.user_ids = {int(k): n for n, k in enumerate(saved["user_ids"])}
-                            base.item_ids = {int(k): n for n, k in enumerate(saved["item_ids"])}
-                            base.item_keys = saved["item_ids"]
-                            base._ego = saved["ego"]
-                            base._final = np.concatenate([saved["user_vectors"], saved["item_vectors"]])
-                    if seed == exp.random_seed and condition == "baseline":
+                        base = restore_graph_backbone(model_path, cf,
+                            expected_user_ids=sorted({r.user_id for r in split.train}),
+                            expected_item_ids=item_ids)
+                    if seed == exp.random_seed and condition == "baseline" and args.graph_epochs == exp.lightgcn_epochs:
                         if ranks != fixed_c4:
                             raise ValueError("Reused seed42 baseline differs from prepared C4")
                         state["baseline_reproduced_exactly"] = True
@@ -389,6 +461,18 @@ def train(args, exp, split, queries, bank, c5, fixed_c4, run, state, protected, 
             assert base is not None
             for mode, text in (("mean", "actual"), ("late", "actual"), ("late", "shuffled")):
                 name = f"review_{mode}_{text}_seed{seed}"
+                completed = load_completed_arm(run, state, name, user_ids, item_ids)
+                if completed is not None:
+                    scores, arm = completed
+                    ranks = ranks_from_scores(scores, user_ids, item_ids, queries)
+                    validate_rankings(queries, {name: ranks}, set(item_ids), 100)
+                    recomputed = evaluate(ranks)
+                    check_completed_metrics(name, arm.get("metrics"), recomputed)
+                    state["arms"][name] = {**arm, "metrics": recomputed}
+                    all_ranks[name] = ranks
+                    print(f"{name}: reused completed checkpoint and scores", flush=True)
+                    del scores
+                    continue
                 config = LearnedReviewRetrievalConfig(mode=mode, text_condition=text, epochs=args.review_epochs,
                                                      seed=seed, threads=args.threads,
                                                      balance_text_presence=args.balance_text_presence)
@@ -452,6 +536,8 @@ def train(args, exp, split, queries, bank, c5, fixed_c4, run, state, protected, 
     state["ranker_hashes_after"] = protect_ranker(args.baseline_run)
     if state["ranker_hashes_after"] != protected:
         raise ValueError("Ranker changed during retrieval comparison")
+    state.pop("active_arm", None)
+    state.pop("active_epoch", None)
     state.update(status="complete", seconds_this_process=time.perf_counter()-started,
                  peak_rss_kib=__import__("resource").getrusage(__import__("resource").RUSAGE_SELF).ru_maxrss)
     write_json(run/"metrics.json", state)

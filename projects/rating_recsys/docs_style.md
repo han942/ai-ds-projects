@@ -176,7 +176,7 @@ Use numbered lists when:
 - documenting setup or execution steps,
 - separating a fixed set of analyses, methods, findings, or goals.
 
-When a section contains several distinct items, prefer this pattern:
+For a small set of distinct items that do not need a side-by-side comparison, this pattern can work:
 
 ```md
 1. First item
@@ -190,7 +190,7 @@ When a section contains several distinct items, prefer this pattern:
    - Next action
 ```
 
-Use the numbered items for the main grouping and short bullets for the facts inside each item.
+Use numbered items for steps or a small main grouping, and short bullets for independent facts. Do not apply the same numbered outline to every section.
 
 Do not reduce a section to labels and fragments alone. When a concept, decision, or method needs context, add a short paragraph before the list that explains:
 
@@ -211,7 +211,15 @@ Good uses:
 - configuration comparison,
 - before/after changes.
 
-Reserve tables for values that readers need to compare across the same columns, such as exact metrics or configuration grids. Use numbered items and bullets for document navigation, status summaries, method lists, and qualitative findings.
+Tables also work for qualitative comparisons: document responsibilities, method differences, what an experiment changes, and what its result allows us to conclude. Keep cells brief; explain mechanisms and caveats in nearby prose instead of putting long paragraphs inside a table.
+
+### Explanation Depth
+
+Use more explanation where it changes the reader's understanding of the conclusion. For important methods or findings, briefly describe the problem, how the method addresses it, and why the observed result supports the decision. A score or status label alone is not enough.
+
+For example, explain why a reranker cannot recover a restaurant missing from the candidate set, why a text-only gain may not improve a behavioral baseline, and why high reconstruction cosine does not establish neighbor preservation. Keep routine settings, dates, costs, and verification counts in compact lists or tables.
+
+The entry document gives the conclusion and points to the owning report. The report explains the mechanism, comparison, and interpretation. Detailed settings, full curves, and checksums remain in artifacts. Avoid repeating the same long explanation across all three layers.
 
 ### Diagrams
 

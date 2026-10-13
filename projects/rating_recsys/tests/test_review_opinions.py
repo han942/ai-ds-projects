@@ -152,7 +152,7 @@ def test_later_nonpreference_negation_does_not_invert_food_praise():
 
 def test_non_spiciness_followed_by_satisfaction_keeps_the_positive_polarity():
     assert compact("맵지 않아 좋다.") == [("taste", "맵", "positive")]
-    assert VERSION == "raw-multi-opinion-rules-v3"
+    assert VERSION == "raw-multi-opinion-rules-v4"
 
 
 @pytest.mark.parametrize("text,polarity", [
@@ -177,3 +177,36 @@ def test_emphatic_negation_preserves_polarity_and_original_scope(text, polarity)
 def test_emphatic_negation_does_not_flip_other_opinions():
     assert compact("직원은 친절하지도 않지만 국물은 맛있다.") == [
         ("service", "직원", "negative"), ("taste", "국물", "positive")]
+
+
+@pytest.mark.parametrize("text,category,opinion", [
+    ("국물은 그동안 맛있었다.", "taste", "맛있었다"),
+    ("서비스는 한동안 좋았다.", "service", "좋았다"),
+])
+def test_temporal_word_suffix_is_not_a_negator(text, category, opinion):
+    records = extract_opinions(text)
+    assert len(records) == 1
+    record = records[0]
+    assert record["category"] == category
+    assert record["polarity"] == "positive"
+    assert record["opinion"] == opinion
+    assert "local-negation:1" not in record["rule_trace"]
+    assert text[record["opinion_start"]:record["opinion_end"]] == opinion
+    assert text[record["start"]:record["end"]] == record["evidence"]
+
+
+@pytest.mark.parametrize("text,opinion", [
+    ("국물은 안 맛있다.", "안 맛있다"),
+    ("국물은 안맛있다.", "안맛있다"),
+    ("안맛있다.", "안맛있다"),
+    ("국물에는 못 만족했다.", "못 만족했다"),
+])
+def test_standalone_negator_with_or_without_predicate_spacing_keeps_source_span(text, opinion):
+    records = extract_opinions(text)
+    assert len(records) == 1
+    record = records[0]
+    assert record["polarity"] == "negative"
+    assert "local-negation:1" in record["rule_trace"]
+    assert record["opinion"] == opinion
+    assert text[record["opinion_start"]:record["opinion_end"]] == opinion
+    assert text[record["start"]:record["end"]] == record["evidence"]

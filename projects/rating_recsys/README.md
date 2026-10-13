@@ -10,30 +10,15 @@ The current baseline uses visit and rating history only. Several review-based me
 
 ## Documentation
 
-1. Research plan and progress
+Start here for the task and system overview, then use the results index to choose a report. Each document has a distinct responsibility.
 
-   - [PLAN.md](./PLAN.md)
-   - Completed experiments, current decisions, and next steps
-
-2. Baseline definition
-
-   - [BASELINE_MODEL.md](./BASELINE_MODEL.md)
-   - Inputs, candidate retrieval, reranking, training, and evaluation
-
-3. Experiment results
-
-   - [reports/README.md](./reports/README.md)
-   - Method-level results, limitations, and source artifacts
-
-4. Satisfaction labels
-
-   - [SATISFACTION_BASELINE.md](./SATISFACTION_BASELINE.md)
-   - User-specific strong and weak satisfaction thresholds
-
-5. Local artifacts
-
-   - [artifacts/README.md](./artifacts/README.md)
-   - Retention and restoration scope for models, caches, source text, and archives
+| Document | Purpose |
+|---|---|
+| [PLAN.md](./PLAN.md) | Research questions, completed work, and next validation priorities |
+| [BASELINE_MODEL.md](./BASELINE_MODEL.md) | Baseline inputs, retrieval, reranking, and evaluation rules |
+| [reports/README.md](./reports/README.md) | Find the report explaining a method and its conclusion |
+| [SATISFACTION_BASELINE.md](./SATISFACTION_BASELINE.md) | Definitions and examples of user-specific satisfaction labels |
+| [artifacts/README.md](./artifacts/README.md) | Retention and restoration of models, caches, source text, and archives |
 
 Most detailed research documents are currently written in Korean.
 
@@ -51,29 +36,14 @@ flowchart LR
     E --> F[Top-10 recommendations]
 ```
 
-1. Candidate retrieval
+| Component | Information and role |
+|---|---|
+| C1 item-item retrieval | Finds restaurants co-visited with those in the user's history |
+| C4 LightGCN retrieval | Uses relationships propagated through the user–restaurant visit graph |
+| C5 fusion | Combines C1/C4 ranks with RRF and excludes visited items, retaining up to 100 candidates |
+| LambdaRank reranking | Uses 16 behavioral, rating, and region features to order the same candidates |
 
-   - C1: item-item co-visitation
-   - C4: LightGCN over the user–restaurant visit graph
-   - C5: Reciprocal Rank Fusion of C1 and C4
-   - Previously visited restaurants are removed; up to 100 candidates remain
-
-2. Reranking
-
-   - LightGBM LambdaRank
-   - 16 visit, rating, popularity, graph, and region features
-   - Final Top-10 output
-
-3. Review and menu data
-
-   - Review text has been evaluated in separate experiments
-   - Review text is not part of the current baseline
-   - Menu and external restaurant attributes have not been evaluated as recommendation inputs
-
-4. Current research scope
-
-   - Improve full-catalog candidate retrieval with review text
-   - Further reranking experiments are paused
+Review text is not part of the baseline; menu and external attributes remain unevaluated. Current work focuses on finding better candidates from the full catalog. Reranking cannot introduce an item missing from its candidate set, which limits its ability to address retrieval failures.
 
 Two-stage refers to the full retrieval–reranking pipeline. Two-Tower refers to separate user and restaurant encoders. Temporal splitting and sequential recommendation are separate experimental dimensions.
 
@@ -113,21 +83,14 @@ The temporal split reconstructs what would have been available at recommendation
 
 These are the 2026-10-04 Window/history-aware test results for seed 42. They were produced before the 2026-10-12 bug fixes.
 
-1. Candidate retrieval
+| Stage | Recall@100 | NDCG@10 | Recall@10 |
+|---|---:|---:|---:|
+| C5 candidate order | 20.1626% | 0.026590 | — |
+| Same C5 → LambdaRank | 20.1626% | 0.025467 | 3.6502% |
 
-   - C5 Recall@100: **20.1626%**
-   - C5 candidate-order NDCG@10: **0.026590**
+Recall@100 measures the share of future relevant items retrieved, averaged per user. These results leave substantial room to improve candidate retrieval. Reranking retains the same items, so Recall@100 stays unchanged; NDCG@10 measures its effect on the top positions. This test did not establish a reranking gain.
 
-2. Final reranking
-
-   - LambdaRank NDCG@10: **0.025467**
-   - LambdaRank Recall@10: **3.6502%**
-
-3. Decision
-
-   - The test run did not establish a reranking improvement over C5 order.
-   - No review-based method has been adopted into the baseline.
-   - Real-data retraining and evaluation after the October 12 fixes have not been run.
+No review-based method has been adopted, and real-data retraining and evaluation after the October 12 fixes have not been run.
 
 See the [baseline run report](./artifacts/runs/20261004T125314601899Z-e7896add/report.md) and [baseline diagnostics](./reports/baseline.md).
 

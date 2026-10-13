@@ -8,6 +8,8 @@
 
 **현재 판단: 압축은 확인했지만 추천 모델은 유지한다.** 실행 기록상 Supabase 본문 리뷰 94,301개의 코드 생성과 validation 비교를 완료했다. 과거 리뷰의 코드+공유 모델 tensor payload는 원 벡터보다 **144.63배 작았지만**, 원래 Top-10 이웃 overlap은 **10.42%**였고 추천 개선은 확인하지 못했다.
 
+이 실험은 리뷰의 384차원 실수 벡터를 코드북 번호 3개로 표현한 것이다. 저장과 공유에는 유리하지만, 추천에 중요한 리뷰 간의 작은 차이를 얼마나 남기는지가 별도 문제다. 따라서 압축률뿐 아니라 복원 오차·가까운 리뷰의 변화·실제 후보 검색을 함께 확인한다.
+
 1. 과거 리뷰 학습·평가
 
    - E5→RQ-VAE 압축·복원
@@ -29,9 +31,9 @@
 4. 현재 보관 상태
 
    - 코드·보고서 존재
-   - 원 run 폴더는 로컬에 없음
+   - 이 로컬에는 run의 모델·리뷰 코드·검산 파일도 보존돼 있음
    - 아래 수치는 실행 당시 기록
-   - 이번 문서 정리에서 원 artifact 재검산 불가
+   - 이번 문서 정리에서는 새 artifact 재검산을 수행하지 않음
 
 <a id="무엇을-코드로-바꾸는가"></a>
 
@@ -39,7 +41,7 @@
 
 `리뷰 본문 → 고정 E5 임베딩 384차원 → 학습 encoder 32차원 → 잔차 양자화 3단계 → 코드 3개` 순서다. 예를 들어 `(17, 82, 4)`는 각 단계 코드북에서 선택한 벡터의 번호다. 코드 벡터를 합친 뒤 decoder를 통과하면 원래 384차원 공간의 근사 벡터를 복원할 수 있다.
 
-각 단계는 이전 단계가 남긴 오차를 양자화한다. 숫자를 연속 실수처럼 평균하거나 코드 번호의 차이를 의미 거리로 쓰지 않는다. 첫 코드가 맛, 둘째가 가격 같은 해석을 자동으로 갖는 것도 아니다.
+코드북은 학습한 대표 벡터의 목록이며, 양자화는 가장 가까운 대표 벡터를 고르고 그 번호를 남기는 과정이다. 첫 단계에서 근사한 뒤 남은 차이를 다음 단계가 다시 근사하므로 코드가 3개 생긴다. 코드 번호 자체를 평균하거나 번호 차이를 의미 거리로 쓰지 않는다. 첫 코드가 맛, 둘째가 가격 같은 해석을 자동으로 갖는 것도 아니다.
 
 [TIGER](https://arxiv.org/abs/2305.05065)는 **식당/상품 같은 추천 대상**의 표현을 Semantic ID로 바꾸고, 별도의 생성 모델이 그 ID를 예측한다. 이번은 사용자가 지정한 **리뷰별 코드** 실험이다. 코드가 같은 리뷰를 하나로 삭제하지 않으며, 코드 자체는 고유 review ID나 식당 ID가 아니다. 식당 ID를 생성하는 추천 Transformer는 구현·학습하지 않았다.
 
@@ -47,78 +49,23 @@ RQ-VAE의 잔차 양자화·encoder/decoder·codebook/commitment loss는 [원 RQ
 
 ## 입력과 비교 조건
 
-1. 과거 입력
+모델을 학습하는 과거 리뷰, 압축을 점검하는 audit, 이후 식당 추천을 평가하는 validation을 구분한다. 같은 실제 E5 입력이 학습과 audit 양쪽에 들어가지 않도록 접두어·토큰 절단까지 적용한 입력으로 그룹을 나눴다.
 
-   - 첫 사용자–식당 상호작용
-   - `event_date ≤ 2025-12-19`
-   - 모든 평점 유지
+| 비교 축 | 고정 조건 |
+|---|---|
+| 과거 리뷰 | 첫 사용자–식당 상호작용 중 `event_date ≤ 2025-12-19`; 모든 평점 유지 |
+| 새 E5 입력 | `intfloat/multilingual-e5-small`; 384차원 float32·L2; 전체 본문 `passage:`·최대 512토큰 |
+| Fit / audit | 실제 E5 token IDs가 같은 리뷰를 한 그룹으로 처리; 과거 내부 90% / 10% |
+| 모델 | Encoder 384→128→32, decoder 32→128→384; 단계별 코드북 256개 × 3단계 |
+| Scaling·학습 | Fit 평균·전역 RMS; AE warmup 5epoch → fit 잔차 KMeans 초기화 → RQ 40epoch |
+| 최적화·선택 | Adam 0.001·batch 512·commitment β=0.25·seed 42·CPU 4threads; 고정 마지막 epoch |
+| 추천 평가 | T1 이후~2026-05-04 validation; history-aware·최소 이력 10·평균 가중치 0.5·이동 한도 0.5; test 미평가 |
+| 프로필·후보 | 최근 사용자 리뷰 최대 20개·식당 30개; 리뷰 L2 → 동등 평균 → 프로필 L2; 과거 catalog·K=100·방문 제외 |
+| 전체 DB 적용 | 같은 과거 모델을 업데이트 없이 적용; 이후 리뷰 코드는 과거 validation 입력에 미사용 |
 
-2. 리뷰 임베딩
+E5 revision은 `614241f622f53c4eeff9890bdc4f31cfecc418b3`다. 기존 합성 프로필 캐시를 쓰지 않고 리뷰별 로컬 임베딩을 새로 만들었으며 외부 embedding API 호출은 0회였다. 이전 RLMRec의 query/passage·문장 블록 정책과 입력이 달라 서로의 수치를 압축만 바꾼 대조로 비교하지 않는다.
 
-   - `intfloat/multilingual-e5-small`
-   - Revision `614241f622f53c4eeff9890bdc4f31cfecc418b3`
-   - 384차원 float32, L2 정규화
-
-3. 역할·길이
-
-   - 전체 리뷰에 `passage:` 사용
-   - 리뷰별 최대 512토큰
-   - RLMRec의 query/passage·문장 블록 캐시와 다른 입력 정책
-
-4. 캐시
-
-   - 기존 합성 프로필 캐시는 미사용
-   - 리뷰별 로컬 E5 새로 생성
-   - 외부 embedding API 호출 0회
-
-5. 학습·검증 분리
-
-   - 접두어와 512토큰 절단 후 E5 token IDs가 같은 리뷰를 한 그룹으로 처리
-   - 과거 내부 fit 90%, audit 10%
-
-6. 모델 구조
-
-   - Encoder: 384→128→32
-   - Decoder: 32→128→384
-   - Codebook: 256개 × 3단계
-
-7. Scaling
-
-   - Fit 리뷰의 평균과 전역 RMS만 사용
-   - 평균 벡터 복원 기준도 별도 비교
-
-8. 최적화
-
-   - AE warmup 5epoch
-   - Fit latent 잔차 KMeans 초기화
-   - RQ 학습 40epoch
-   - Adam 0.001, batch 512, commitment β=0.25
-   - seed 42, CPU 4threads
-
-9. 모델 선택
-
-   - 정해진 예산의 마지막 epoch 사용
-   - 추천 validation 지표로 checkpoint·하이퍼파라미터를 선택하지 않음
-
-10. 추천 평가
-
-   - T1 이후부터 2026-05-04까지 validation
-   - History-aware 만족도, min history 10
-   - 평균 가중치 0.5, 이동 한도 0.5
-   - Test 성능 미계산
-
-11. 프로필·후보
-
-   - 모든 평점의 최근 사용자 리뷰 최대 20개, 식당 최대 30개
-   - 리뷰별 L2 정규화→동등 평균→프로필 L2 정규화
-   - 과거 catalog와 K=100 고정
-   - 방문 식당 제외
-   - 사용자 본문이 없으면 인기 fallback
-
-12. DB 전체 적용
-
-   - 과거 fit 모델을 이후 리뷰에 업데이트 없이 적용
-   - 미래 리뷰 코드는 앞선 validation 평가 입력에 미사용
+추천 validation으로 checkpoint·하이퍼파라미터를 선택하지 않았고, 사용자 본문이 없으면 인기 fallback을 사용했다. 평균 벡터만 복원하는 기준도 함께 측정해 높은 cosine이 공통 성분만 복원한 결과인지 확인한다.
 
 역사적 event_date로 과거 경험을 재구성한 비교다. 리뷰가 실제 DB에 적재된 시점은 2026년 9월이므로, 당시 DB에서 이용 가능했던 텍스트라고 주장하지 않는다.
 
@@ -126,44 +73,17 @@ RQ-VAE의 잔차 양자화·encoder/decoder·codebook/commitment loss는 [원 RQ
 
 ## 효과 분리 기준
 
-1. 원래 E5와 코드 복원
+복원 벡터가 원래 벡터와 가깝더라도, 리뷰 사이의 작은 거리 차이가 바뀌면 가까운 이웃의 순서도 달라질 수 있다. 또한 원래 E5의 이웃을 보존하는 것만으로 미래 만족도까지 잘 맞힌다고 보장할 수 없다. 아래 세 수준을 함께 본다: 복원 품질, 검색 구조 보존, 실제 추천 결과.
 
-   - 측정: MSE, 원래 벡터 cosine, 학습 평균 복원 대비 오차
-   - 목적: 압축 후 표현 보존과 공통 성분 복원 착시 구분
-
-2. 연속 경로와 코드 복원
-
-   - 측정: 같은 encoder/decoder에서 양자화만 우회
-   - 목적: 학습 경로와 이산 코드 경로의 출력 차이 확인
-   - 한계: 독립 AE 실험이나 전체 양자화 인과 효과가 아님
-
-3. 원래 이웃과 복원 이웃
-
-   - 측정: 최대 1,000 query × 10,000 reference의 Top-10 overlap
-   - 목적: E5 근접 구조 보존 확인
-   - 한계: 전체 추천 Recall이나 실제 의미 정답과 다름
-
-4. 코드 사용·충돌
-
-   - 측정: 단계별 사용률, perplexity, 최대 버킷, prefix 중복
-   - 목적: 코드 쏠림과 실제 분해능 확인
-   - 같은 본문 반복도 충돌에 포함
-
-5. 저장량
-
-   - 비교: float32 벡터 vs 코드+공유 모델 tensor
-   - ID·파일 포맷·원 벡터를 별도로 보존하는 연구용 디스크 비용은 제외
-
-6. 추천 검색
-
-   - 비교: raw / continuous / decoded 프로필
-   - 지표: Recall@100, NDCG@10
-   - 목적: 코드 복원의 미래 식당 검색 영향 확인
-
-7. C5 결합
-
-   - 비교: 같은 C5의 cosine 재정렬 또는 dense RRF 결합
-   - 목적: 행동 후보 안 순위와 후보 보완 효과 구분
+| 확인할 효과 | 측정·대조 | 해석의 범위 |
+|---|---|---|
+| 복원 품질 | MSE·cosine, fit 평균만 복원한 기준 | 높은 cosine을 의미 보존 비율로 해석하지 않음 |
+| 학습 변환과 양자화 | 같은 encoder/decoder의 연속 경로 vs 코드 복원 | 독립 AE 대조나 양자화의 전체 인과 효과는 아님 |
+| 이웃 보존 | 최대 1,000 query × 10,000 reference의 Top-10 overlap | 원래 E5 근접 구조의 보존이며 실제 의미 정답·추천 Recall과 다름 |
+| 코드 분해능 | 사용률·perplexity·최대 버킷·prefix 중복 | 같은 본문 반복을 구분하며 코드 중복을 의미 충돌로 단정하지 않음 |
+| 저장량 | Float32 벡터 vs 코드+공유 모델 tensor | ID·파일 형식·보존한 원 벡터 캐시는 제외 |
+| 추천 영향 | Raw / continuous / decoded의 Recall@100·NDCG@10 | 과거 audit와 별도의 미래 식당 validation |
+| 행동 후보 결합 | C5 cosine 재정렬 vs dense RRF | 같은 후보의 순서 변화와 후보 집합 변화 구분 |
 
 C5 비교는 **LambdaRank 이전 후보 순서**다. cosine 재정렬을 기존 학습된 LambdaRank의 개선으로 부르지 않는다. 동일 경로 raw와 RQ, C5와 각 경로의 NDCG@10 차이는 동일 사용자 paired bootstrap 2,000회로 계산한다. 이번 validation 결과는 탐색이며 독립 미래 holdout의 최종 증거가 아니다.
 
@@ -239,7 +159,7 @@ C5 비교는 **LambdaRank 이전 후보 순서**다. cosine 재정렬을 기존 
 
 ## 재현과 artifact
 
-**2026-10-12 현재 `artifacts/comparisons/rqvae/20261010T065109Z` 원 artifact가 로컬에 없다.** 아래 파일명·검증 수치·비용은 실행 당시 기록이다. 재현 전에 원 모델·코드·임베딩 캐시와 Python 3.12의 별도 `.venv-rqvae` 환경을 복원하거나 새 실행으로 준비해야 한다. 이 문서 정리에서는 다운로드·학습·DB 조회를 실행하지 않았다.
+이 로컬에는 `artifacts/comparisons/rqvae/20261010T065109Z`의 모델·코드·지표·검산 파일이 보존돼 있다. 다른 머신에서는 Git에 없는 artifact와 Python 3.12의 `.venv-rqvae` 환경을 별도로 준비해야 한다. 아래 검증 수치·비용은 실행 당시 기록이며, 이번 문서 정리에서는 새 다운로드·학습·DB 조회·결과 재검산을 하지 않았다.
 
 아래는 과거 실행 명령이다. 첫 명령은 단순 검산이 아니라 모델 다운로드와 임베딩·RQ 학습을 포함할 수 있다. 프로젝트 루트 기준이다.
 
@@ -253,7 +173,7 @@ PYTHONPATH=src .venv-rqvae/bin/python -m rating_recsys.experiments.rqvae_cli --d
 .venv-rqvae/bin/python scripts/encode_supabase_review_codes.py --run-dir artifacts/comparisons/rqvae/<run>
 ```
 
-원 artifact를 복원하면 다음 명령으로 저장된 코드·순위를 원래 임베딩을 읽지 않고 검증한다. 이 명령은 새 학습·예측·DB 조회를 하지 않는다.
+원 artifact가 준비돼 있으면 다음 명령으로 저장된 코드·순위를 원래 임베딩을 입력으로 사용하지 않고 검증한다. 이 명령은 새 학습·추천 예측·DB 조회를 하지 않는다.
 
 ```bash
 .venv-rqvae/bin/python scripts/verify_review_codes.py --run-dir artifacts/comparisons/rqvae/20261010T065109Z
@@ -261,7 +181,7 @@ PYTHONPATH=src .venv-rqvae/bin/python -m rating_recsys.experiments.rqvae_cli --d
 
 ### 당시 결과·검증 기록
 
-아래는 현재 없는 원 artifact의 과거 경로다. 클릭 가능한 링크로 표시하지 않으며, 복원 후 해당 경로에서 확인한다.
+대표 파일은 [실제 지표](../artifacts/comparisons/rqvae/20261010T065109Z/metrics.json), [전체 리뷰 코드](../artifacts/comparisons/rqvae/20261010T065109Z/supabase_review_codes.npz), [검산 결과](../artifacts/comparisons/rqvae/20261010T065109Z/verification.json)다. 다음 목록은 당시 어떤 검증을 수행했는지 설명한다.
 
 - 실제 수치 `artifacts/comparisons/rqvae/20261010T065109Z/metrics.json`, 독립 재검산 `verification.json`: 5개 artifact·2개 구현 hash, 리뷰 ID·fit/audit 분리·과거 catalog/방문 제외를 확인. 코드 복원 최대 오차 `1.68e-8`; 저장 순위의 NDCG/Recall@10/100 재계산 일치.
 - 전체 DB 적용 근거 `supabase_application.json`, 전체 리뷰 코드 `supabase_review_codes.npz`, 고정 모델 `model.pt`.
