@@ -14,7 +14,7 @@ from rating_recsys.datasets.models import Interaction
 from rating_recsys.experiments.config import ExperimentConfig
 from rating_recsys.experiments.queries import build_training_windows
 from rating_recsys.retrieval.review_embeddings import E5_MODEL, model_embedding_config, profile_api_inputs
-from rating_recsys.retrieval.two_tower import CachedProfiles, TwoTower, TwoTowerConfig
+from rating_recsys.retrieval.two_tower import BehavioralProfiles, CachedProfiles, TwoTower, TwoTowerConfig
 
 
 class Formatter:
@@ -75,6 +75,7 @@ def case(tmp_path):
 @pytest.mark.parametrize("kwargs", [
     {"negative_samples": 0}, {"temperature": 0}, {"threads": 0},
     {"id_dropout": 1}, {"learning_rate": float("nan")}, {"weight_decay": -1},
+    {"input_mode": "unknown"},
 ])
 def test_config_validation(kwargs):
     with pytest.raises(ValueError):
@@ -194,7 +195,9 @@ def test_fit_deterministic_callback_stop_exclusion_and_saved_schema(tmp_path):
     assert artifact["bytes"] == destination.stat().st_size
     assert artifact["sha256"] == hashlib.sha256(destination.read_bytes()).hexdigest()
     saved = torch.load(destination, weights_only=True)
-    assert saved["schema"] == "frozen-e5-two-tower-v1"
+    assert saved["schema"] == "frozen-e5-two-tower-v2"
+    assert saved["trained_users"] == sorted(model.trained_users)
+    assert saved["trained_items"] == sorted(model.trained_items)
     assert saved["config"]["name"] == "two_tower"
     assert set(saved["bank"]) == {"users", "items", "user_keys", "item_keys"}
     assert saved["metadata"]["training_positives"] == 12
@@ -216,3 +219,74 @@ def test_no_trainable_windows_and_unfitted_inference_fail(tmp_path):
         model.save(tmp_path / "unfitted.pt")
     with pytest.raises(ValueError, match="No cutoff-safe"):
         model.fit(rows[:6], texts)
+
+
+def test_controlled_profiles_share_behavior_and_ignore_text_metadata(tmp_path):
+    rows, texts, _, reader, _ = case(tmp_path)
+    no_text = BehavioralProfiles("behavior").build(rows[:6], {}, [1, 4, 999])
+    with_text = BehavioralProfiles("behavior_text", reader).build(rows[:6], texts, [1, 4, 999])
+    torch.testing.assert_close(no_text.users[:, 384:], with_text.users[:, 384:], rtol=0, atol=0)
+    torch.testing.assert_close(no_text.items[:, 384:], with_text.items[:, 384:], rtol=0, atol=0)
+    assert no_text.users[0, 384] == pytest.approx(np.log(2))
+    assert no_text.users[0, 385] == 1
+    assert no_text.users[1, 384] > 0  # empty body still has an observed visit
+    assert torch.count_nonzero(no_text.users[2]) == 0
+    assert torch.count_nonzero(no_text.users[:, :384]) == 0
+    assert torch.count_nonzero(with_text.users[:, :384]) > 0
+    changed = BehavioralProfiles("behavior").build(rows[:6], {r.review_id: "altered" for r in rows}, [1, 4, 999])
+    torch.testing.assert_close(no_text.users, changed.users, rtol=0, atol=0)
+    torch.testing.assert_close(no_text.items, changed.items, rtol=0, atol=0)
+
+
+def test_controlled_training_matches_initialization_and_sampling(tmp_path):
+    rows, texts, legacy, reader, _ = case(tmp_path)
+    fitted = []
+    for mode in ("behavior", "behavior_text"):
+        cfg = replace(legacy.config, input_mode=mode)
+        fitted.append(TwoTower(cfg, embedding_config=legacy.embedding_config, formatter=Formatter(),
+            profiles=BehavioralProfiles(mode, reader if mode == "behavior_text" else None),
+            eval_user_ids=range(1, 7), experiment_config=legacy.experiment_config).fit(rows, texts))
+    for field in ("initial_parameters_sha256", "parameter_count", "training_sequence_sha256", "training_positives"):
+        assert fitted[0].metadata[field] == fitted[1].metadata[field]
+    # Behavior-only remains usable with missing review cache/tokenizer and changed future/body inputs.
+    again = TwoTower(fitted[0].config, embedding_config=replace(legacy.embedding_config, cache_path="/missing/cache"),
+                     formatter=None, eval_user_ids=range(1, 7), experiment_config=legacy.experiment_config)
+    again.fit(rows, {})
+    np.testing.assert_array_equal(fitted[0]._encode()[1], again._encode()[1])
+    np.testing.assert_array_equal(fitted[0]._encode()[2], again._encode()[2])
+
+
+def test_untrained_ids_use_zero_embedding_and_participation_survives_save(tmp_path):
+    rows, texts, legacy, _, _ = case(tmp_path)
+    # User 99 has history, but no eligible future positive. Item 999 first
+    # appears after the final training window's cutoff, so it is never sampled.
+    rows += [row(90, 99, 10, 1, 9), row(91, 1, 999, 7, 20)]
+    model = TwoTower(replace(legacy.config, input_mode="behavior", epochs=1),
+                     embedding_config=legacy.embedding_config, formatter=None,
+                     eval_user_ids=[1, 99], experiment_config=legacy.experiment_config)
+    model.fit(rows, {})
+    assert 99 in model.user_ids and 99 not in model.trained_users
+    assert 999 in model.item_ids and 999 not in model.trained_items
+    before_users, before_items = model._encode()[1:]
+    before_users, before_items = before_users.copy(), before_items.copy()
+    with torch.no_grad():
+        model.user_tower.ids.weight[model.user_ids[99] + 1].fill_(1000)
+        model.item_tower.ids.weight[model.item_ids[999] + 1].fill_(-1000)
+        upos = model._bank.user_keys.index(99)
+        ipos = model._bank.item_keys.index(999)
+        expected_user = model.user_tower(torch.tensor([0]), model._bank.users[upos:upos+1]).numpy()[0]
+        expected_item = model.item_tower(torch.tensor([0]), model._bank.items[ipos:ipos+1]).numpy()[0]
+    model._encoded = None
+    _, users, items = model._encode()
+    np.testing.assert_array_equal(users, before_users)
+    np.testing.assert_array_equal(items, before_items)
+    np.testing.assert_allclose(users[upos], expected_user, atol=1e-7)
+    np.testing.assert_allclose(items[ipos], expected_item, atol=1e-7)
+    assert len(model.recommend([99], {99: [10]}, 100)[99]) > 0
+    assert model.metadata["evaluation_users_without_trained_id"] == 1
+    assert model.metadata["evaluation_items_without_trained_id"] >= 1
+    destination = tmp_path / "participation.pt"
+    model.save(destination)
+    saved = torch.load(destination, weights_only=True)
+    assert saved["trained_users"] == sorted(model.trained_users)
+    assert saved["trained_items"] == sorted(model.trained_items)

@@ -152,4 +152,28 @@ def test_later_nonpreference_negation_does_not_invert_food_praise():
 
 def test_non_spiciness_followed_by_satisfaction_keeps_the_positive_polarity():
     assert compact("맵지 않아 좋다.") == [("taste", "맵", "positive")]
-    assert VERSION == "raw-multi-opinion-rules-v2"
+    assert VERSION == "raw-multi-opinion-rules-v3"
+
+
+@pytest.mark.parametrize("text,polarity", [
+    ("직원은 친절하지도 않다.", "negative"),
+    ("친절하지도않음", "negative"),
+    ("국물은 맛있지도 않았다.", "negative"),
+    ("맛이 좋지도 않다.", "negative"),
+    ("웨이팅을 좋아하지도 않아요.", "negative"),
+    ("국물은 맛있다고 생각하지도 않는다.", "unknown"),
+    ("국물은 안 맛있지도 않다.", "unknown"),
+])
+def test_emphatic_negation_preserves_polarity_and_original_scope(text, polarity):
+    records = extract_opinions(text)
+    assert len(records) == 1
+    record = records[0]
+    assert record["polarity"] == polarity
+    assert "지도" in record["opinion"] and "않" in record["opinion"]
+    assert text[record["opinion_start"]:record["opinion_end"]] == record["opinion"]
+    assert text[record["start"]:record["end"]] == record["evidence"]
+
+
+def test_emphatic_negation_does_not_flip_other_opinions():
+    assert compact("직원은 친절하지도 않지만 국물은 맛있다.") == [
+        ("service", "직원", "negative"), ("taste", "국물", "positive")]

@@ -66,17 +66,23 @@ class LightGBMLambdaRanker:
         groups,
         *,
         eval_set: tuple[object, object, object] | None = None,
+        eval_idcg=None,
+        eval_query_count: int | None = None,
         early_stopping_rounds: int | None = None,
     ) -> None:
         """Fit one row per candidate; ``groups`` holds the row count per query.
 
-        ``eval_set`` is ``(features, labels, groups)``. Early stopping monitors
-        candidate-normalized NDCG at ``ranking_k`` only. Its IDCG uses the
-        candidate labels, not unretrieved positives used by end-to-end metrics.
+        ``eval_set`` is ``(features, labels, groups)``. Supply ``eval_idcg``
+        from each query's complete truth and ``eval_query_count`` including
+        relevant queries without candidates to match end-to-end NDCG. Exact
+        score ties preserve evaluation row order. Omitting these arguments
+        retains the legacy candidate-normalized metric.
         """
 
         if not len(groups):
             raise ValueError("LambdaRank requires at least one query group")
+        if eval_set is None and (eval_idcg is not None or eval_query_count is not None):
+            raise ValueError("Validation normalization requires eval_set")
         kwargs: dict[str, object] = {}
         if eval_set is not None:
             eval_features, eval_labels, eval_groups = eval_set
@@ -96,6 +102,13 @@ class LightGBMLambdaRanker:
             k = min(self._ranking_k, width)
             discount = 1 / np.log2(np.arange(k) + 2)
             ideal = (np.sort(gains, axis=1)[:, ::-1][:, :k] * discount).sum(axis=1)
+            if eval_idcg is not None:
+                ideal = np.asarray(eval_idcg, dtype=np.float64)
+                if ideal.shape != (len(eval_groups),) or not np.isfinite(ideal).all() or np.any(ideal <= 0):
+                    raise ValueError("eval_idcg must contain one finite positive value per validation group")
+            query_count = len(eval_groups) if eval_query_count is None else eval_query_count
+            if not isinstance(query_count, int) or query_count < len(eval_groups):
+                raise ValueError("eval_query_count must include every validation group")
 
             def common_ndcg(y_true, predictions):
                 scores = np.full_like(gains, -np.inf)
@@ -103,7 +116,7 @@ class LightGBMLambdaRanker:
                 order = np.argsort(-scores, axis=1, kind="stable")[:, :k]
                 dcg = (np.take_along_axis(gains, order, axis=1) * discount).sum(axis=1)
                 values = np.divide(dcg, ideal, out=np.zeros_like(dcg), where=ideal > 0)
-                return f"ndcg@{self._ranking_k}", float(values.mean()), True
+                return f"ndcg@{self._ranking_k}", float(values.sum() / query_count), True
             # LightGBM 4.7 deprecates eval_set in favour of eval_X/eval_y.
             if "eval_X" in inspect.signature(self._model.fit).parameters:
                 kwargs = {"eval_X": (eval_features,), "eval_y": (eval_labels,)}

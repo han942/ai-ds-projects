@@ -7,12 +7,20 @@
 
 ## 과정
 
-- 현재 baseline은 텍스트 없는 Two-stage 추천: item-item·LightGCN 후보 검색 + LambdaRank 재정렬이다. 별도 E5 Two-Tower 후보 모델은 구현·3조건 CPU 비교를 완료했지만 미채택했다. 기존 test 재사용에 따른 탐색 결과로 구분한다.
+- 현재 baseline은 텍스트 없는 Two-stage 추천: item-item·LightGCN 후보 검색 + LambdaRank 재정렬이다. 별도 E5 Two-Tower 초기 3조건 CPU 비교와 후속 동일 구조의 행동만/행동+텍스트 3seed×12epoch validation 대조를 완료했지만 미채택했다. 초기 test 재사용과 후속 반복 validation 탐색을 구분한다.
 - 전체 범위는 현재 baseline → 후보 모델 비교 → 리뷰 텍스트 결합 → Generative Retrieval → 리스트 생성형 추천·OneRec 통합 실험이다.
 - 후보 비교에는 MF, Two-Tower, 그래프 추천, 순차 추천, 텍스트·하이브리드 검색을 포함한다. 상세 단계와 구현 상태는 `PLAN.md`를 따른다.
 - 텍스트는 기존 후보 검색과 ranker feature에 각각 추가하고, Two-Tower 입력으로 쓰는 방식도 비교한다. OpenRouter 임베딩 API와 Supabase pgvector·Milvus·Astra DB를 검토 범위에 포함한다.
 - 시간 분할은 평가 규칙, 순차 추천은 이력 순서·전이를 학습하는 방식, Two-stage는 검색·재정렬 구조, Two-Tower는 사용자·식당 encoder 구조다. 서로 다른 실험 축으로 구분한다.
 - 같은 데이터·평가 조건에서 성능과 비용을 비교한다. 뒤 단계가 더 좋은 결과를 낸다고 미리 가정하지 않는다.
+
+## 현재 연구 범위: retrieval (2026-10-11 사용자 지시)
+
+- 당분간 리뷰 텍스트로 후보 검색 자체를 개선하는 데 집중한다. Re-ranking·LambdaRank 피처·고정 후보의 행동 점수에 텍스트 잔차를 더하는 재정렬은 현재 후속 범위에서 제외한다. 전체 catalog에서 행동·텍스트 점수를 함께 계산해 새 후보를 찾는 retrieval은 범위에 포함한다. 기존 전체 시스템은 과거 기준으로 보존한다.
+- Two-Tower에 한정하지 않는다. 기존 리뷰 Transformer의 전체 검색은 단일 벡터 내적이고, cross-attention은 Top-200 재정렬에만 실행됐다. 사용자 요청에 따라 고정 E5 식당 kNN 그래프와 추천 손실로 학습한 리뷰 단위 다중 벡터 retrieval을 구현·비교했다. 학습형 그래프 구조 갱신·원문 encoder fine-tuning·전체 catalog cross-attention은 미실행이다.
+- `text_retrieval_comparison_cli`는 기존 로컬 E5 bank만 사용한다. 그래프는 방문 그래프만/실제 텍스트 간선/식당별 차수 보존 재배선, 리뷰는 같은 frozen C4의 학습 mean/late/shuffle late를 seed 42/43/44·고정 마지막 epoch로 비교한다. 장시간 추가 학습은 검토 루틴만으로 자동 시작하지 않으며 해당 사용자 요청 범위를 따른다.
+- 후보를 전체 cutoff catalog에서 직접 생성해 Recall@20/50/100과 후보 순서의 Graded NDCG@10·비용을 평가한다. 주 비교는 Recall@100이며 기존 재정렬 지표로 검색 모델을 선택하지 않는다.
+- 구조 전체의 효과와 실제 텍스트 대응의 효과를 구분한다. 텍스트 그래프는 방문 그래프와 학습 조건을 고정한 기존/실제 텍스트 간선/간선 수·차수·가중치 분포를 보존한 재배선 조건을 비교한다.
 
 ## 데이터
 
@@ -31,3 +39,15 @@
 - 저장된 순위 재검산은 새 학습·예측과 구분한다. `rating_recsys.experiments.review_ltr_diagnostics`는 validation만 기본 점검하며, 기존 test를 다시 분석해 모델 선택에 사용하지 않는다.
 - 후속 변경은 validation 기준으로 한 번에 한 가설씩 비교한다. 이미 본 test는 새 설계의 독립 최종 증거로 재사용하지 않으며 새 holdout이 없으면 탐색 결과로 표시한다.
 - 장시간 재학습·재임베딩·유료 호출·정기 자동 실행을 검토 루틴만으로 자동 시작하지 않는다. 해당 작업의 사용자 요청 범위를 따른다.
+
+## 이번 후속 작업 (2026-10-11)
+
+- 기존 22조건의 validation을 사용자 이력 1–4/5–9/10–19/20+와 식당의 cutoff 이전 방문 수별로 재계산했다. 신규 validation 사용자 1,139명은 제외되므로 이력이 적은 기존 사용자 결과를 신규 사용자 효과로 해석하지 않는다. Catalog 밖 정답도 분모에 남긴다.
+- `two_tower_ablation_cli`는 행동 ID·수치·MLP·초기화·양성/부정 샘플·epoch를 고정하고 E5 384차원만 0/실제 벡터로 바꾼다. 본문 존재·선택 리뷰 수는 제외한다. 고정 12epoch의 seed 42/43/44를 모두 보고하며 test·ranker·새 임베딩은 실행하지 않는다.
+- 평균 Recall@100 9.1229%→9.3854%의 차이 구간은 0을 포함해 텍스트 추가 이득 미확인이다. 사용자×seed를 독립 표본으로 합치지 않고 사용자별 seed 평균 차이를 bootstrap한다. 정의·결과·원본은 `reports/review_embeddings.md`를 따른다.
+- 텍스트 식당 그래프·학습형 review mean/late/shuffle을 3seed 비교했다. 행동 C4 평균 Recall@100 18.4481%, 실제 그래프 18.2001%, 본문 존재 균형 교정 late 18.4514%로 미채택이다. CLI는 기본적으로 균형 교정을 사용하고 원 정책은 `--no-balance-text-presence`로 보존한다. 다음 검증은 미래 방문·만족도에 맞춘 텍스트 학습과 새 holdout 또는 과거 rolling validation이다. LTR 유사도와 존재 피처 분리는 별도 미실행 과제로 유지한다.
+
+## 확인된 코드 오류 수정 (2026-10-12 사용자 요청)
+
+- 의견 추출의 `지도 않다` 처리(v3), formatter의 최소 토큰 예산·접두어 보존, 리뷰 epoch가 그래프보다 긴 경우의 샘플 검증, BM25 부정 표현 보존(v2), Two-Tower의 미참여 ID→0번 처리(v2 checkpoint), LTR 전체 정답 IDCG·사용자 분모·동점 순서를 수정했다.
+- 과거 artifact와 성능 수치는 수정 전 결과로 보존한다. 수정 후 실데이터 재학습·재임베딩·test 평가는 미실행이며, 코드 수정 효과를 성능 개선으로 표현하지 않는다. 설명·적용 범위는 `reports/review_embeddings.md`와 `reports/bm25.md`를 따른다.

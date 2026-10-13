@@ -28,7 +28,7 @@ from rating_recsys.experiments.config import ExperimentConfig
 from rating_recsys.experiments.prepared import PreparedData, add_cache_arguments
 from rating_recsys.experiments.pipeline import (
     STAGE1, CheckpointedLightGCN, ExperimentResult, _ranker, _ranker_grid, observations,
-    paired_bootstrap, positive_eval_set, rank_window, ranked_ids, select_ranker,
+    paired_bootstrap, ranker_eval_kwargs, rank_window, ranked_ids, select_ranker,
 )
 from rating_recsys.experiments.queries import build_window_queries
 from rating_recsys.experiments.snapshot import code_manifest, environment_manifest, freeze_snapshot, load_snapshot
@@ -67,12 +67,12 @@ def _tune(name, config, arrays, candidates, queries, strength, run_dir, emit):
     arm_candidates = replace(candidates, features=shrink_feature_matrix(
         candidates.features, config.feature_names, candidates.rating_prior, strength,
     ))
-    eval_set = positive_eval_set(arm_candidates)
+    eval_kwargs = ranker_eval_kwargs(arm_candidates, queries, cutoff=config.ranking_k)
     grid, models = [], {}
     for params in _ranker_grid(config):
         started = time.perf_counter()
         model = _ranker(arm_config, params)
-        model.fit(features, arrays.labels, arrays.groups, eval_set=eval_set,
+        model.fit(features, arrays.labels, arrays.groups, **eval_kwargs,
                   early_stopping_rounds=config.early_stopping_rounds if params["early_stopping"] else None)
         ranked = rank_window(model, queries, arm_candidates)
         scores = evaluate_rankings(observations(queries, ranked_ids(ranked)),

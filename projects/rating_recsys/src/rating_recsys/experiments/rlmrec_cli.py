@@ -30,7 +30,7 @@ from rating_recsys.experiments.config import ExperimentConfig
 from rating_recsys.experiments.pipeline import (
     STAGE1, CheckpointedLightGCN, _generator, _ranker, _ranker_grid,
     build_context, checkpoint_start, observations, paired_bootstrap,
-    positive_eval_set, rank_window, ranked_ids, select_ranker,
+    ranker_eval_kwargs, rank_window, ranked_ids, select_ranker,
     window_candidates, window_training_arrays,
 )
 from rating_recsys.experiments.queries import build_window_queries
@@ -386,14 +386,14 @@ def run(args, argv=None):
             raise ValueError("Full pipeline fusion differs from the selection candidates")
         np.savez_compressed(run / "ranker_validation.npz", features=validation.features, labels=validation.labels,
                             groups=validation.group_sizes, restaurant_ids=validation.row_restaurant_ids)
-        eval_set = positive_eval_set(validation)
+        eval_kwargs = ranker_eval_kwargs(validation, queries, cutoff=exp.ranking_k)
         state["status"], state["ranker_grid"] = "training-ranker", []
         best_ranker, best_ranks, best_params, best_key = None, None, None, None
         for params in _ranker_grid(exp):
             ranker = _ranker(exp, params)
             rank_started = time.perf_counter()
             ranker.fit(train.features, train.labels, train.groups,
-                       eval_set=eval_set if params["early_stopping"] else None,
+                       **(eval_kwargs if params["early_stopping"] else {}),
                        early_stopping_rounds=exp.early_stopping_rounds if params["early_stopping"] else None)
             rankings = ranked_ids(rank_window(ranker, queries, validation))
             metrics = evaluate(rankings)

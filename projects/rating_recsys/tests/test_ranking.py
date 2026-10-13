@@ -7,6 +7,7 @@ import math
 import unittest
 from dataclasses import replace
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import numpy as np
@@ -15,7 +16,10 @@ import pytest
 from rating_recsys.datasets.split import build_global_temporal_split
 from rating_recsys.evaluation.metrics import RankingObservation, evaluate_observed_pairs, evaluate_rankings
 from rating_recsys.experiments.config import ExperimentConfig
-from rating_recsys.experiments.pipeline import _generator, build_context, window_training_arrays
+from rating_recsys.experiments.pipeline import (
+    STAGE1, _generator, build_context, observations, ranker_eval_kwargs,
+    rank_window, ranked_ids, window_training_arrays,
+)
 from rating_recsys.experiments.queries import build_prefix_queries, build_training_windows
 from rating_recsys.experiments.shrinkage import run_shrinkage_comparison, shrink_feature_matrix
 from rating_recsys.ranking.features import feature_values, global_rating_prior, shrink_mean
@@ -174,6 +178,59 @@ def test_early_stopping_metric_is_independent_of_training_gain():
         metric = ranker._model.fit.call_args.kwargs["eval_metric"]
         results.append(metric(np.array([2, 0, 1]), np.array([0.2, 0.1, 0.3])))
     assert results[0] == results[1]
+
+
+def test_early_stopping_matches_full_truth_metric_with_ties_and_missing_candidates():
+    queries = tuple(SimpleNamespace(query_id=f"q{i}", user_id=i, relevance_by_item=truth)
+                    for i, truth in enumerate(({10: 1, 99: 2}, {30: 2}, {90: 1}, {80: 1}, {70: 0})))
+    candidates = SimpleNamespace(
+        features=np.array([[.5], [.5], [.1], [.9], [.2], [.3]]),
+        labels=np.array([1, 0, 2, 0, 0, 0]),
+        group_sizes=[2, 2, 1, 0, 1], row_restaurant_ids=np.array([10, 20, 30, 40, 60, 70]),
+        ordered={STAGE1: {"q0": (20, 10), "q1": (30, 40), "q2": (60,), "q3": (), "q4": (70,)}},
+    )
+    kwargs = ranker_eval_kwargs(candidates, queries, cutoff=2)
+    assert kwargs["eval_query_count"] == 4  # Includes the relevant user with zero candidates.
+    assert kwargs["eval_set"][2] == [2, 2, 1]  # Keeps the retrieved-zero-positive user.
+    assert kwargs["eval_set"][1].tolist() == [0, 1, 2, 0, 0]  # C5 tie order, not row-ID order.
+    ranker = LightGBMLambdaRanker(ranking_k=2)
+    ranker._model = Mock()
+    ranker.fit(candidates.features, candidates.labels, [6], **kwargs)
+    metric = ranker._model.fit.call_args.kwargs["eval_metric"]
+    callback_score = metric(kwargs["eval_set"][1], kwargs["eval_set"][0][:, 0])[1]
+    predictor = SimpleNamespace(predict=lambda features: features[:, 0])
+    ranks = ranked_ids(rank_window(predictor, queries, candidates))
+    reported = evaluate_rankings(observations(queries, ranks), cutoffs=(2,), catalog_ids=range(100))
+    assert ranks["q0"] == (20, 10)
+    assert callback_score == pytest.approx(reported["ndcg_at_2"])
+
+
+def test_full_truth_idcg_changes_preferred_iteration_when_recall_differs_by_user():
+    labels = np.array([1, 0, 0, 1, 0, 0])
+    predictions_a = np.array([3, 2, 1, 2, 3, 1])
+    predictions_b = np.array([1, 3, 2, 3, 2, 1])
+    full_idcg = np.array([3 + 3 / np.log2(3) + .5, 1])
+    preferences = []
+    for normalization in ({}, {"eval_idcg": full_idcg, "eval_query_count": 2}):
+        ranker = LightGBMLambdaRanker(ranking_k=3)
+        ranker._model = Mock()
+        ranker.fit(np.zeros((6, 1)), labels, [3, 3],
+                   eval_set=(np.zeros((6, 1)), labels, [3, 3]), **normalization)
+        metric = ranker._model.fit.call_args.kwargs["eval_metric"]
+        preferences.append(metric(labels, predictions_a)[1] > metric(labels, predictions_b)[1])
+    assert preferences == [True, False]
+
+
+@pytest.mark.parametrize("normalization", [
+    {"eval_idcg": [1, 2]}, {"eval_idcg": [0]}, {"eval_idcg": [float("nan")]},
+    {"eval_query_count": 0},
+])
+def test_early_stopping_rejects_invalid_full_truth_normalization(normalization):
+    ranker = LightGBMLambdaRanker(ranking_k=2)
+    ranker._model = Mock()
+    with pytest.raises(ValueError):
+        ranker.fit(np.zeros((2, 1)), np.array([1, 0]), [2],
+                   eval_set=(np.zeros((2, 1)), np.array([1, 0]), [2]), **normalization)
 
 
 def test_window_pipeline_keeps_c5_and_test_selection_boundary(tmp_path):

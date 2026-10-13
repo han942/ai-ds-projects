@@ -1,251 +1,287 @@
-# Rating Recommender System V2
+# Rating Recommender System
 
-DiningCode의 방문·평점·리뷰로 **사용자가 만족할 식당을 추천하는 방법**을 비교한다. 현재 기준 모델은 방문·평점 이력만 사용하는 Two-stage 추천 시스템이다.
+[Korean](./README_KOR.md)
 
-## 연구 질문
+This research project compares methods for recommending restaurants that users are likely to enjoy, using DiningCode visits, ratings, and review text.
 
-| 질문 | 확인할 내용 |
-|---|---|
-| **RQ1** | 과거 리뷰와 식당 정보를 더하면 방문·평점 이력 baseline보다 만족할 식당을 더 잘 추천하는가? |
-| **RQ2** | 같은 추천 과제와 평가 기준에서 어떤 모델 구성이 더 효과적인가? |
+Updated: **2026-10-13 KST**
 
-성능 향상은 가정하지 않는다. 입력 정보의 효과와 모델 구조의 효과를 나눠 비교한다.
+The current baseline uses visit and rating history only. Several review-based methods have been evaluated, but none has shown a stable improvement over the behavioral baseline.
 
-## 현재 시스템
+## Documentation
 
-| 단계 | 현재 구성 | 역할 |
-|---|---|---|
-| 후보 검색 | C1 Item-item + C4 LightGCN → C5 RRF | 사용자별 식당 후보 100개 생성 |
-| 재정렬 | R1 LightGBM LambdaRank | 후보를 다시 정렬해 Top-10 추천 |
-| 텍스트·식당 정보 | 미사용 | 후속 실험에서 추가 |
-| 별점 예측 | 미지원 | 현재 ranker는 별점이 아닌 순위 점수를 출력 |
+1. Research plan and progress
+
+   - [PLAN.md](./PLAN.md)
+   - Completed experiments, current decisions, and next steps
+
+2. Baseline definition
+
+   - [BASELINE_MODEL.md](./BASELINE_MODEL.md)
+   - Inputs, candidate retrieval, reranking, training, and evaluation
+
+3. Experiment results
+
+   - [reports/README.md](./reports/README.md)
+   - Method-level results, limitations, and source artifacts
+
+4. Satisfaction labels
+
+   - [SATISFACTION_BASELINE.md](./SATISFACTION_BASELINE.md)
+   - User-specific strong and weak satisfaction thresholds
+
+5. Local artifacts
+
+   - [artifacts/README.md](./artifacts/README.md)
+   - Retention and restoration scope for models, caches, source text, and archives
+
+Most detailed research documents are currently written in Korean.
+
+## Current System
+
+The pipeline separates retrieval from reranking because scoring every restaurant with the full ranking model would be expensive. Behavioral retrievers first produce 100 candidates, and a richer model then orders the Top-10. This separation also makes it possible to distinguish retrieval failures from ordering failures.
 
 ```mermaid
 flowchart LR
-    A[과거 방문·평점] --> B[C1 Item-item]
-    A --> C[C4 LightGCN]
-    B --> D[C5 RRF 후보 100개]
+    A[Past visits and ratings] --> B[C1 item-item retrieval]
+    A --> C[C4 LightGCN retrieval]
+    B --> D[C5 RRF: 100 candidates]
     C --> D
-    D --> E[R1 LambdaRank]
-    E --> F[추천 Top-10]
-    F --> G[미래 실제 방문·평점과 비교]
+    D --> E[LambdaRank]
+    E --> F[Top-10 recommendations]
 ```
 
-후보와 feature는 추천 시점 이전 정보만 사용한다. 미래 방문·평점은 평가 정답으로만 사용하며, 정답 식당을 후보에 강제로 추가하지 않는다.
+1. Candidate retrieval
 
-## 데이터와 시간 분할
+   - C1: item-item co-visitation
+   - C4: LightGCN over the user–restaurant visit graph
+   - C5: Reciprocal Rank Fusion of C1 and C4
+   - Previously visited restaurants are removed; up to 100 candidates remain
 
-DiningCode 리뷰를 고정 interaction snapshot으로 만들어 실험에 사용한다. snapshot을 사용하면 반복 실험마다 크롤링이나 DB 적재를 다시 하지 않아도 된다.
+2. Reranking
 
-| 항목 | 현재 기준 |
-|---|---|
-| Snapshot | `e7896add5b4b5939` |
-| 규모 | 88,554 interactions · 사용자 14,008명 · 식당 4,587개 |
-| Train cutoff (T1) | 2025-12-19 |
-| Validation cutoff (T2) | 2026-05-04 |
-| Train / validation / test | 70,883 / 8,934 / 8,737 interactions |
-| Test 사용자 | cutoff 이전 이력이 있는 1,580명 |
-| Prepared 데이터 | 이번 Window 실행의 4개 배열 파일 약 45 MB · 같은 조건에서 자동 재사용 |
+   - LightGBM LambdaRank
+   - 16 visit, rating, popularity, graph, and region features
+   - Final Top-10 output
 
-Test는 T2 이후 약 145일 동안의 여러 실제 방문으로 구성된다. 바로 다음 방문 하나만을 맞히는 평가는 아니다.
+3. Review and menu data
 
-- test 방문은 평점과 관계없이 모두 보존한다.
-- 개인화 순위 평가는 cutoff 이전 방문 이력이 있는 사용자를 대상으로 한다.
-- test 기간에 방문·평점이 기록되지 않은 식당은 미관측 항목이다. 낮은 평점으로 간주하지 않는다.
-- 사용자 데모그래픽 정보는 없다. 사용자 취향은 과거 리뷰·평점에서, 식당 특성은 cutoff 당시 이용 가능한 리뷰·메뉴·속성에서 추출하는 것을 계획한다.
-- 과거 시점의 실험에는 그 시점 이후 수집한 리뷰·메뉴·속성을 사용하지 않는다.
+   - Review text has been evaluated in separate experiments
+   - Review text is not part of the current baseline
+   - Menu and external restaurant attributes have not been evaluated as recommendation inputs
 
-## 학습과 평가
+4. Current research scope
 
-### 현재 학습 방식
+   - Improve full-catalog candidate retrieval with review text
+   - Further reranking experiments are paused
 
-1. Train 기간을 기본 3개월 Window로 나눈다.
-2. 각 기간 시작 전 이력으로 C5가 후보를 검색하고, 후보별 feature를 만든다.
-3. 기간 내 모든 방문을 개인별 만족도 정답으로 묶고, 정답이 실제 후보에 검색된 query로 LambdaRank를 학습한다.
-4. Validation의 Graded NDCG@10으로 ranker 설정과 트리 수를 선택한다.
-5. 선택한 설정으로 T2까지 다시 학습한 뒤, test에서 최종 평가한다.
+Two-stage refers to the full retrieval–reranking pipeline. Two-Tower refers to separate user and restaurant encoders. Temporal splitting and sequential recommendation are separate experimental dimensions.
 
-현재 기준 학습은 **기준 날짜까지의 이력으로 후보를 만들고, 이후 일정 기간의 모든 방문을
-한 정답 목록으로 묶는 Window 방식**으로 진행한다. 같은 날 방문도 목록에 함께 보존한다.
-과거 CLI 기본값은 Prefix/absolute로 유지하며, 새 baseline은 Window/history-aware 옵션을 명시한다.
-학습 3개월과 test 약 145일의 기간 차이는 남아 있다.
-자세한 차이는 [PLAN의 날짜 경계 설명](./PLAN.md#같은-날짜-방문-처리의-의미)에 있다.
+## Data and Evaluation
 
-### 현재 구현의 평점 기준과 지표
+The temporal split reconstructs what would have been available at recommendation time. Future reviews and ratings never enter historical profiles; observed future visits are used only as evaluation targets.
 
-강한 만족 경계 h는 과거 이력 10건 미만에서 4점, 10건 이상에서
-`clip(4 + 0.5 × (과거 사용자 평균 − 4), 3.5, 4.5)`다.
+1. Frozen data
 
-| 실제 test 평점 | Graded relevance | 해석 |
-|---|---:|---|
-| h 이상 | 2 | 강한 만족 |
-| 3점 이상 h 미만 | 1 | 약한 만족 |
-| 3점 미만 | 0 | 만족 정답 아님; test 행은 유지 |
+   - Snapshot: `e7896add5b4b5939`
+   - First user–restaurant interactions: 88,554
+   - Users: 14,008
+   - Restaurants: 4,587
 
-| 평가 단계 | 지표 | 답하는 질문 |
-|---|---|---|
-| 후보 검색 | Recall@100, 4점 이상 Recall@100 | 만족한 식당을 재정렬 전에 찾았는가? |
-| 최종 추천 · 주 비교 | **Graded NDCG@10** | 만족한 식당을 추천 상위에 배치했는가? |
-| 고평점 추천 진단 | 4점 이상 Recall@10 | 실제 고평점 식당이 Top-10에 포함됐는가? |
-| 별점 예측 모델만 해당 | 모든 test 평점의 MAE/RMSE | 방문한 식당에 줄 평점을 얼마나 정확히 예측했는가? |
-| 저평점 진단 | 실제 3점 미만 방문의 Top-K 포함 수·비율 | 나중에 낮은 점수를 준 식당을 상위에 둔 사례는 얼마인가? |
-| 순서 보조 진단 | 관측 만족도 쌍 순서 정확도 | 같은 C5 후보에 포함된 실제 평가 식당 쌍에서 더 높은 만족도 등급을 위에 두었는가? |
+2. Temporal split
 
-Validation Graded NDCG@10으로 설정을 고르고, test Graded NDCG@10은 최종 비교에 한 번 사용한다. MAE/RMSE는 별점 예측값을 출력하는 모델에만 적용한다. 낮은 MAE가 좋은 추천 순위를 보장하지 않으므로 순위 지표와 따로 해석한다.
+   - Train: 70,883 interactions through 2025-12-19 (T1)
+   - Validation: 8,934 interactions in `(T1, 2026-05-04]` (T2)
+   - Test: 8,737 interactions over approximately 145 days after T2
+   - Future reviews and ratings are used only as labels, never as model inputs
 
-관측 만족도 쌍 순서 정확도는 **인사이트용 보조 지표**이며 학습·설정 선택에는 사용하지 않는다.
-기존 등급 0·1·2가 서로 다른 실제 평가 식당 둘이 모두 C5 후보에 있는 경우만 비교한다.
-사용자별 정확도를 동일 가중 평균하며, 평가 사용자 수·비교 쌍 수·전체 관측 등급 차이 쌍 수를 함께 기록한다.
-동일 등급과 미관측·후보 밖 식당은 제외한다. 비교 쌍이 없으면 0% 대신 미정의(‘–’)로 표시한다.
-Top-10 전체 성능이나 저평점 회피의 증거로 확대 해석하지 않는다.
-향후 baseline 실행은 자동으로 기록하며, 기존 실행은 저장된 순위만으로 계산할 수 있다.
+3. Evaluation population
 
-```bash
-python -m rating_recsys.evaluation.pair_diagnostics --run-dir artifacts/runs/20261004T125314601899Z-e7896add
-```
+   - Validation: 1,639 users with history and relevant future outcomes
+   - Test: 1,573 users with history and relevant future outcomes
+   - Users without prior history are excluded from the current personalized evaluation
+   - Relevant restaurants outside the cutoff catalog remain in the recall denominator
 
-선택한 공통 만족도 기준은 **이력이 적으면 기존 기준을 유지하고, 충분하면 사용자의 과거 평균
-평점도 활용하는 것**이다. 이 기준은 구현·검증됐으며 Window baseline과 후속 모델을 모두
-같은 기준으로 평가한다. 최소 이력 10건의 train 분석 근거와 적용 예시는
-[SATISFACTION_BASELINE.md](./SATISFACTION_BASELINE.md)에 정리했다.
+4. Primary metrics
 
-## 현재 측정 결과
+   - Candidate retrieval: Recall@100
+   - Full pipeline: graded NDCG@10
+   - Target: user-specific future satisfaction levels 0/1/2
+   - Relevant outcome: an observed future rating of at least 3
 
-아래 값은 **2026-10-04 Window + 개인별 만족도 기준**의 전체 실행 결과다.
+## Baseline Results
 
-| 지표 | 현재 결과 | 기준 |
-|---|---:|---|
-| C5 후보 Recall@100 | 20.1626% | 등급 > 0 test 식당; 3점 이상 |
-| 최종 Graded NDCG@10 | 0.025467 | 개인별 만족도 등급 |
-| 최종 Recall@10 | 3.6502% | 등급 > 0 test 식당 |
-| 4점 이상 Recall@10 | 3.5105% | 4점 이상 방문이 있는 사용자 |
-| 실제 3점 미만 방문의 Top-10 포함 | 3 / 43 (6.98%) | 관측된 저평점 방문 |
-| 관측 만족도 쌍 순서 정확도 · 보조 | 50.88% | 동일 C5 후보 안의 실제 등급 차이 쌍; 사용자별 평균 |
+These are the 2026-10-04 Window/history-aware test results for seed 42. They were produced before the 2026-10-12 bug fixes.
 
-선택된 ranker는 leaves 63 / min_child_samples 100 / trees 76이다. Test 이력 사용자
-1,580명 중 862명에게 개인 기준을 적용했다. R0 후보 순서의 NDCG@10은 0.026590이며,
-R1 − R0의 95% CI가 0을 포함해 이번 실행에서는 재정렬의 이득을 확인하지 못했다.
-현재 ranker는 별점을 출력하지 않아 MAE/RMSE는 없다. 과거 2026-10-02 수치는
-평가 등급·학습 방식이 달라 직접 비교하지 않는다.
-출처: [실행 보고서](./artifacts/runs/20261004T125314601899Z-e7896add/report.md).
+1. Candidate retrieval
 
-쌍 순서 보조 지표는 2026-10-05에 기존 저장 순위로 사후 계산했다. Test 91명·234쌍에서
-R0 C5 순서 54.11%, R1 LambdaRank 50.88%다. 전체 관측 등급 차이 5,566쌍 중 둘 다 C5에
-검색된 부분집합으로, 전형적인 지표를 대체하거나 새로운 학습 목표로 사용하지 않는다.
-Validation 결과·입력 hash·계산 출처는 같은 run의 `observed_pair_diagnostics.json`에 기록했다.
+   - C5 Recall@100: **20.1626%**
+   - C5 candidate-order NDCG@10: **0.026590**
 
-## 실험 비교 범위
+2. Final reranking
 
-| 비교 축 | 후보 구성 |
-|---|---|
-| 입력 정보 (RQ1) | 방문·평점 이력 / 사용자 리뷰 / 식당 정보 / 리뷰와 식당 정보 모두 |
-| 후보 검색 | Item-item, MF, LightGCN, BM25, 리뷰 임베딩, Two-Tower |
-| 재정렬 | R0 기준 순서, LambdaRank, Jev decision model |
-| 추천 구조 (RQ2) | Two-stage, Two-Tower, Generative Retrieval, 리스트 생성형 추천 |
+   - LambdaRank NDCG@10: **0.025467**
+   - LambdaRank Recall@10: **3.6502%**
 
-현재 baseline은 C5 + LambdaRank다. Liquid·BM25·E5 Two-Tower 후보 비교를 실행·검증했다. 이번 단독·선택 결합 Recall@100은 C5보다 낮아 baseline을 유지한다. E5 Two-Tower는 기존 test를 재사용한 탐색 비교다. Jev·생성형 추천은 비교 계획이며 상태와 순서는 [PLAN.md](./PLAN.md)에 정리한다. baseline의 feature·label·설정·평가 절차는 [BASELINE_MODEL.md](./BASELINE_MODEL.md)에서 확인할 수 있다.
+3. Decision
 
-### 지금까지의 실험 리포트
+   - The test run did not establish a reranking improvement over C5 order.
+   - No review-based method has been adopted into the baseline.
+   - Real-data retraining and evaluation after the October 12 fixes have not been run.
 
-실험 결과는 [리포트 모음](./reports/README.md)에서 주제별로 확인한다. README는
-현재 구성과 실행 방법을 안내하고, 핵심 결과와 판단은 카테고리별 overview에 모았다.
+See the [baseline run report](./artifacts/runs/20261004T125314601899Z-e7896add/report.md) and [baseline diagnostics](./reports/baseline.md).
 
-| 주제 | 결과·한계·원본 실행 링크 |
-|---|---|
-| BM25·Kiwi·전처리 | [BM25 overview](./reports/bm25.md) |
-| E5 CPU·LTR·Two-Tower·재검증 | [리뷰 임베딩](./reports/review_embeddings.md) |
-| 15명 리뷰 속성과 실제 평점 | [리뷰 표현 일치성 리포트](./reports/review_aspects.md) |
-| C1·LightGCN·LambdaRank·지역 피처 | [Baseline 진단 리포트](./reports/baseline.md) |
+## Experiment History
 
-카테고리별 짧은 overview를 유지한다. Jev는 아직 미실행이므로 목록에만 표시한다.
-실행별 상세 리포트·생성 파일·API 응답은 로컬 ZIP으로 보관했고, 입력 데이터·
-현재 baseline 파일·E5 모델과 본 캐시는 재사용을 위해 유지한다. 이전 Liquid 설치·벡터 캐시와 불필요한 V1 실행 파일은 사용자 요청으로 삭제했다. [현재 보존 범위](./artifacts/README.md).
+Experiments are grouped by the question they test rather than by model name alone. Standalone text retrieval, behavior–text fusion, review aggregation, and controlled text-input ablations answer different questions and should not be ranked as one uniform benchmark.
 
-### Kiwi + BM25 실행
+1. Lexical and semantic retrieval
 
-사용자의 과거 선호 리뷰와 식당 리뷰를 Kiwi로 토큰화하고 BM25로 후보를 검색한다.
-토큰화·색인·검색은 로컬 CPU에서 수행한다. 리뷰 선택·전처리·평가 조건과 결과는
-[BM25 overview](./reports/bm25.md)에 있다.
+   - DeepCoNN, BM25, Liquid, and frozen E5 mean retrieval
+   - Standalone and C5-fusion results were lower or inconclusive
 
-```bash
-.venv/bin/python -m rating_recsys.experiments.compare_cli bm25 \
-  --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl \
-  --baseline-run artifacts/runs/20261004T125314601899Z-e7896add \
-  --satisfaction-mode history-aware --satisfaction-min-history 10 --no-plot
-```
+2. Review-aware learned models
 
-과거 BM25를 참조하는 전처리 비교·검증에는 `bm25.zip`을 먼저 복원한다.
-새 실행의 출력은 `artifacts/comparisons/bm25/<run_id>/`에 저장된다.
+   - E5 features for LambdaRank
+   - E5 Two-Tower
+   - Review Transformer with Top-200 cross-attention
+   - No stable incremental gain
 
-### 리뷰 임베딩 실행
+3. Behavioral models with text
 
-현재 리뷰 LTR의 기본 encoder는 로컬 E5 Small이다. 완료된 59,455개 입력 캐시를
-읽으며 API 키가 필요 없다. 전체 결과·CPU 비용·재검증·미실행 후속 실험은
-[리뷰 임베딩](./reports/review_embeddings.md)에 모았다. 이전 Liquid 설치와 캐시는 삭제했다.
+   - RLMRec/E5 alignment
+   - Ten aspect–sentiment channels
+   - Fixed text restaurant graph
+   - No stable improvement over the behavioral control
 
-```bash
-.venv/bin/python -m rating_recsys.experiments.review_ltr \
-  --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl --dry-run
-```
+4. Multi-review and multi-interest representations
 
-`--dry-run`은 입력·캐시 점검만 수행한다. 원 조건의 LTR 재학습과 저장 결과의
-읽기 전용 재검증은 [재현 안내](./reports/review_embeddings.md#재현)를 따른다.
+   - Review-level Top-3 matching
+   - K1/K3 user interests
+   - Learned mean, late, and shuffled-late retrieval
+   - Some standalone text signal, but no confirmed complement to C5
 
-### E5 Two-Tower 후보 비교
+5. Controlled comparisons
 
-동결된 E5 캐시로 C5, Two-Tower 단독, C1+Two-Tower RRF의 세 조건만 비교한다.
-기존 후보 캐시나 E5 입력·토크나이저 검증에 실패하면 중단하며, 새 임베딩·API·LTR 학습은 없다.
-아래는 소형 신경망을 다시 학습하는 명령이다. 결과·한계·CPU 비용은 [리뷰 임베딩 리포트](./reports/review_embeddings.md#two-tower-후보-비교)에 있다.
+   - Behavior-only versus behavior+E5 Two-Tower, three seeds and 12 fixed epochs
+   - Behavioral graph, text graph, and learned review retrieval, three seeds
+   - Most text-effect confidence intervals included zero
 
-```bash
-env OPENBLAS_NUM_THREADS=4 OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 \
-  .venv/bin/python -m rating_recsys.experiments.compare_cli two_tower \
-  --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl \
-  --max-epochs 12 --patience 3 --threads 4 --label e5-three-conditions --no-plot
-```
+6. Data and representation diagnostics
 
-### 리뷰 속성 결과 재계산
+   - Review length, rating distribution, and sparsity
+   - LLM aspect and sentiment extraction
+   - RQ-VAE review codes and neighbor preservation
 
-완료된 15명 속성 진단은 [리뷰 속성 overview](./reports/review_aspects.md)에 정리했다.
-과거 추출 응답을 재검토하거나 API 없이 재계산할 때는 [복원 안내](./artifacts/README.md)를 따른다.
+See the [experiment timeline](./PLAN.md#실험-이력) and [review embedding report](./reports/review_embeddings.md) for detailed conditions and results.
 
-## 제한 사항
+## Bug Fixes
 
-- 추천 노출 기록이 없어 오프라인 평가는 실제 추천이 방문이나 만족을 유발했다는 인과 효과를 검증하지 않는다.
-- 현재 baseline은 리뷰 텍스트와 식당 콘텐츠를 사용하지 않는다.
-- 기존 test 결과는 한 snapshot과 한 미래 기간에 대한 측정이다. 일반화를 확인하려면 추가 seed와 새로운 미래 holdout이 필요하다.
-- 신규 사용자 1,214명은 cutoff 이전 이력이 없어 개인화 순위 평가에서 제외되며, 별도 cold-start 평가가 필요하다.
+Six implementation issues were corrected on 2026-10-12.
 
-## 저장소 안내
+These changes align implementation with the intended evaluation and input contracts. A bug fix is not itself evidence of better recommendation quality, so prior artifacts remain historical records and performance effects require separate retraining.
 
-| 경로 | 내용 |
-|---|---|
-| [BASELINE_MODEL.md](./BASELINE_MODEL.md) | 현재 baseline 구조·학습·평가·결과 상세 |
-| [SATISFACTION_BASELINE.md](./SATISFACTION_BASELINE.md) | 개인별 만족도 기준·10건 선택 근거·Window 실행 |
-| [PLAN.md](./PLAN.md) | 연구 질문·평가 기준·실험 로드맵·실행 안내 |
-| [AGENTS.md](./AGENTS.md) · [docs_style.md](./docs_style.md) | 프로젝트 지침·문서 작성 기준 |
-| [`src/rating_recsys/`](./src/rating_recsys/) | 데이터·후보 검색·순위 학습·평가 코드 |
-| [`artifacts/snapshots/`](./artifacts/snapshots/) | 고정 interaction·리뷰 입력 |
-| [`artifacts/prepared/`](./artifacts/prepared/) | 재사용 학습 feature·label·group·후보 자료 |
-| [리포트 모음](./reports/README.md) | BM25·임베딩·리뷰 속성·baseline 주제별 결과 |
-| [실험 파일 안내](./artifacts/README.md) | 상세 리포트·생성 파일의 로컬 보관·복원 방법 |
-| [`migrations/`](./migrations/) · [`queries/`](./queries/) | DB schema 변경과 데이터 검증 SQL |
-| [`crawler/`](./crawler/) | 데이터 수집 코드·수집 상태 |
-| [V1 수집 원본 안내](./legacy/v1_rating_prediction/README.md) | 적재용 CSV 보존; 이전 실행 코드·모델·캐시는 삭제 |
+1. Indirect-negation scope in opinion extraction
+2. Minimum token budget and role-prefix preservation in the E5 formatter
+3. Sampling audit when graph and review epoch budgets differ
+4. Negation preservation in BM25 POS filtering
+5. Inference handling for IDs absent from Two-Tower training
+6. Full-truth IDCG and query denominators for LambdaRank early stopping
 
-## 실행
+- Full suite: **512 passed, 1 skipped**
+- Existing artifacts and reported metrics remain pre-fix records
+- Post-fix real-data performance has not been measured
 
-명령은 `projects/rating_recsys`에서 실행한다. 고정 snapshot을 사용하므로 실험 실행에는 DB 연결이 필요 없다.
+## Usage
 
-```bash
-# 개인별 만족도 기준의 Window baseline; 같은 조건의 prepared 데이터 재사용
-rating-recsys-experiment --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl \
-  --ranker-training-mode window --satisfaction-mode history-aware \
-  --label window-personal-satisfaction-n10
+Run commands from `projects/rating_recsys`.
 
-# 기존 표준 실행 결과 조회
-rating-recsys-dashboard --address 127.0.0.1
-mlflow ui --backend-store-uri sqlite:///artifacts/mlflow.db --host 127.0.0.1 --port 5000
-```
+1. Inspect existing input and caches
 
-새 환경에서는 Python 3.10 환경에서 `pip install -e '.[experiment,dev]'`로 설치한다. DB를 쓸 때는 `.env.example`을 `.env`로 복사하고 접속 정보를 설정한다. 추가 실행 명령과 환경 준비는 [PLAN.md](./PLAN.md#실행-방법)를 참고한다.
+   ```bash
+   .venv/bin/python -m rating_recsys.experiments.review_ltr \
+     --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl --dry-run
+   ```
+
+   - No model training
+   - No missing-embedding inference
+   - Checks saved E5 profiles and cache identity
+
+2. Train the baseline
+
+   ```bash
+   .venv/bin/python -m rating_recsys.experiments.cli \
+     --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl \
+     --ranker-training-mode window --satisfaction-mode history-aware \
+     --satisfaction-min-history 10 --label window-personal-satisfaction-n10
+   ```
+
+3. Run the controlled Two-Tower text comparison
+
+   ```bash
+   .venv/bin/python -m rating_recsys.experiments.two_tower_ablation_cli \
+     --epochs 12 --seeds 42 43 44 --threads 4
+   ```
+
+   - Validation only
+   - Keeps behavioral inputs and training fixed
+   - Changes only zero versus real E5 inputs
+
+4. Compare text graphs and learned review retrieval
+
+   ```bash
+   .venv/bin/python -m rating_recsys.experiments.text_retrieval_comparison_cli \
+     --seeds 42 43 44 --graph-epochs 20 --review-epochs 12 --threads 4
+   ```
+
+   - Validation only
+   - Text graph versus rewired control
+   - Mean, late, and shuffled-late review scoring
+
+5. Create the environment
+
+   ```bash
+   conda create --prefix ./.venv python=3.10 pip libgomp -y
+   conda activate ./.venv
+   pip install -e '.[experiment,dev]'
+   ```
+
+   - DeepCoNN and PyTorch models: `deepconn`
+   - Local E5 inference: `local-embeddings`
+   - BM25 and Korean tokenization: `bm25`
+   - RQ-VAE: `rqvae`
+
+6. Run tests
+
+   ```bash
+   .venv/bin/python -m pytest -q
+   .venv/bin/python -m rating_recsys.experiments.compare_cli --help
+   ```
+
+## Repository Structure
+
+1. Source and tests
+
+   - `src/rating_recsys/`: data, retrieval, ranking, and evaluation
+   - `tests/`: regression and integration tests
+
+2. Documentation
+
+   - `PLAN.md`: research plan and status
+   - `BASELINE_MODEL.md`: baseline definition
+   - `reports/`: method-level results and interpretation
+
+3. Experiment artifacts
+
+   - `artifacts/snapshots/`: frozen inputs
+   - `artifacts/prepared/`: reusable candidates and training rows
+   - `artifacts/runs/`, `artifacts/comparisons/`: settings, models, rankings, and metrics
+   - `artifacts/local_models/` and E5 SQLite caches: local frozen models and embeddings
+
+4. Collection and ingestion
+
+   - `crawler/`: data collection
+   - `migrations/`: database schema
+   - `queries/`: validation SQL
+
+Documentation follows [docs_style.md](./docs_style.md). API responses, source text, models, and archives are local artifacts; their retention status is documented in [artifacts/README.md](./artifacts/README.md).

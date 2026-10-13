@@ -12,7 +12,7 @@ import re
 
 
 CATEGORIES = ("taste", "value", "service", "atmosphere", "portion")
-VERSION = "raw-multi-opinion-rules-v2"
+VERSION = "raw-multi-opinion-rules-v3"
 POLARITIES = ("positive", "negative", "neutral", "unknown")
 
 # These boundaries retain their connective in the preceding evidence. In
@@ -88,15 +88,15 @@ _NEG_ENDING = r"(?:하|했|았|었)?(?:습니다|는다|아요|어요|에요|네
 # denial ("좋은 편은 아니다") and cognitive denial are kept unknown: rejecting
 # praise does not by itself establish dissatisfaction.
 _NEGATION_PATTERNS = (
-    ("preference", re.compile(r"^아하(?:지는?|진|지)\s*(?:않|못)" + _NEG_ENDING)),
+    ("preference", re.compile(r"^아하(?:지는?|지도|진|지)\s*(?:않|못)" + _NEG_ENDING)),
     ("cognitive", re.compile(
         r"^(?:다고|다는)?\s*(?:느껴지|느끼|생각하|생각되|생각(?:은|을)?\s*하)"
-        r"(?:지는?|진|지)\s*(?:않|못)" + _NEG_ENDING)),
+        r"(?:지는?|지도|진|지)\s*(?:않|못)" + _NEG_ENDING)),
     ("qualified", re.compile(
         r"^(?:아하는|다는|는|은|다)?\s*(?:느낌|편|것|건|정도|수준)(?:은|는|이)?\s*아니"
         + _NEG_ENDING)),
     ("qualified", re.compile(r"^(?:다|다는)?\s*까지(?:는)?\s*아니" + _NEG_ENDING)),
-    ("direct", re.compile(r"^(?:하)?(?:지는?|진|지)\s*(?:않|못)" + _NEG_ENDING)),
+    ("direct", re.compile(r"^(?:하)?(?:지는?|지도|진|지)\s*(?:않|못)" + _NEG_ENDING)),
     ("direct", re.compile(r"^(?:다는|는|은)?\s*(?:건|것은|것이)?\s*아니" + _NEG_ENDING)),
 )
 _PREDICATE_END = re.compile(

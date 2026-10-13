@@ -91,7 +91,7 @@ def run_comparison(rows, texts, texts_meta, *, config, embedding, formatter, cac
     from rating_recsys.evaluation.metrics import evaluate_rankings
     from rating_recsys.experiments.pipeline import (
         STAGE1, CheckpointedLightGCN, _generator, _ranker_grid,
-        observations, paired_bootstrap, positive_eval_set, rank_window, ranked_ids,
+        observations, paired_bootstrap, ranker_eval_kwargs, rank_window, ranked_ids,
         select_ranker, window_training_arrays,
     )
     from rating_recsys.experiments.prepared import PreparedData
@@ -143,11 +143,12 @@ def run_comparison(rows, texts, texts_meta, *, config, embedding, formatter, cac
     validation_ranked = {}
     for arm, width in widths.items():
         candidates = replace(validation, features=validation.features[:, :width])
+        eval_kwargs = ranker_eval_kwargs(candidates, validation_q, cutoff=config.ranking_k)
         grid = []
         for params in _ranker_grid(config):
             model = _ranker(config, params, names[arm])
             model.fit(train.features[:, :width], train.labels, train.groups,
-                      eval_set=positive_eval_set(candidates),
+                      **eval_kwargs,
                       early_stopping_rounds=config.early_stopping_rounds if params["early_stopping"] else None)
             ranked = rank_window(model, validation_q, candidates)
             scores = metrics(validation_q, candidates, ranked)

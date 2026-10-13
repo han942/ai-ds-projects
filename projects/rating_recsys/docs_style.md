@@ -173,7 +173,32 @@ Use numbered lists when:
 - order matters,
 - describing a workflow,
 - explaining an algorithm,
-- documenting setup or execution steps.
+- documenting setup or execution steps,
+- separating a fixed set of analyses, methods, findings, or goals.
+
+When a section contains several distinct items, prefer this pattern:
+
+```md
+1. First item
+
+   - Key result
+   - Limitation
+
+2. Second item
+
+   - Key result
+   - Next action
+```
+
+Use the numbered items for the main grouping and short bullets for the facts inside each item.
+
+Do not reduce a section to labels and fragments alone. When a concept, decision, or method needs context, add a short paragraph before the list that explains:
+
+- what it is,
+- why it matters here, and
+- how the listed items should be interpreted.
+
+The paragraph provides meaning; the list provides structure.
 
 ### Tables
 
@@ -186,7 +211,7 @@ Good uses:
 - configuration comparison,
 - before/after changes.
 
-Do not turn normal explanations into tables unnecessarily.
+Reserve tables for values that readers need to compare across the same columns, such as exact metrics or configuration grids. Use numbered items and bullets for document navigation, status summaries, method lists, and qualitative findings.
 
 ### Diagrams
 
@@ -357,6 +382,27 @@ If a point has already been explained clearly, reference it instead of rewriting
 ## 15. Use Headings for Navigation
 
 Headings should help the reader predict what information follows.
+
+Prefer short noun phrases or compact labels.
+
+### Better
+
+```md
+## 진행 상황
+## 실험 이력
+## 주요 관찰
+## 후속 과제
+```
+
+### Avoid
+
+```md
+## 지금 어디까지 진행했는가?
+## 지금까지 무엇을 시도했는가?
+## 이 결과에서 무엇을 알게 됐는가?
+```
+
+Use full questions inside a research-question section when the question itself matters. Do not use conversational questions as routine navigation headings.
 
 Prefer descriptive headings.
 

@@ -86,8 +86,8 @@ class ReviewEmbeddingConfig:
             raise ValueError("liked_items requires review_mean aggregation")
         for name in ("dimensions", "batch_size", "concurrency", "max_user_reviews",
                      "max_item_reviews", "max_review_chars", "max_document_tokens", "cpu_threads"):
-            if getattr(self, name) < 1:
-                raise ValueError(f"{name} must be positive")
+            if type(getattr(self, name)) is not int or getattr(self, name) < 1:
+                raise ValueError(f"{name} must be a positive integer")
         if self.requests_per_minute <= 0 or self.max_retries < 0:
             raise ValueError("requests_per_minute must be positive and max_retries nonnegative")
         if not math.isfinite(self.request_timeout_seconds) or self.request_timeout_seconds <= 0:
@@ -159,6 +159,11 @@ class ProfileFormatter:
         # them here so audits count the full source and our own budget is explicit.
         tokenizer.no_truncation()
         tokenizer.no_padding()
+        minimum_tokens = max(len(tokenizer.encode(f"{prefix}: ").ids)
+                             for prefix in (config.query_prefix, config.document_prefix))
+        if config.max_document_tokens < minimum_tokens:
+            raise ValueError(f"max_document_tokens must fit role prefixes and special tokens "
+                             f"(at least {minimum_tokens})")
         self.tokenizer = tokenizer
         self.stats = {"profiles": 0, "truncated_profiles": 0, "original_tokens": 0,
                       "sent_tokens": 0, "max_original_tokens": 0, "max_sent_tokens": 0}
@@ -167,14 +172,17 @@ class ProfileFormatter:
         if role not in ("query", "document"):
             raise ValueError("role must be query or document")
         prefix = self.config.query_prefix if role == "query" else self.config.document_prefix
-        value = f"{prefix}: {text}"
+        marker = f"{prefix}: "
+        value = marker + text
         encoded = self.tokenizer.encode(value)
         original_count = len(encoded.ids)
         limit = self.config.max_document_tokens
         if original_count > limit:
             end = max(end for _, end in encoded.offsets[:limit])
-            value = value[:end]
+            value = value[:max(len(marker), end)]
             while len(self.tokenizer.encode(value).ids) > limit:
+                if len(value) <= len(marker):
+                    raise ValueError("Token budget cannot retain the embedding role prefix")
                 value = value[:-1]
         sent_count = len(self.tokenizer.encode(value).ids)
         self.stats["profiles"] += 1

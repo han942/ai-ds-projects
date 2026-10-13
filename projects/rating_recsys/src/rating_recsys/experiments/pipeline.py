@@ -626,6 +626,36 @@ def observations(
     )
 
 
+def ranker_eval_kwargs(candidates: WindowCandidates, queries, *, cutoff: int) -> dict:
+    """Match reported NDCG truth, query denominator and C5 score tie order."""
+    if cutoff < 1:
+        raise ValueError("Validation cutoff must be positive")
+    if candidates.features is None or candidates.labels is None or candidates.row_restaurant_ids is None:
+        raise ValueError("Window candidates were built without features")
+    indexes, groups, ideals = [], [], []
+    offset, query_count = 0, 0
+    for query, size in zip(queries, candidates.group_sizes, strict=True):
+        grades = sorted((g for g in query.relevance_by_item.values() if g > 0), reverse=True)
+        if grades:
+            query_count += 1
+            if size:
+                ids = candidates.row_restaurant_ids[offset:offset + size]
+                order = candidates.ordered[STAGE1][query.query_id]
+                positions = {int(i): offset + j for j, i in enumerate(ids)}
+                if len(positions) != size or len(order) != size or set(order) != set(positions):
+                    raise ValueError("Validation rows differ from C5 candidates")
+                indexes.extend(positions[i] for i in order)
+                groups.append(size)
+                ideals.append(sum((2 ** g - 1) / np.log2(rank + 2)
+                                  for rank, g in enumerate(grades[:cutoff])))
+        offset += size
+    if not groups:
+        raise ValueError("Validation window has no relevant query with candidates")
+    indexes = np.asarray(indexes, dtype=np.int64)
+    return {"eval_set": (candidates.features[indexes], candidates.labels[indexes], groups),
+            "eval_idcg": np.asarray(ideals), "eval_query_count": query_count}
+
+
 def stage_metrics(
     queries: tuple[WindowQuery, ...],
     candidates: WindowCandidates,
@@ -851,7 +881,7 @@ def run_experiment(
     train_arrays = prepared.training("train", split.train, t1, checkpoints)
     lap("03_build_train_rows")
 
-    eval_set = positive_eval_set(validation_candidates)
+    eval_kwargs = ranker_eval_kwargs(validation_candidates, validation_queries, cutoff=config.ranking_k)
     lap("04_build_validation_rows")
 
     # ---- Step C: LightGBM grid with early stopping on validation ----------
@@ -864,7 +894,7 @@ def run_experiment(
             train_arrays.features,
             train_arrays.labels,
             train_arrays.groups,
-            eval_set=eval_set,
+            **eval_kwargs,
             early_stopping_rounds=(
                 config.early_stopping_rounds if params["early_stopping"] else None
             ),
@@ -909,7 +939,7 @@ def run_experiment(
         run_dir, "validation", validation_queries, validation_ranked,
         validation_candidates, config,
     )
-    del eval_set, validation_candidates, validation_ranker
+    del eval_kwargs, validation_candidates, validation_ranker
     gc.collect()
     lap("05_tune_lightgbm_on_validation")
 

@@ -8,7 +8,7 @@ import pytest
 pytest.importorskip("kiwipiepy")
 bm25s = pytest.importorskip("bm25s")
 
-from rating_recsys.retrieval.bm25 import BM25Config, BM25Retriever
+from rating_recsys.retrieval.bm25 import BM25Config, BM25Retriever, NEGATION_TOKENS
 from rating_recsys.retrieval.review_profiles import build_profiles
 from rating_recsys.retrieval.review_preprocessing import clean_review_profile
 from support import _interaction
@@ -89,6 +89,42 @@ def test_stopword_only_query_is_empty_but_user_is_retained():
     assert fitted.metadata["input_users"] == 1
     assert fitted.metadata["users_without_query_tokens"] == 1
     assert fitted.recommend([1], {}, 100) == {1: ()}
+
+
+@pytest.mark.parametrize("preprocessing", ["baseline", "clean", "clean_stopwords"])
+def test_real_kiwi_preserves_negation_in_queries_and_index(preprocessing, tmp_path):
+    # Opposite statements must not collapse to the same lexical representation.
+    pairs = [
+        ("맵지 않아 좋다", "매워 좋다", "않"),
+        ("친절하지 않다", "친절하다", "않"),
+        ("안 맵다", "맵다", "안"),
+        ("못 먹다", "먹다", "못"),
+        ("먹지 못하다", "먹다", "못하"),
+        ("먹지 말다", "먹다", "말"),
+        ("맛이 없다", "맛이 있다", "없"),
+        ("고기 없이 먹다", "고기와 먹다", "없이"),
+        ("친절한 곳이 아니다", "친절한 곳이다", "아니"),
+    ]
+    texts = {2 * i + j + 1: text for i, pair in enumerate(pairs)
+             for j, text in enumerate(pair[:2])}
+    rows = [_interaction(rid, rid, rid * 10, 1) for rid in texts]
+    fitted = BM25Retriever(BM25Config(threads=1, preprocessing=preprocessing)).fit(
+        rows, texts, list(texts))
+    for i, (_, _, negator) in enumerate(pairs):
+        negative, positive = 2 * i + 1, 2 * i + 2
+        assert negator in fitted.user_tokens[negative]
+        assert negator not in fitted.user_tokens[positive]
+        assert fitted.user_tokens[negative] != fitted.user_tokens[positive]
+        # Verify that the item document retained the cue as well as the query.
+        scores = fitted.index.get_scores([negator])
+        assert scores[fitted.item_ids.index(negative * 10)] > 0
+        assert scores[fitted.item_ids.index(positive * 10)] == 0
+
+    fitted.save(tmp_path / "negation-index")
+    saved = json.loads((tmp_path / "negation-index" / "profiles.json").read_text())
+    assert saved["config"]["profile_version"].endswith("-v2")
+    assert saved["metadata"]["preprocessing_version"] == fitted.config.profile_version
+    assert saved["metadata"]["negation_tokens"] == [list(pair) for pair in sorted(NEGATION_TOKENS)]
 
 
 @pytest.mark.parametrize("changes", [

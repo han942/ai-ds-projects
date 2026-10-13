@@ -120,6 +120,32 @@ def toy_tokenizer():
     return tokenizer
 
 
+@pytest.mark.parametrize("budget", [1, 2])
+def test_formatter_rejects_budget_that_cannot_fit_special_tokens_and_role(budget):
+    from tokenizers.processors import TemplateProcessing
+
+    tokenizer = toy_tokenizer()
+    tokenizer.post_processor = TemplateProcessing(
+        single="[CLS] $A [SEP]", special_tokens=[("[CLS]", 1), ("[SEP]", 2)])
+    with pytest.raises(ValueError, match="role prefixes and special tokens"):
+        ProfileFormatter(ReviewEmbeddingConfig(max_document_tokens=budget),
+                         Path("unused"), tokenizer=tokenizer)
+
+
+def test_minimum_budget_keeps_role_prefix_and_terminates():
+    from tokenizers.processors import TemplateProcessing
+
+    tokenizer = toy_tokenizer()
+    tokenizer.post_processor = TemplateProcessing(
+        single="[CLS] $A [SEP]", special_tokens=[("[CLS]", 1), ("[SEP]", 2)])
+    formatter = ProfileFormatter(ReviewEmbeddingConfig(max_document_tokens=3),
+                                 Path("unused"), tokenizer=tokenizer)
+    for role, marker in (("query", "query: "), ("document", "document: ")):
+        formatted = formatter.format("국물은 맛있다 " * 100, role)
+        assert formatted == marker
+        assert len(tokenizer.encode(formatted).ids) == 3
+
+
 def test_token_budget_keeps_role_prefix_and_counts_untruncated_source():
     tokenizer = toy_tokenizer()
     tokenizer.enable_truncation(4)

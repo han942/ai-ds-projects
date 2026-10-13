@@ -8,9 +8,9 @@ import unicodedata
 
 
 PREPROCESSING_VERSIONS = {
-    "baseline": "positive-recent-kiwi-content-v1",
-    "clean": "positive-recent-kiwi-clean-v1",
-    "clean_stopwords": "positive-recent-kiwi-clean-stopwords-v1",
+    "baseline": "positive-recent-kiwi-content-v2",
+    "clean": "positive-recent-kiwi-clean-v2",
+    "clean_stopwords": "positive-recent-kiwi-clean-stopwords-v2",
 }
 # Fixed before evaluation. Apply to Kiwi lemmas, not substrings of food names.
 # These are common praise/visit expressions; retain taste, menu and service words.

@@ -32,6 +32,7 @@ TWO_TOWER = "two_tower"
 
 @dataclass(frozen=True, slots=True)
 class TwoTowerConfig:
+    input_mode: str = "legacy_text"
     id_dim: int = 32
     hidden_dim: int = 128
     output_dim: int = 64
@@ -47,6 +48,8 @@ class TwoTowerConfig:
     window_months: int = 3
 
     def __post_init__(self):
+        if self.input_mode not in ("legacy_text", "behavior", "behavior_text"):
+            raise ValueError("Unknown Two-Tower input mode")
         for name in ("id_dim", "hidden_dim", "output_dim", "epochs", "batch_size",
                      "negative_samples", "threads", "window_months"):
             if getattr(self, name) < 1:
@@ -175,6 +178,65 @@ class CachedProfiles:
         })
 
 
+class BehavioralProfiles:
+    """Matched numeric history features, optionally augmented with frozen E5.
+
+    Both arms retain exactly the same widths. Text presence and selected review
+    counts are deliberately absent; the only varying input is the first 384
+    columns. Behavior-only needs neither review bodies nor an embedding cache.
+    """
+
+    def __init__(self, mode, text_reader=None):
+        if mode not in ("behavior", "behavior_text"):
+            raise ValueError("Require a controlled behavior input mode")
+        if mode == "behavior_text" and text_reader is None:
+            raise ValueError("Text arm requires a frozen profile reader")
+        self.mode, self.text_reader = mode, text_reader
+
+    def close(self):
+        if self.text_reader is not None:
+            self.text_reader.close()
+
+    def build(self, history, texts, user_ids):
+        history = tuple(history)
+        user_keys = tuple(sorted(set(user_ids)))
+        item_keys = tuple(sorted({r.restaurant_id for r in history}))
+        users = torch.zeros((len(user_keys), 387))
+        items = torch.zeros((len(item_keys), 386))
+        grouped_users, grouped_items = defaultdict(list), defaultdict(list)
+        for row in history:
+            grouped_users[row.user_id].append(row)
+            grouped_items[row.restaurant_id].append(row)
+        for keys, values, grouped, user_side in (
+            (user_keys, users, grouped_users, True),
+            (item_keys, items, grouped_items, False),
+        ):
+            for index, key in enumerate(keys):
+                rows = grouped[key]
+                if rows:
+                    values[index, 384] = math.log1p(len(rows))
+                    values[index, 385] = sum(r.rating for r in rows) / len(rows) / 5
+                    if user_side:
+                        values[index, 386] = math.log1p(len({r.restaurant_id for r in rows}))
+        audit = {
+            "input_mode": self.mode, "history_rows": len(history),
+            "users": len(user_keys), "items": len(item_keys),
+            "latest_history_date": max((r.event_date for r in history), default=None).isoformat() if history else None,
+            "numeric_features": {"users": ["log_visits", "mean_rating_div_5", "log_distinct_items"],
+                                 "items": ["log_visits", "mean_rating_div_5"]},
+            "text_presence_feature": False, "selected_review_count_feature": False,
+            "encoder_loaded": False, "cache_misses": 0,
+        }
+        if self.mode == "behavior_text":
+            text_bank = self.text_reader.build(history, texts, user_keys)
+            if text_bank.user_keys != user_keys or text_bank.item_keys != item_keys:
+                raise ValueError("Text and behavior profile populations differ")
+            users[:, :384] = text_bank.users[:, :384]
+            items[:, :384] = text_bank.items[:, :384]
+            audit["text_audit"] = text_bank.audit
+        return ProfileBank(user_keys, item_keys, users, items, audit)
+
+
 class _Tower(nn.Module):
     def __init__(self, entities, width, config):
         super().__init__()
@@ -227,6 +289,7 @@ class TwoTower:
         if self.experiment_config.lightgcn_checkpoint_months != config.window_months:
             raise ValueError("Two-Tower and experiment training window months must match")
         self.user_ids, self.item_ids = {}, {}
+        self.trained_users, self.trained_items = set(), set()
         self.item_keys = np.empty(0, dtype=np.int64)
         self.edge_count = 0
         self.history = []
@@ -283,14 +346,29 @@ class TwoTower:
         self.item_keys = np.asarray(list(self.item_ids), dtype=np.int64)
         self.edge_count = len({(r.user_id, r.restaurant_id) for r in rows})
         self.history, self.training_audit = [], []
+        self.trained_users, self.trained_items = set(), set()
         self._encoded = None
         owned = self.profiles is None
-        reader = self.profiles or CachedProfiles(self.embedding_config, self.formatter)
+        reader = self.profiles
+        if reader is None:
+            if self.config.input_mode == "legacy_text":
+                reader = CachedProfiles(self.embedding_config, self.formatter)
+            else:
+                text_reader = (CachedProfiles(self.embedding_config, self.formatter)
+                               if self.config.input_mode == "behavior_text" else None)
+                reader = BehavioralProfiles(self.config.input_mode, text_reader)
         try:
             windows = self._windows(rows, texts, reader)
             if not windows:
                 raise ValueError("No cutoff-safe eligible positives with an unobserved negative")
+            self.trained_users = {window.bank.user_keys[int(index)]
+                                  for window in windows for index in window.users}
             self._bank = reader.build(rows, texts, self.eval_user_ids or self.user_ids)
+            if self.config.input_mode != "legacy_text" and any(
+                bank.audit.get("input_mode") != self.config.input_mode
+                for bank in [self._bank, *(window.bank for window in windows)]
+            ):
+                raise ValueError("Controlled input mode differs from supplied profiles")
             print(f"Two-Tower setup: {len(windows)} training banks, "
                   f"{sum(len(w.positives) for w in windows)} positives, "
                   f"{len(self._bank.item_keys)} evaluation items", file=sys.stderr, flush=True)
@@ -303,16 +381,29 @@ class TwoTower:
             "frozen_encoder": self.embedding_config.to_dict(), "profile_audit": self.training_audit,
             "evaluation_bank": self._bank.audit, "training_positives": sum(len(w.positives) for w in windows),
             "e5_training": False, "api_requests": 0,
+            "input_mode": self.config.input_mode,
+            "id_policy": "untrained user/item IDs use zero padding; item participation includes sampled negatives",
+            "trained_users": len(self.trained_users), "trained_items": 0,
         }
         rng = np.random.default_rng(self.config.seed)
         with _torch_settings(self.config):
             self.user_tower = _Tower(len(self.user_ids), 387, self.config)
             self.item_tower = _Tower(len(self.item_ids), 386, self.config)
+            initial = hashlib.sha256()
+            for tower in (self.user_tower, self.item_tower):
+                for name, value in tower.state_dict().items():
+                    initial.update(name.encode())
+                    initial.update(value.numpy().tobytes())
+            self.metadata["initial_parameters_sha256"] = initial.hexdigest()
+            self.metadata["parameter_count"] = sum(p.numel() for tower in (self.user_tower, self.item_tower)
+                                                   for p in tower.parameters())
+            self.metadata["training_sequence_sha256"] = []
             optimizer = torch.optim.Adam(
                 [*self.user_tower.parameters(), *self.item_tower.parameters()],
                 lr=self.config.learning_rate, weight_decay=self.config.weight_decay,
             )
             for epoch in range(1, self.config.epochs + 1):
+                sequence = hashlib.sha256()
                 started, total, count = time.perf_counter(), 0.0, 0
                 self.user_tower.train()
                 self.item_tower.train()
@@ -324,10 +415,15 @@ class TwoTower:
                         rng, np.repeat(window.users, self.config.negative_samples),
                         len(window.bank.item_keys), window.forbidden,
                     ).reshape(-1, self.config.negative_samples)
+                    for value in (np.asarray([wi], np.int64), window.users, window.positives, order, negatives):
+                        sequence.update(np.asarray(value.shape, np.int64).tobytes())
+                        sequence.update(value.tobytes())
                     for offset in range(0, len(order), self.config.batch_size):
                         indices = order[offset:offset + self.config.batch_size]
                         users = torch.from_numpy(window.users[indices])
                         choices = torch.from_numpy(np.column_stack((window.positives[indices], negatives[indices])))
+                        self.trained_items.update(window.bank.item_keys[int(index)]
+                                                  for index in np.unique(choices.numpy()))
                         uvec = self.user_tower(window.user_embedding_ids[users], window.bank.users[users])
                         ivec = self.item_tower(window.item_embedding_ids[choices], window.bank.items[choices])
                         logits = torch.einsum("bd,bnd->bn", uvec, ivec) / self.config.temperature
@@ -341,6 +437,12 @@ class TwoTower:
                 self.item_tower.eval()
                 stats = EpochStats(epoch, total / count, time.perf_counter() - started)
                 self.history.append(stats)
+                self.metadata["training_sequence_sha256"].append(sequence.hexdigest())
+                self.metadata["trained_items"] = len(self.trained_items)
+                self.metadata["evaluation_users_without_trained_id"] = sum(
+                    key not in self.trained_users for key in self._bank.user_keys)
+                self.metadata["evaluation_items_without_trained_id"] = sum(
+                    key not in self.trained_items for key in self._bank.item_keys)
                 if callback is not None and callback(stats, self):
                     break
         self._encoded = None
@@ -353,17 +455,17 @@ class TwoTower:
             with _torch_settings(self.config), torch.no_grad():
                 self.user_tower.eval()
                 self.item_tower.eval()
-                def encode(tower, keys, features, ids):
+                def encode(tower, keys, features, ids, trained):
                     result = []
                     for start in range(0, len(keys), self.config.batch_size):
                         part = keys[start:start + self.config.batch_size]
-                        eid = torch.tensor([ids.get(key, -1) + 1 for key in part])
+                        eid = torch.tensor([ids[key] + 1 if key in trained else 0 for key in part])
                         result.append(tower(eid, features[start:start + len(part)]).numpy())
                     return np.concatenate(result) if result else np.empty((0, self.config.output_dim), np.float32)
                 self._encoded = (
                     {key: i for i, key in enumerate(self._bank.user_keys)},
-                    encode(self.user_tower, self._bank.user_keys, self._bank.users, self.user_ids),
-                    encode(self.item_tower, self._bank.item_keys, self._bank.items, self.item_ids),
+                    encode(self.user_tower, self._bank.user_keys, self._bank.users, self.user_ids, self.trained_users),
+                    encode(self.item_tower, self._bank.item_keys, self._bank.items, self.item_ids, self.trained_items),
                 )
         return self._encoded
 
@@ -400,9 +502,10 @@ class TwoTower:
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
         torch.save({
-            "schema": "frozen-e5-two-tower-v1", "config": self.config.to_dict(),
+            "schema": "frozen-e5-two-tower-v2", "config": self.config.to_dict(),
             "user_tower": self.user_tower.state_dict(), "item_tower": self.item_tower.state_dict(),
             "user_ids": self.user_ids, "item_ids": self.item_ids,
+            "trained_users": sorted(self.trained_users), "trained_items": sorted(self.trained_items),
             "bank": {"user_keys": self._bank.user_keys, "item_keys": self._bank.item_keys,
                      "users": self._bank.users, "items": self._bank.items},
             "metadata": self.metadata, "history": [asdict(stats) for stats in self.history],
@@ -412,4 +515,4 @@ class TwoTower:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(chunk)
         return {"path": destination.name, "sha256": digest.hexdigest(),
-                "bytes": destination.stat().st_size, "schema": "frozen-e5-two-tower-v1"}
+                "bytes": destination.stat().st_size, "schema": "frozen-e5-two-tower-v2"}

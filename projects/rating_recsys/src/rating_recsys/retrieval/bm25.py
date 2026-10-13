@@ -22,12 +22,19 @@ from rating_recsys.retrieval.review_preprocessing import (
 
 
 CONTENT_POS = frozenset(("NNG", "NNP", "VV", "VA", "XR", "SL"))
+# Keep negation even when Kiwi tags it as an auxiliary, adverb or copula.
+# Match both lemma and POS rather than retaining every auxiliary/adverb.
+# This preserves the cue; bag-of-words BM25 still does not model its scope.
+NEGATION_TOKENS = frozenset((
+    ("안", "MAG"), ("못", "MAG"), ("없이", "MAG"),
+    ("않", "VX"), ("못하", "VX"), ("말", "VX"), ("아니", "VCN"),
+))
 
 
 @dataclass(frozen=True, slots=True)
 class BM25Config:
     name: str = field(default="bm25", init=False)
-    profile_version: str = field(default="positive-recent-kiwi-content-v1", init=False)
+    profile_version: str = field(default=PREPROCESSING_VERSIONS["baseline"], init=False)
     method: str = field(default="lucene", init=False)
     epochs: int = 1
     seed: int = 42
@@ -94,7 +101,8 @@ class BM25Retriever:
         kiwi = Kiwi(num_workers=self.config.threads, model_type="cong")
         tokens = {
             document: tuple(token.form.lower() for token in parsed
-                            if token.tag.split("-")[0] in CONTENT_POS)
+                            if token.tag.split("-")[0] in CONTENT_POS
+                            or (token.form, token.tag.split("-")[0]) in NEGATION_TOKENS)
             for document, parsed in zip(documents, kiwi.tokenize(documents, normalize_coda=True))
         }
         del kiwi
@@ -131,6 +139,8 @@ class BM25Retriever:
             "stopwords": sorted(REVIEW_STOPWORDS) if self.config.preprocessing == "clean_stopwords" else [],
             "stopword_tokens_removed_unique_profiles": dict(sorted(removed.items())),
             "content_pos": sorted(CONTENT_POS), "kiwi_model_type": "cong",
+            "negation_tokens": [list(pair) for pair in sorted(NEGATION_TOKENS)],
+            "negation_policy": "preserve lexical cues; no scope or polarity composition",
             "normalize_coda": True, "query_term_frequency": "deduplicated",
             "document_term_frequency": "retained", "max_document_tokens": None,
             "input_through": max((row.event_date.isoformat() for row in interactions), default=None),

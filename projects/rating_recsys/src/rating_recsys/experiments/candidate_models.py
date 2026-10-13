@@ -386,6 +386,9 @@ CANDIDATE_MODELS: dict[str, CandidateModel] = {
 
 
 class TwoTowerCandidate(CandidateModel):
+    # Controlled input modes belong to the fixed-budget validation-only runner.
+    # The generic comparison runner selects epochs and always refits on test.
+    variant_fields = ("input_mode",)
     name = "two_tower"
     title = "E5 Two-Tower"
     letter = "T"
