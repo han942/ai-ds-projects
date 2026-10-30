@@ -5,33 +5,12 @@
 CUAI(대학생 AI 연합 동아리) NLP 1팀 최종 프로젝트입니다. 2025년 7월 1일 발표되었습니다.
 
 ```mermaid
-flowchart TB
-    subgraph S1["1 · 데이터 구축"]
-        direction TB
-        A["국립국어원<br/>신문 말뭉치"] --> C
-        B["국립국어원<br/>일상 대화 말뭉치"] --> C
-        C["ChatGPT API로<br/>쉬운 버전 합성"] --> D["병렬 코퍼스 15,894쌍<br/>Train 70% · Valid 15% · Test 15%"]
-    end
-
-    subgraph S2["2 · 파인튜닝"]
-        direction TB
-        E["google/gemma-3-1b-it"] --> F["QLoRA 4-bit NF4 + LoRA r=64<br/>SFTTrainer · 800 steps"]
-    end
-
-    subgraph S3["3 · 평가"]
-        direction TB
-        G["Test 2,340문장 추론"] --> H["SARI 57.02 · FKGL 1.28<br/>ROUGE-L 0.355 · BLEU-1 0.338"]
-    end
-
-    D --> F
-    F --> G
-
-    classDef data fill:#e8f0fe,stroke:#4a6da7,color:#1f2328
-    classDef train fill:#fdf0e3,stroke:#c98b3a,color:#1f2328
-    classDef eval fill:#e9f5ec,stroke:#4a8a5f,color:#1f2328
-    class A,B,C,D data
-    class E,F train
-    class G,H eval
+flowchart LR
+    A["국립국어원 신문·대화 말뭉치"] --> B["ChatGPT API 병렬 데이터 생성"]
+    B --> C["학습 / 검증 / 테스트 분할"]
+    C --> D["Gemma 3 1B QLoRA 파인튜닝"]
+    D --> E["테스트 뉴스 쉬운 문장으로 변환"]
+    E --> F["SARI · FKGL · ROUGE · BLEU 평가"]
 ```
 
 > 어려운 시사 뉴스 → 초등 고학년~중학생 눈높이의 쉬운 문장

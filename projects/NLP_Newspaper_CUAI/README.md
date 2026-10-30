@@ -11,33 +11,12 @@ Final project by CUAI (a university AI club) NLP Team 1. Presented on 2025.07.01
 ## Architecture
 
 ```mermaid
-flowchart TB
-    subgraph S1["1 · Data construction"]
-        direction TB
-        A["NIKL<br/>Newspaper Corpus"] --> C
-        B["NIKL<br/>Everyday Conversation Corpus"] --> C
-        C["Synthesize simplified<br/>versions via ChatGPT API"] --> D["Parallel corpus · 15,894 pairs<br/>Train 70% · Valid 15% · Test 15%"]
-    end
-
-    subgraph S2["2 · Fine-tuning"]
-        direction TB
-        E["google/gemma-3-1b-it"] --> F["QLoRA 4-bit NF4 + LoRA r=64<br/>SFTTrainer · 800 steps"]
-    end
-
-    subgraph S3["3 · Evaluation"]
-        direction TB
-        G["Inference on 2,340 test sentences"] --> H["SARI 57.02 · FKGL 1.28<br/>ROUGE-L 0.355 · BLEU-1 0.338"]
-    end
-
-    D --> F
-    F --> G
-
-    classDef data fill:#e8f0fe,stroke:#4a6da7,color:#1f2328
-    classDef train fill:#fdf0e3,stroke:#c98b3a,color:#1f2328
-    classDef eval fill:#e9f5ec,stroke:#4a8a5f,color:#1f2328
-    class A,B,C,D data
-    class E,F train
-    class G,H eval
+flowchart LR
+    A["NIKL newspaper and conversation corpora"] --> B["ChatGPT API parallel data generation"]
+    B --> C["Train / validation / test split"]
+    C --> D["Gemma 3 1B QLoRA fine-tuning"]
+    D --> E["Test-set news simplification"]
+    E --> F["SARI · FKGL · ROUGE · BLEU evaluation"]
 ```
 
 > Hard news articles → sentences at an upper-elementary / middle-school reading level
