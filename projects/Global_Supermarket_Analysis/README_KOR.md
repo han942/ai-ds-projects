@@ -1,147 +1,186 @@
-# 🛒 Global Supermarket Analysis
+# Global Supermarket Analysis
 
-> 51,290건의 글로벌 소매 거래 데이터를 EDA·손실 분석·다변량 분석으로 파고들어,
-> **전체 손실의 68%가 소수의 고할인 거래에서 발생**한다는 구조적 수익 누수를 규명한 프로젝트입니다.
+[English](./README.md)
 
-분석 결과를 정적 리포트(PDF)뿐 아니라 **인터랙티브 대시보드**로도 볼 수 있게 재구성했습니다.
+## Overview
 
-[English README](README.md)
+글로벌 슈퍼마켓의 2019–2022년 주문 데이터를 분석해 손실이 생기는 원인을 찾고, 손실을 줄일 가격 정책을 제안하는 프로젝트다.
 
-| | |
-|---|---|
-| **데이터** | Global Supermarket · 51,290 rows × 24 cols · 2019–2022 |
-| **총 매출 / 총 이익** | $12.64M / $1.47M (이익률 **11.6%**) |
-| **핵심 발견** | 할인율 40% 초과 거래 = 전체의 13.6%지만 **총 손실의 68.2%** 차지 |
-| **스택** | Python (Pandas · NumPy · Matplotlib · Seaborn · SciPy) · MySQL · Vanilla JS 대시보드 |
+- **Q1.** 고객, 주문, 상품, 시장, 배송 데이터에는 각각 어떤 특징이 있는가?
+- **Q2.** 손실은 어떤 거래에서 생기고, 이를 줄이려면 어떤 결정을 내려야 하는가?
 
----
+## Architecture
 
-## 📊 대시보드
+원본 CSV 하나로 분석 리포트, MySQL 테이블, 대시보드를 각각 만든다.
 
-핵심 결과를 한 화면에서 탐색할 수 있는 단일 HTML 대시보드입니다. 별도 서버나 설치 없이 브라우저에서 바로 열 수 있습니다.
-
-- **파일:** [`dashboard.html`](dashboard.html) — 데이터가 내장된 self-contained 파일(더블클릭으로 실행)
-- **구성:** KPI 헤더 · 매출/이익 추이 · 지역별 손익 · 카테고리별 손익 · 할인·손실 심층 분석 · 배송 분석 · 전략 제언
-- **기능:** 호버 툴팁, 차트↔표 전환, 라이트/다크 테마 지원
-
-```bash
-# 로컬에서 열기
-open dashboard.html        # macOS
-xdg-open dashboard.html    # Linux
+```mermaid
+flowchart LR
+    A[원본 CSV<br/>51,290행] --> B[global_supermarket.ipynb<br/>피처 생성, EDA, 손실 분석]
+    B --> C[PDF 리포트<br/>영문, 국문]
+    A --> D[global_supermarket_to_sql.ipynb<br/>MySQL 테이블 하나로 적재]
+    D --> E[global_supermarket.sql<br/>5개 테이블로 분리]
+    A --> F[build_dashboard_data.py<br/>전체 기간과 연도별 집계]
+    F --> G[dashboard.html<br/>집계 데이터 내장]
 ```
 
----
-
-## 🗂️ 저장소 구조
-
-```
-Global_Supermarket_Analysis/
-├── README.md                             # 영어 문서
-├── README_KOR.md                         # 한글 문서
-├── global_supermarket.ipynb              # 메인 분석 노트북 (EDA · 손실 · 다변량 · 할인)
-├── gl_supermarkt_recsys.ipynb            # 데이터 기반 추천 시스템 실험
-├── global_supermarket_to_sql.ipynb       # 정제 데이터를 SQL로 적재
-├── dashboard.html                        # 인터랙티브 대시보드 (self-contained)
-├── dashboard_build/
-│   ├── build_dashboard_data.py           # CSV → 집계 JSON 생성 스크립트
-│   └── dashboard_data.json               # 대시보드용 사전 집계 데이터
-├── requirements.txt                      # 분석 노트북 실행에 필요한 파이썬 의존성
-├── Global_Supermarket_Analysis.pdf       # 최종 리포트 (영문)
-├── Global_Supermarket_Analysis_korean.pdf# 최종 리포트 (국문)
-└── Global_Supermarket_Analysis_db_schema.png  # 정규화 스키마 다이어그램
-
-../../SQL/global_supermarket/
-├── global_supermarket.sql                # DDL/ETL: 플랫 CSV → 5개 정규화 테이블
-└── global_supermarket_ERD.mwb             # MySQL Workbench ERD
-```
-
----
-
-## 🧪 데이터 & 파이프라인
-
-**원본 데이터** (`datafile/[DArt-B 5기] Global_Supermarket.csv`)는 51,290행, 24열이며 결측치는 0%입니다.
-고객·주문·상품·시장(지역)·배송 정보를 포함한 "Global Superstore" 형태의 데이터셋으로,
-US·EU·APAC·LATAM·Africa 등 여러 시장에 걸쳐 있습니다.
-
-**① 피처 엔지니어링** — 원본 지표를 넘어선 경제 지표를 직접 설계했습니다.
-
-| 피처 | 정의 | 목적 |
+| 구성 | 역할 | 사용 기술 |
 |---|---|---|
-| `pre_sales` | 할인 적용 전 원매출 복원 | 가격 정책의 실제 영향 측정 |
-| `uni_cost` | 상품 단위 원가 | 마진 구조의 건전성 평가 |
-| `eta` | 주문일 → 배송일 소요 기간 | 물류 리드타임 성과 평가 |
+| 분석 노트북 | 피처 생성, EDA, 손실 분석, 할인 분석 | Pandas, NumPy, SciPy, Matplotlib, Seaborn |
+| SQL | CSV를 MySQL에 넣고 5개 테이블로 나눈다 | MySQL, PyMySQL |
+| 대시보드 빌드 | CSV를 집계해 HTML에 넣고 합계를 검증한다 | Python 표준 라이브러리 |
+| 대시보드 | 브라우저에서 결과를 살펴본다 | JavaScript, SVG |
 
-**② 정규화 (SQL)** — 플랫 CSV를 `row_id` 기준으로 5개 테이블(`customer` · `product` · `market` · `order` · `shipping`)로 분해했습니다. 스키마는 [`Global_Supermarket_Analysis_db_schema.png`](Global_Supermarket_Analysis_db_schema.png), DDL/ETL은 [`SQL/global_supermarket/global_supermarket.sql`](../../SQL/global_supermarket/global_supermarket.sql)을 참고하세요.
+MySQL에는 원본을 `row_id` 기준으로 다섯 테이블에 나눠 저장했다.
 
-**③ 분석** — 고객·주문·상품·시장·배송에 대한 EDA 이후 상관 분석 → 손실 분석 → 이익 분석 → 다변량 분석 → 할인 분석 순으로 진행했습니다.
+```mermaid
+erDiagram
+    order ||--|| customer : "row_id"
+    order ||--|| product : "row_id"
+    order ||--|| market : "row_id"
+    order ||--|| shipping : "row_id"
 
----
+    order {
+        INT row_id PK
+        VARCHAR(30) order_id
+        DATE order_date
+        SMALLINT order_year
+        TINYINT order_weeknum
+        INT quantity
+        INT sales
+        DECIMAL profit
+        INT discount
+    }
+    customer {
+        INT row_id PK
+        VARCHAR(20) customer_id
+        VARCHAR(100) customer_name
+        VARCHAR(50) customer_segment
+    }
+    product {
+        INT row_id PK
+        VARCHAR(30) product_id
+        VARCHAR(300) product_name
+        VARCHAR(50) category
+        VARCHAR(50) sub_category
+    }
+    market {
+        INT row_id PK
+        VARCHAR(100) market_country
+        VARCHAR(10) market_area
+        VARCHAR(100) market_city
+        VARCHAR(100) order_city
+        VARCHAR(100) order_region
+    }
+    shipping {
+        INT row_id PK
+        DATE ship_date
+        VARCHAR(50) ship_mode
+        DECIMAL shipping_cost
+    }
+```
 
-## 🔍 핵심 발견
+## Data
 
-### 1. 할인이 이익을 갉아먹는다
+원본은 저장소 루트의 `datafile/[DArt-B 5기] Global_Supermarket.csv`다.
 
-- 할인율과 이익의 피어슨 상관계수는 **-0.32**(검증값 -0.316)로 뚜렷한 음의 상관관계를 보입니다.
-- **할인율 40% 초과 거래는 전체의 13.6%에 불과**하지만, **전사 총 손실의 68.2%**를 차지합니다.
-  → 손실은 광범위하게 퍼져 있는 것이 아니라 소수의 고할인 거래에 집중되어 있습니다.
+- 51,290행, 24열이며 결측값과 중복 행은 없다.
+- 2019-01-01부터 2022-12-31까지의 주문으로, 고유 주문 25,035건과 고객 4,873명을 포함한다.
+- 7개 시장(APAC, EU, US, LATAM, Africa, EMEA, Canada), 147개국, 서브카테고리 17개에 걸쳐 있다.
+- 한 행은 주문 한 건이 아니라 주문에 담긴 상품 한 줄이다.
 
-### 2. Tables가 유일한 적자 서브카테고리다
+### Derived Features
 
-- 17개 서브카테고리 중 **Tables만 순손실**(약 -$64K)을 기록해 마진 압박의 핵심 요인으로 나타났습니다.
-- 제조사별로 보면 **Bevis·Barricks·Lesro**가 손실 상위 3사입니다.
+| 피처 | 계산 방법 | 쓰임 |
+|---|---|---|
+| `pre_sales` | `sales / (1 − discount)` | 할인 전 매출 |
+| `uni_cost` | `pre_sales / quantity` | 할인 전 개당 판매가(이름과 달리 원가가 아니다) |
+| `eta` | `ship_date − order_date` | 주문 후 출고까지 걸린 일수 |
 
-### 3. 지역별 손익 편차
+## Method
 
-- 순이익 규모는 **APAC > EU > US > LATAM** 순으로 크며, 매출이 큰 시장일수록 손실 규모도 함께 커지는 경향이 있습니다.
-- 특히 APAC·US·LATAM에서는 테이블 판매의 손실 기여도가 시장 전체 손실 대비 과도하게 높습니다.
+데이터 전체를 훑어본 뒤 손실이 생기는 곳을 좁혀 가는 순서로 분석했다.
 
-### 4. 우상향하는 거래량과 뚜렷한 계절성
+1. EDA: 고객, 주문, 상품, 시장, 배송을 차례로 살펴봤다.
+2. 상관 분석: 할인율, 매출, 이익 같은 연속형 변수의 관계를 확인했다.
+3. 손실 분석: 서브카테고리, 제조사, 시장, 도시별로 손익을 나눠 봤다.
+4. 할인 분석: 할인 구간별 손익을 시장과 서브카테고리에 따라 비교했다.
 
-- 거래 건수가 2019년 8,998건에서 2022년 17,531건으로 **약 95%** 성장했으며, 2022년에는 전년 대비 **27.0%** 증가했습니다.
-- 매년 **하반기(9–12월)**에 뚜렷한 성수기 피크가 반복됩니다.
+고할인은 할인율이 40%를 넘는 경우(`discount > 0.4`)로 정의했다. 제조사는 상품명의 첫 단어로 추정했다.
 
----
+## Results
 
-## 💡 전략적 제언
+| 지표 | 값 |
+|---|---|
+| 총 매출 / 총 이익 | $12.64M / $1.47M (이익률 11.6%) |
+| 할인율과 이익의 상관계수 | −0.316 |
+| 할인율 40% 초과 거래 | 전체의 13.6% |
+| 그 거래가 차지하는 손실 비중 | 전체 손실의 68.2% |
+
+### Key Findings
+
+1. **손실은 고할인 거래에 몰려 있다.** 할인율 40%를 넘는 거래는 전체의 13.6%뿐이지만 전체 손실의 68.2%가 여기서 나온다. 이 거래들이 낸 이익은 전체 이익의 약 0.02%다.
+2. **적자를 내는 서브카테고리는 Tables뿐이다.** 순손실은 약 −$64K이고, 제조사별로는 Bevis, Barricks, Lesro의 손실이 가장 컸다.
+3. **지역마다 손익 구조가 다르다.** 순이익은 APAC, EU, US, LATAM 순으로 크다. APAC, US, LATAM에서 Tables는 매출의 6–9%지만 손실의 18–21%를 차지하고, EU 손실은 75.6%가 할인율 40–60% 구간에서 나온다.
+4. **거래는 늘고 있고 계절성이 뚜렷하다.** 거래는 2019년 8,998건에서 2022년 17,531건으로 약 95% 늘었고, 9월, 11월, 12월에 가장 많다.
+
+### Recommendations
 
 | # | 제언 | 근거 |
 |---|---|---|
-| 1 | **고거래량 카테고리에 할인 상한 40% 도입** (Phones, Bookcases 등) | 40% 초과 할인이 전체 손실의 68% 유발 |
-| 2 | **EU 평균 할인율 20%p 하향** | EU의 큰 손실 규모를 줄이고 지역 수익성 교정 |
-| 3 | **고손실 제조사의 테이블 상품군 축소·단종** (Bevis, Barricks, Lesro) | Tables가 유일한 적자 서브카테고리이며 해당 제조사의 손실이 큼 |
-| 4 | **고손실 도시의 가격 정책 재설계** (Istanbul, Lagos 등) | 할인율을 40% 이하 구간으로 재구성 |
+| 1 | Phones와 Bookcases의 할인율을 40% 이하로 묶는다 | 40%를 넘는 할인이 손실의 68.2%를 만든다 |
+| 2 | EU의 고할인 상품 할인율을 평균 20%p 낮춘다 | EU 손실의 75.6%가 40–60% 할인 구간에서 나온다 |
+| 3 | Bevis, Barricks, Lesro의 Tables 상품을 줄이거나 단종한다 | 유일한 적자 서브카테고리의 손실 상위 제조사다 |
+| 4 | Istanbul, Lagos, Texas의 고할인을 줄인다 | 손실이 가장 큰 세 도시다 |
 
----
+## Usage
 
-## 🔁 재현 방법
+명령은 `projects/Global_Supermarket_Analysis`에서 실행한다.
+
+### Environment
 
 ```bash
-# 0. 의존성 설치
 pip install -r requirements.txt
-cp .env.example .env
+```
 
-# 1. 대시보드용 집계 데이터 재생성 (원본 CSV 필요)
-python dashboard_build/build_dashboard_data.py
-#    → dashboard_build/dashboard_data.json 갱신
-#    (총 매출/이익, 상관계수 -0.316, 고할인 손실 비중 68.2% 등을 콘솔에 출력)
+Python 3.10과 3.11에서 실행했다.
 
-# 2. 대시보드 열기
-open dashboard.html
+### Dashboard
 
-# 3. 전체 분석 재현
+`dashboard.html`은 집계 데이터가 들어 있는 파일이라 서버나 인터넷 연결 없이 브라우저에서 바로 열린다. 연도 필터, 차트와 표 전환, 월별 CSV 내보내기를 지원한다.
+
+```bash
+xdg-open dashboard.html                            # 대시보드 열기 (macOS는 open)
+python3 dashboard_build/build_dashboard_data.py    # 원본 CSV가 바뀌었을 때 다시 집계
+python3 -m unittest discover -s dashboard_build    # 집계 결과와 원본 CSV 대조
+```
+
+지표 정의는 [dashboard_build/README.md](./dashboard_build/README.md)에 있다.
+
+### Notebooks
+
+```bash
 jupyter notebook global_supermarket.ipynb
 ```
 
-> 분석 노트북과 SQL 적재 단계에서 필요한 파이썬 의존성은 [`requirements.txt`](requirements.txt)에 정리되어 있습니다. **Python 3.10 / 3.11**에서 테스트되었으며(노트북은 각각 3.10.18, 3.11.6에서 실행됨), 라이브러리 버전은 별도로 pin되어 있지 않습니다. 대시보드 빌드 스크립트(`dashboard_build/build_dashboard_data.py`)는 파이썬 표준 라이브러리만 사용합니다.
+- 분석 노트북은 GitHub에 올라간 CSV를 URL로 읽으므로 인터넷 연결이 필요하다.
+- `global_supermarket_to_sql.ipynb`를 실행하려면 `.env.example`을 `.env`로 복사해 MySQL 접속 정보를 채운다. 적재가 끝나면 [global_supermarket.sql](../../SQL/global_supermarket/global_supermarket.sql)로 테이블을 나눈다.
 
-> 참고: `dashboard.html`은 집계 결과가 내장된 정적 파일이라 CSV 없이도 바로 열 수 있습니다. 원본 데이터가 갱신되면 1번 스크립트를 다시 실행해 대시보드에 반영하세요.
+## Repository Structure
 
----
+```
+Global_Supermarket_Analysis/
+├── global_supermarket.ipynb              # 메인 분석
+├── gl_supermarkt_recsys.ipynb            # 협업 필터링 추천 실험
+├── global_supermarket_to_sql.ipynb       # CSV를 MySQL에 적재
+├── dashboard.html                        # 인터랙티브 대시보드
+├── dashboard_build/                      # 대시보드 집계 스크립트와 테스트
+├── Global_Supermarket_Analysis.pdf       # 최종 리포트 (영문)
+├── Global_Supermarket_Analysis_korean.pdf# 최종 리포트 (국문)
+├── Global_Supermarket_Analysis_db_schema.png  # Workbench ERD 이미지
+├── requirements.txt
+└── .env.example                          # MySQL 접속 정보 템플릿
 
-## 🧰 기술 스택
-
-- **언어:** Python, SQL, JavaScript
-- **분석:** Pandas · NumPy · SciPy(통계) · Matplotlib · Seaborn(시각화)
-- **데이터베이스:** MySQL(정규화 스키마 설계 · ETL)
-- **대시보드:** 의존성 없는 Vanilla JS + SVG(외부 라이브러리 미사용)
-- **기법:** 다변량 EDA · 피처 엔지니어링 · 상관 분석 · 리스크 프로파일링 · BI 리포팅
+../../SQL/global_supermarket/
+├── global_supermarket.sql                # 5개 테이블 생성과 데이터 분리
+└── global_supermarket_ERD.mwb            # MySQL Workbench ERD
+```

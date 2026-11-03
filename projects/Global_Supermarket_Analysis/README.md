@@ -1,144 +1,186 @@
-# 🛒 Global Supermarket Analysis
+# Global Supermarket Analysis
 
-> An in-depth analysis of 51,290 global retail transactions using EDA, loss analysis, and multivariate analysis, identifying a structural profit leak: **68% of total losses come from a small number of heavily discounted transactions**.
+[Korean](./README_KOR.md)
 
-The results are available both as a static report (PDF) and an **interactive dashboard**.
+## Overview
 
-[Korean README](README_KOR.md)
+A project that analyzes global supermarket order data from 2019–2022 to find what causes losses and to recommend pricing policies that reduce them.
 
-| | |
+- **Q1.** What characterizes the customer, order, product, market, and shipping data?
+- **Q2.** Which transactions create losses, and what decisions would reduce them?
+
+## Architecture
+
+One raw CSV produces the analysis report, the MySQL tables, and the dashboard.
+
+```mermaid
+flowchart LR
+    A[Raw CSV<br/>51,290 rows] --> B[global_supermarket.ipynb<br/>features, EDA, loss analysis]
+    B --> C[PDF report<br/>English, Korean]
+    A --> D[global_supermarket_to_sql.ipynb<br/>load one MySQL table]
+    D --> E[global_supermarket.sql<br/>split into 5 tables]
+    A --> F[build_dashboard_data.py<br/>overall and yearly aggregates]
+    F --> G[dashboard.html<br/>embedded aggregates]
+```
+
+| Component | Role | Stack |
+|---|---|---|
+| Analysis notebook | Feature engineering, EDA, loss analysis, discount analysis | Pandas, NumPy, SciPy, Matplotlib, Seaborn |
+| SQL | Loads the CSV into MySQL and splits it into five tables | MySQL, PyMySQL |
+| Dashboard build | Aggregates the CSV into the HTML and checks the totals | Python standard library |
+| Dashboard | Explores the results in a browser | JavaScript, SVG |
+
+In MySQL, the source data is split into five tables by `row_id`.
+
+```mermaid
+erDiagram
+    order ||--|| customer : "row_id"
+    order ||--|| product : "row_id"
+    order ||--|| market : "row_id"
+    order ||--|| shipping : "row_id"
+
+    order {
+        INT row_id PK
+        VARCHAR(30) order_id
+        DATE order_date
+        SMALLINT order_year
+        TINYINT order_weeknum
+        INT quantity
+        INT sales
+        DECIMAL profit
+        INT discount
+    }
+    customer {
+        INT row_id PK
+        VARCHAR(20) customer_id
+        VARCHAR(100) customer_name
+        VARCHAR(50) customer_segment
+    }
+    product {
+        INT row_id PK
+        VARCHAR(30) product_id
+        VARCHAR(300) product_name
+        VARCHAR(50) category
+        VARCHAR(50) sub_category
+    }
+    market {
+        INT row_id PK
+        VARCHAR(100) market_country
+        VARCHAR(10) market_area
+        VARCHAR(100) market_city
+        VARCHAR(100) order_city
+        VARCHAR(100) order_region
+    }
+    shipping {
+        INT row_id PK
+        DATE ship_date
+        VARCHAR(50) ship_mode
+        DECIMAL shipping_cost
+    }
+```
+
+## Data
+
+The source is `datafile/[DArt-B 5기] Global_Supermarket.csv` at the repository root.
+
+- 51,290 rows and 24 columns, with no missing values or duplicate rows.
+- Orders from 2019-01-01 to 2022-12-31, covering 25,035 unique orders and 4,873 customers.
+- Seven markets (APAC, EU, US, LATAM, Africa, EMEA, Canada), 147 countries, and 17 sub-categories.
+- Each row is one product line within an order, not a whole order.
+
+### Derived Features
+
+| Feature | Formula | Meaning |
+|---|---|---|
+| `pre_sales` | `sales / (1 − discount)` | Sales before discount |
+| `uni_cost` | `pre_sales / quantity` | Pre-discount price per unit (despite the name, not a cost) |
+| `eta` | `ship_date − order_date` | Days from order to shipment |
+
+## Method
+
+The analysis surveys the whole dataset first and then narrows down where losses occur.
+
+1. EDA: customers, orders, products, markets, and shipping.
+2. Correlation analysis: relationships among continuous variables such as discount, sales, and profit.
+3. Loss analysis: profit and loss by sub-category, manufacturer, market, and city.
+4. Discount analysis: profit and loss by discount band across markets and sub-categories.
+
+A high discount means a discount above 40% (`discount > 0.4`). Manufacturers are inferred from the first word of the product name.
+
+## Results
+
+| Metric | Value |
 |---|---|
-| **Data** | Global Supermarket · 51,290 rows × 24 columns · 2019–2022 |
-| **Total Sales / Profit** | $12.64M / $1.47M (profit margin **11.6%**) |
-| **Key Finding** | Transactions with discounts above 40% represent 13.6% of all transactions but account for **68.2% of total losses** |
-| **Stack** | Python (Pandas · NumPy · Matplotlib · Seaborn · SciPy) · MySQL · Vanilla JS dashboard |
+| Total sales / profit | $12.64M / $1.47M (11.6% margin) |
+| Discount–profit correlation | −0.316 |
+| Transactions discounted above 40% | 13.6% of all transactions |
+| Their share of losses | 68.2% of total losses |
 
----
+### Key Findings
 
-## 📊 Dashboard
+1. **Losses concentrate in heavily discounted transactions.** Transactions discounted above 40% are only 13.6% of all transactions but produce 68.2% of total losses, and about 0.02% of total profit.
+2. **Tables is the only loss-making sub-category.** Its net loss is about −$64K, led by Bevis, Barricks, and Lesro.
+3. **Profit structure differs by region.** Net profit ranks APAC, EU, US, LATAM. In APAC, US, and LATAM, Tables are 6–9% of sales but 18–21% of losses, and 75.6% of EU losses come from discounts of 40–60%.
+4. **Volume is growing with clear seasonality.** Transactions grew about 95%, from 8,998 in 2019 to 17,531 in 2022, and peak in September, November, and December.
 
-The self-contained HTML dashboard lets you explore the key results in one place. It opens directly in a browser without a server or installation.
+### Recommendations
 
-- **File:** [`dashboard.html`](dashboard.html) — a self-contained file with the data embedded (double-click to open)
-- **Includes:** KPI header · sales/profit trends · regional profit and loss · category profit and loss · discount/loss deep dive · shipping analysis · strategic recommendations
-- **Features:** hover tooltips, chart/table toggle, and light/dark theme support
+| # | Recommendation | Evidence |
+|---|---|---|
+| 1 | Cap discounts for Phones and Bookcases at 40% | Discounts above 40% cause 68.2% of losses |
+| 2 | Lower discounts on high-discount EU products by about 20 percentage points | 75.6% of EU losses come from the 40–60% band |
+| 3 | Reduce or discontinue Tables products from Bevis, Barricks, and Lesro | Largest losses in the only loss-making sub-category |
+| 4 | Reduce heavy discounts in Istanbul, Lagos, and Texas | The three cities with the largest losses |
+
+## Usage
+
+Run commands from `projects/Global_Supermarket_Analysis`.
+
+### Environment
 
 ```bash
-# Open locally
-open dashboard.html        # macOS
-xdg-open dashboard.html    # Linux
-```
-
----
-
-## 🗂️ Repository Structure
-
-```
-Global_Supermarket_Analysis/
-├── README.md                             # This document
-├── README_KOR.md                         # Korean documentation
-├── global_supermarket.ipynb              # Main analysis notebook (EDA · loss · multivariate · discount)
-├── gl_supermarkt_recsys.ipynb            # Data-driven recommendation system experiment
-├── global_supermarket_to_sql.ipynb       # Load cleaned data into SQL
-├── dashboard.html                        # Interactive dashboard (self-contained)
-├── dashboard_build/
-│   ├── build_dashboard_data.py           # Generate aggregated JSON from CSV
-│   └── dashboard_data.json               # Pre-aggregated data for the dashboard
-├── requirements.txt                      # Python dependencies for the analysis notebooks
-├── Global_Supermarket_Analysis.pdf       # Final report (English)
-├── Global_Supermarket_Analysis_korean.pdf# Final report (Korean)
-└── Global_Supermarket_Analysis_db_schema.png  # Normalized schema diagram
-
-../../SQL/global_supermarket/
-├── global_supermarket.sql                # DDL/ETL: flat CSV → five normalized tables
-└── global_supermarket_ERD.mwb             # MySQL Workbench ERD
-```
-
----
-
-## 🧪 Data & Pipeline
-
-**Raw data** (the Global Supermarket CSV in `datafile/`) contains 51,290 rows and 24 columns with no missing values. It includes customer, order, product, market/region, and shipping information across multiple markets, including US, EU, APAC, LATAM, and Africa.
-
-**① Feature engineering** — custom economic indicators were designed beyond the original metrics:
-
-| Feature | Definition | Purpose |
-|---|---|---|
-| `pre_sales` | Reconstructed sales before discount | Measure the actual impact of pricing policies |
-| `uni_cost` | Unit cost of a product | Evaluate the health of the margin structure |
-| `eta` | Elapsed time from order to delivery | Evaluate logistics lead-time performance |
-
-**② Normalization (SQL)** — the flat CSV was decomposed by `row_id` into five tables (`customer` · `product` · `market` · `order` · `shipping`). The schema is available in [`Global_Supermarket_Analysis_db_schema.png`](Global_Supermarket_Analysis_db_schema.png), and the DDL/ETL is documented in [`SQL/global_supermarket/global_supermarket.sql`](../../SQL/global_supermarket/global_supermarket.sql).
-
-**③ Analysis** — EDA across customers, orders, products, markets, and shipping, followed by correlation, loss, profit, multivariate, and discount analyses.
-
----
-
-## 🔍 Key Findings
-
-### 1. Discounts erode profit
-
-- The Pearson correlation between discount rate and profit is **-0.32** (validated at -0.316), indicating a clear negative relationship.
-- Transactions with discounts above 40% account for only **13.6% of all transactions**, but represent **68.2% of total losses**.
-  → Losses are concentrated in a small number of heavily discounted transactions rather than spread evenly across the business.
-
-### 2. Tables is the only loss-making subcategory
-
-- **Tables** is the only loss-making subcategory among 17 subcategories, with a net loss of approximately -$64K.
-- **Bevis, Barricks, and Lesro** are the three manufacturers with the largest losses.
-
-### 3. Regional profit and loss variation
-
-- Total profit ranks **APAC > EU > US > LATAM**, while larger markets also tend to carry larger losses.
-- In APAC, US, and LATAM, table sales contribute disproportionately to each market's overall losses.
-
-### 4. Growing transaction volume with clear seasonality
-
-- Transaction volume grew from 8,998 in 2019 to 17,531 in 2022, an increase of approximately **95%** (**+27.0% year over year in 2022**).
-- A clear seasonal peak recurs every year in the second half, especially from September through December.
-
----
-
-## 💡 Strategic Recommendations
-
-| # | Recommendation | Rationale |
-|---|---|---|
-| 1 | **Introduce a 40% discount cap for high-volume categories** (Phones, Bookcases, etc.) | Discounts above 40% cause 68% of total losses |
-| 2 | **Reduce the average discount rate in the EU by 20 percentage points** | Correct the EU's large loss burden and regional profitability |
-| 3 | **Reduce or discontinue table products from high-loss manufacturers** (Bevis, Barricks, Lesro) | Tables is the only loss-making subcategory and these manufacturers lead losses |
-| 4 | **Redesign pricing for high-loss cities** (Istanbul, Lagos, etc.) | Reconfigure discounts within the 40% threshold |
-
----
-
-## 🔁 Reproduction
-
-```bash
-# 0. Install dependencies
 pip install -r requirements.txt
-cp .env.example .env
+```
 
-# 1. Regenerate aggregated data for the dashboard (requires the raw CSV)
-python dashboard_build/build_dashboard_data.py
-#    → updates dashboard_build/dashboard_data.json
-#    (prints total sales/profit, correlation -0.316, and the 68.2% high-discount loss share)
+Tested on Python 3.10 and 3.11.
 
-# 2. Open the dashboard
-open dashboard.html
+### Dashboard
 
-# 3. Reproduce the full analysis
+`dashboard.html` embeds the aggregated data, so it opens directly in a browser without a server or internet connection. It supports a year filter, chart/table toggles, and monthly CSV export.
+
+```bash
+xdg-open dashboard.html                            # Open the dashboard (open on macOS)
+python3 dashboard_build/build_dashboard_data.py    # Re-aggregate after the source CSV changes
+python3 -m unittest discover -s dashboard_build    # Check the aggregates against the source CSV
+```
+
+Metric definitions are in [dashboard_build/README.md](./dashboard_build/README.md).
+
+### Notebooks
+
+```bash
 jupyter notebook global_supermarket.ipynb
 ```
 
-> Dependencies for the analysis notebooks and the SQL loading step are listed in [`requirements.txt`](requirements.txt). Tested on **Python 3.10 / 3.11** (the notebooks were originally executed on 3.10.18 and 3.11.6; no library versions are pinned). The dashboard build script (`dashboard_build/build_dashboard_data.py`) uses only the Python standard library.
+- The analysis notebooks read the CSV from GitHub by URL, so they need an internet connection.
+- To run `global_supermarket_to_sql.ipynb`, copy `.env.example` to `.env` and fill in the MySQL connection details. After loading, split the tables with [global_supermarket.sql](../../SQL/global_supermarket/global_supermarket.sql).
 
-> Note: `dashboard.html` is a static file with the aggregated results embedded, so it can be opened without the CSV. Run step 1 again after updating the raw data to refresh the dashboard.
+## Repository Structure
 
----
+```
+Global_Supermarket_Analysis/
+├── global_supermarket.ipynb              # Main analysis
+├── gl_supermarkt_recsys.ipynb            # Collaborative-filtering experiment
+├── global_supermarket_to_sql.ipynb       # Load the CSV into MySQL
+├── dashboard.html                        # Interactive dashboard
+├── dashboard_build/                      # Dashboard aggregation script and tests
+├── Global_Supermarket_Analysis.pdf       # Final report (English)
+├── Global_Supermarket_Analysis_korean.pdf# Final report (Korean)
+├── Global_Supermarket_Analysis_db_schema.png  # Workbench ERD image
+├── requirements.txt
+└── .env.example                          # MySQL connection template
 
-## 🧰 Tech Stack
-
-- **Languages:** Python, SQL, JavaScript
-- **Analysis:** Pandas · NumPy · SciPy (statistics) · Matplotlib · Seaborn (visualization)
-- **Database:** MySQL (normalized schema design · ETL)
-- **Dashboard:** Dependency-free Vanilla JS + SVG (no external libraries)
-- **Methods:** Multivariate EDA · feature engineering · correlation analysis · risk profiling · BI reporting
+../../SQL/global_supermarket/
+├── global_supermarket.sql                # Create the five tables and split the data
+└── global_supermarket_ERD.mwb            # MySQL Workbench ERD
+```

@@ -2,247 +2,182 @@
 
 [English](./README.md)
 
-DiningCode의 방문·평점·리뷰를 이용해 **사용자가 만족할 식당을 찾는 방법**을 비교하는 연구 프로젝트다.
+## Overview
 
-갱신: **2026-10-13 KST**
+DiningCode에서 식당 방문 기록, 별점, 리뷰를 수집하고, 이를 활용해 사용자에게 더 나은 식당을 추천할 수 있는 모델을 개발하는 프로젝트다.
 
-현재 기준 모델은 방문·평점만 사용한다. 리뷰를 활용한 여러 실험은 완료했지만 안정적인 추가 이득을 확인하지 못해 기준 모델에는 반영하지 않았다.
+- **RQ1.** 리뷰 텍스트를 함께 쓰면 방문 기록과 별점만 쓰는 모델보다 추천이 좋아지는가?
+- **RQ2.** 추천 모델의 구조(Two-stage, Two-Tower, 그래프, 다중 벡터)에 따라 성능이 어떻게 달라지는가?
 
-## 문서 안내
+## Architecture
 
-처음에는 이 문서에서 과제와 시스템을 파악하고, 결과 안내에서 관심 있는 실험을 고르면 된다. 각 문서는 아래 역할을 맡으며 같은 실행 수치를 모두 반복하지 않는다.
-
-| 문서 | 읽는 목적 |
-|---|---|
-| [PLAN.md](./PLAN.md) | 연구 질문, 완료 범위, 다음 검증의 우선순위 |
-| [BASELINE_MODEL.md](./BASELINE_MODEL.md) | 기준 모델의 입력·검색·재정렬·평가 규칙 |
-| [reports/README.md](./reports/README.md) | 방법별 결론과 설명을 담은 리포트 찾기 |
-| [SATISFACTION_BASELINE.md](./SATISFACTION_BASELINE.md) | 사용자별 만족도 정답의 정의와 예시 |
-| [artifacts/README.md](./artifacts/README.md) | 모델·캐시·원문·ZIP의 보존·복원 범위 |
-
-## 현재 시스템
-
-전체 식당을 한 번에 정교하게 평가하면 계산량이 커지므로 검색과 재정렬을 나눈다. 먼저 행동 이력으로 후보 100개를 찾고, 그 안에서 더 많은 feature를 사용해 Top-10 순서를 정한다. 이 구분 덕분에 후보를 못 찾은 문제와 후보 순서를 잘못 정한 문제를 따로 분석할 수 있다.
+추천은 두 단계로 나눈다. 방문 기록으로 후보 100개를 먼저 고르고, LambdaRank가 그 안에서 Top-10 순서를 정한다.
 
 ```mermaid
 flowchart LR
-    A[과거 방문과 평점] --> B[C1 공동 방문 검색]
+    A[과거 방문과 별점] --> B[C1 공동 방문 검색]
     A --> C[C4 LightGCN 검색]
     B --> D[C5 RRF 후보 100개]
     C --> D
     D --> E[LambdaRank]
     E --> F[추천 Top-10]
+    R["리뷰 텍스트 (실험)"] -.-> T[텍스트 검색기]
+    T -.-> D
+    R -.-> C
+    R -.-> E
 ```
 
-| 구성 | 사용 정보와 역할 |
+실선은 기준 모델이고, 점선은 리뷰를 넣어 실험한 위치다.
+
+| 구성 | 역할 |
 |---|---|
-| C1 공동 방문 검색 | 사용자가 방문한 식당과 함께 방문된 다른 식당을 찾음 |
-| C4 LightGCN 검색 | 사용자–식당 방문 그래프를 거친 관계로 후보를 찾음 |
-| C5 후보 결합 | C1·C4 순위를 RRF로 합치고 방문 식당을 제외해 최대 100개 생성 |
-| LambdaRank 재정렬 | 같은 후보에서 방문·평점·지역 등 16개 feature로 Top-10 순서를 정함 |
+| C1 공동 방문 검색 | 사용자가 다녀간 식당과 함께 자주 방문된 식당을 찾는다 |
+| C4 LightGCN 검색 | 사용자–식당 방문 그래프로 관련 식당을 찾는다 |
+| C5 후보 결합 | C1과 C4의 순위를 RRF로 합쳐 후보 100개를 만든다 |
+| LambdaRank 재정렬 | 방문, 별점, 지역 등 16개 feature로 Top-10 순서를 정한다 |
 
-리뷰는 현재 기준 모델에 들어가지 않으며, 메뉴·외부 식당 정보의 추천 효과도 미검증이다. 후속 연구는 리뷰로 전체 식당 중 더 좋은 후보를 찾는 단계에 집중한다. 재정렬은 후보 목록 밖의 식당을 추가할 수 없어 검색 실패를 해결하는 데 한계가 있기 때문이다.
+## Data
 
-Two-stage는 후보 검색과 재정렬을 나누는 전체 구조다. Two-Tower는 사용자와 식당을 따로 인코딩하는 모델 구조다. 시간 분할과 순차 추천도 별개의 실험 축이다.
+DiningCode 리뷰를 크롤링해 Supabase PostgreSQL에 저장하고, 실험에는 고정한 snapshot(`e7896add5b4b5939`)을 쓴다. 사용자 14,008명, 식당 4,587곳의 첫 방문 기록 88,554건이다. 미래 정보가 입력에 섞이지 않도록 시간 순서로 나눴다.
 
-## 데이터와 평가
+| 구간 | 기간 | 방문 기록 |
+|---|---|---:|
+| Train | 2025-12-19까지 | 70,883 |
+| Validation | 2025-12-20 ~ 2026-05-04 | 8,934 |
+| Test | 2026-05-05 ~ 2026-09-26 | 8,737 |
 
-추천 시점에 실제로 알 수 있었던 정보만 입력으로 사용하기 위해 시간을 기준으로 데이터를 나눈다. 같은 사용자의 미래 리뷰나 평점을 과거 프로필에 넣지 않으며, 미래 방문은 모델이 맞혀야 할 정답으로만 사용한다.
+## Evaluation
 
-1. 고정 데이터
+과거 이력이 있는 사용자에게 추천 목록을 만들고, 이후 실제로 방문한 식당을 얼마나 맞혔는지 본다.
 
-   - Snapshot: `e7896add5b4b5939`
-   - 첫 사용자–식당 상호작용: 88,554개
-   - 사용자: 14,008명
-   - 식당: 4,587곳
+- **평가 사용자:** validation 1,639명, test 1,573명이다. 과거 이력이 없는 신규 사용자는 제외했다.
+- **정답:** 이후 방문해 3점 이상을 준 식당이다. 만족도에 따라 등급을 나누며, "매우 만족" 기준은 사용자의 과거 평균에 따라 3.5~4.5점 사이로 조정한다([정의](./SATISFACTION_BASELINE.md)).
+- **지표:** 후보 검색은 Recall@100, 전체 추천은 Graded NDCG@10으로 평가한다.
+- **비교 방식:** 설정은 validation으로 고르고 test는 마지막 확인에만 쓴다. 리뷰의 효과는 같은 모델에서 텍스트만 바꿔 비교하고, 95% 구간이 0을 포함하면 개선으로 보지 않는다.
 
-2. 시간 분할
+## Results
 
-   - Train: 70,883개, 2025-12-19(T1)까지
-   - Validation: 8,934개, T1 이후 2026-05-04(T2)까지
-   - Test: 8,737개, T2 이후 약 145일
-   - 미래 리뷰·평점은 입력에서 제외하고 정답으로만 사용
+### Baseline
 
-3. 평가 사용자
-
-   - Validation: 과거 이력과 관련 정답이 있는 1,639명
-   - Test: 과거 이력과 관련 정답이 있는 1,573명
-   - 과거 이력이 없는 신규 사용자는 현재 개인화 평가에서 제외
-   - Catalog 밖 정답은 Recall 분모에 유지
-
-4. 주요 지표
-
-   - 후보 검색: Recall@100
-   - 전체 시스템: Graded NDCG@10
-   - 정답: 미래 실제 방문의 개인별 만족도 등급 0/1/2
-   - 관련 정답 경계: 3점 이상
-
-## 기준 성능
-
-2026-10-04 Window/history-aware, seed 42의 test 결과다. 아래 값은 2026-10-12 오류 수정 전 모델에서 측정했다.
+seed 42의 test 결과다.
 
 | 단계 | Recall@100 | NDCG@10 | Recall@10 |
 |---|---:|---:|---:|
 | C5 후보 순서 | 20.1626% | 0.026590 | — |
 | 같은 C5 → LambdaRank | 20.1626% | 0.025467 | 3.6502% |
 
-Recall@100은 미래 관련 정답 중 후보에 들어온 비율을 사용자별로 평균한 값이다. 위 결과는 후보 검색에 개선 여지가 크다는 뜻이다. LambdaRank는 같은 후보를 유지하면서 순서만 바꾸므로 Recall@100은 같고, 상위 순서를 보는 NDCG@10으로 추가 효과를 확인한다. 이번 test에서는 그 이득을 확인하지 못했다.
+기준 모델은 이후 방문한 정답 식당의 약 20%를 후보 100개 안에 담는다. LambdaRank로 순서를 바꾸면 NDCG@10이 오히려 조금 낮아져, 재정렬로 얻은 이득은 확인하지 못했다. 자세한 분석은 [baseline 리포트](./reports/baseline.md)에 있다.
 
-이후 리뷰 실험도 기준 모델에 채택하지 않았으며, 10월 12일 수정 후 실데이터 재학습·재평가는 아직 없다.
+### Review Experiments
 
-근거는 [기준 실행 보고서](./artifacts/runs/20261004T125314601899Z-e7896add/report.md)와 [baseline 진단](./reports/baseline.md)에 있다.
+리뷰를 어디에 썼는지에 따라 실험을 묶었다. 비교 기준은 validation에서 C5의 Recall@100인 **19.48%**다.
 
-## 실험 이력
+| 방법 | 리뷰를 쓰는 방식 | 평가 조건 | 대표 결과 | 판단 |
+|---|---|---|---|---|
+| 단어 검색 | BM25 | validation | 단독 4.54%, C5에 추가하면 16.69% | 새로 찾은 정답보다 밀려난 정답이 많음 |
+| 고정 임베딩 검색 | E5 평균, 리뷰별 매칭, 취향 3개(K3) | validation | 단독 4.50% → K3 5.50% | 리뷰만으로 찾는 신호는 있음 |
+| 별도 신경망 검색 | Two-Tower, 리뷰 Transformer | validation | Two-Tower 9.12% → E5 추가 9.39%, Transformer 9.67% | C5보다 크게 낮음 |
+| 행동 그래프 + 텍스트 | RLMRec, 텍스트 그래프, 학습형 late 매칭 | validation | RLMRec+C1 19.62%, 텍스트 그래프 18.20%, late 18.45% | 뚜렷한 개선 없음 |
+| 재정렬 feature | E5 유사도 feature 6개 | test | NDCG@10 0.025467 → 0.025570 | 개선 폭이 오차 범위 안 |
+| 압축 표현 | RQ-VAE 리뷰 코드 | 표현 검사 | 저장 크기 144.63배 축소 | 추천 성능은 오르지 않음 |
 
-실험은 모델 이름보다 검증하려는 질문에 따라 묶었다. 텍스트 단독 검색, 행동 모델과의 결합, 여러 리뷰의 집계 방식, 같은 구조에서의 텍스트 추가효과는 서로 다른 질문이므로 결과도 구분해서 읽어야 한다.
+따로 적지 않은 값은 Recall@100이다. 정확한 값과 신뢰구간은 [리뷰 임베딩 리포트](./reports/review_embeddings.md)에 있다.
 
-1. 어휘·의미 검색
+### Interpretation and Limitations
 
-   - DeepCoNN, BM25, Liquid, E5 평균 검색
-   - 단독 검색과 C5 결합 모두 기준 모델보다 낮거나 개선 불확실
+리뷰를 쓴 방법 중 C5를 꾸준히 이긴 방법은 없어서, 기준 모델에는 리뷰를 넣지 않았다. 다만 아래 이유로 리뷰가 쓸모없다고 결론 내리기는 이르다.
 
-2. 리뷰 입력 모델
+- 후보가 100개로 정해져 있어서, 텍스트 검색기가 새 정답을 찾아도 그만큼 기존 정답이 밀려난다. BM25를 추가했을 때 새로 들어온 정답은 83쌍, 밀려난 정답은 241쌍이었다.
+- 대부분 입력과 구조만 바꾼 대조 실험이었고, 하이퍼파라미터는 넓게 탐색하지 않았다.
+- 모든 수치는 2026-10-12에 코드 오류를 고치기 전에 측정했고, 고친 뒤로는 다시 평가하지 않았다.
 
-   - E5 6피처 LambdaRank
-   - E5 Two-Tower
-   - 리뷰 Transformer와 Top-200 cross-attention
-   - 안정적인 추가 이득 미확인
+다음 검증 계획은 [PLAN](./PLAN.md#다음-작업)에 있다.
 
-3. 행동 모델과 텍스트 결합
+## Usage
 
-   - RLMRec/E5 정렬
-   - 속성·감정 10채널
-   - 고정 텍스트 식당 그래프
-   - 행동 기준을 안정적으로 개선하지 못함
+명령은 `projects/rating_recsys`에서 실행한다. snapshot, cache, checkpoint는 Git에 없으므로, 다른 컴퓨터에서는 [artifacts/README.md](./artifacts/README.md)를 보고 먼저 복원한다.
 
-4. 다중 리뷰·취향 표현
+### Environment
 
-   - 리뷰별 Top-3 matching
-   - 취향 K1/K3
-   - 학습형 mean/late/shuffle
-   - 텍스트 단독 신호는 있었지만 C5 보완 효과는 미확인
+```bash
+conda create --prefix ./.venv python=3.10 pip libgomp -y
+conda activate ./.venv
+pip install -e '.[experiment,dev]'
+pip install -e '.[deepconn,local-embeddings,bm25]' \
+  --extra-index-url https://download.pytorch.org/whl/cpu   # PyTorch 모델용
+pytest -q
+```
 
-5. 통제 비교
+RQ-VAE는 Python 3.12 환경을 따로 쓴다([RQ-VAE 리포트](./reports/rqvae.md)).
 
-   - 같은 Two-Tower의 행동/행동+E5, 3seed×12epoch
-   - 행동 그래프/텍스트 그래프/학습형 리뷰 검색, 3seed
-   - 텍스트 추가효과의 신뢰구간이 대부분 0을 포함
+### Running Experiments
 
-6. 데이터·표현 진단
+```bash
+# 기준 모델 재학습 (CLI 기본값과 달라 옵션을 모두 지정한다)
+rating-recsys-experiment \
+  --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl \
+  --ranker-training-mode window --satisfaction-mode history-aware \
+  --satisfaction-min-history 10 --label window-personal-satisfaction-n10
 
-   - 리뷰 길이·평점·희소성 조사
-   - LLM 속성·감정 추출 진단
-   - RQ-VAE 리뷰 코드와 이웃 보존 평가
+# 후보 모델을 C5와 비교 (lightgcn, deepconn, bm25, two_tower)
+rating-recsys-compare lightgcn --help
 
-상세 진행 순서는 [PLAN의 실험 이력](./PLAN.md#실험-이력), 수치와 비교 조건은 [리뷰 임베딩 리포트](./reports/review_embeddings.md)를 따른다.
+# validation 통제 실험: 같은 Two-Tower의 텍스트 유무, 텍스트 그래프와 리뷰 검색
+rating-recsys-two-tower-ablation --epochs 12 --seeds 42 43 44 --threads 4
+rating-recsys-text-retrieval-comparison \
+  --seeds 42 43 44 --graph-epochs 20 --review-epochs 12 --threads 4
 
-## 코드 수정
+# 저장된 실행 결과를 보는 Streamlit 대시보드
+rating-recsys-dashboard
+```
 
-2026-10-12에 다음 6개 오류를 수정했다.
+### Data Collection and Ingestion
 
-오류 수정은 구현을 평가 정의와 맞춘 작업이다. 수정 자체가 추천 성능 개선을 뜻하지 않으므로 기존 artifact는 과거 기록으로 보존하고, 성능 영향은 별도 재학습으로 확인해야 한다.
+DB 작업에는 `.env`의 `DATABASE_URL`과 `USER_HASH_SALT`가 필요하다(`.env.example` 참고).
 
-1. 의견 추출의 간접 부정 범위
-2. E5 formatter의 최소 토큰 예산과 역할 접두어
-3. 그래프·리뷰 epoch 차이의 샘플 검증
-4. BM25 품사 필터의 부정 표현
-5. Two-Tower 미참여 ID의 추론 처리
-6. LambdaRank early stopping의 전체 정답 IDCG와 사용자 분모
+```bash
+rating-recsys-migrate                              # DB schema 적용
+rating-recsys-ingest --dry-run                     # V1 CSV 적재 점검 (DB 접속 없음)
+python -m rating_recsys.ingestion.import_crawler   # 최신 크롤링 CSV를 복사해 DB에 적재
+rating-recsys-dataset                              # DB 시간 분할 점검
+```
 
-- 전체 테스트: **512 passed, 1 skipped**
-- 기존 artifact와 성능: 수정 전 결과로 보존
-- 수정 후 실데이터 성능: 미측정
+`import_crawler`는 `--help`도 받지 않고 바로 적재를 시작하니 주의한다.
 
-## 실행 방법
+<details>
+<summary>새로 크롤링하기</summary>
 
-명령은 `projects/rating_recsys`에서 실행한다.
+```bash
+pip install -r crawler/requirements.txt
+playwright install chromium
+python crawler/diningcode_playwright.py --national-regions --max-restaurants 0
+```
 
-1. 입력·캐시 점검
+중간에 멈췄다면 같은 명령에 `--resume`을 붙여 이어서 수집한다.
 
-   ```bash
-   .venv/bin/python -m rating_recsys.experiments.review_ltr \
-     --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl --dry-run
-   ```
+</details>
 
-   - 새 학습 없음
-   - 누락 임베딩 추론 없음
-   - 저장된 E5 프로필과 캐시 조건 확인
+## Repository Structure
 
-2. 기준 모델 재학습
+```
+rating_recsys/
+├── src/rating_recsys/   # 데이터 처리, 검색, 순위 학습, 평가
+├── tests/               # 회귀 테스트와 통합 테스트
+├── scripts/             # 감사, 검산용 스크립트
+├── crawler/             # DiningCode 크롤러
+├── migrations/          # DB schema
+├── queries/             # 검증 SQL
+├── reports/             # 방법별 결과 리포트
+├── artifacts/           # snapshot, 모델, 실행 결과 (대부분 로컬 전용)
+└── legacy/              # V1 때 수집한 원본 CSV
+```
 
-   ```bash
-   .venv/bin/python -m rating_recsys.experiments.cli \
-     --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl \
-     --ranker-training-mode window --satisfaction-mode history-aware \
-     --satisfaction-min-history 10 --label window-personal-satisfaction-n10
-   ```
+### Documentation
 
-3. Two-Tower 텍스트 통제 비교
-
-   ```bash
-   .venv/bin/python -m rating_recsys.experiments.two_tower_ablation_cli \
-     --epochs 12 --seeds 42 43 44 --threads 4
-   ```
-
-   - Validation 전용
-   - 행동 입력과 학습 조건 고정
-   - E5 입력만 0/실제 값으로 변경
-
-4. 텍스트 그래프·리뷰 검색 비교
-
-   ```bash
-   .venv/bin/python -m rating_recsys.experiments.text_retrieval_comparison_cli \
-     --seeds 42 43 44 --graph-epochs 20 --review-epochs 12 --threads 4
-   ```
-
-   - Validation 전용
-   - 텍스트 그래프와 재배선 대조
-   - mean/late/shuffle 비교
-
-5. 환경 준비
-
-   ```bash
-   conda create --prefix ./.venv python=3.10 pip libgomp -y
-   conda activate ./.venv
-   pip install -e '.[experiment,dev]'
-   ```
-
-   - DeepCoNN·PyTorch: `deepconn`
-   - 로컬 E5: `local-embeddings`
-   - BM25·한국어 토큰화: `bm25`
-   - RQ-VAE: `rqvae`
-
-6. 테스트
-
-   ```bash
-   .venv/bin/python -m pytest -q
-   .venv/bin/python -m rating_recsys.experiments.compare_cli --help
-   ```
-
-## 저장소 구조
-
-1. 코드
-
-   - `src/rating_recsys/`: 데이터, 검색, 순위 학습, 평가
-   - `tests/`: 회귀·통합 검증
-
-2. 문서
-
-   - `PLAN.md`: 연구 계획과 진행 상황
-   - `BASELINE_MODEL.md`: 기준 모델 정의
-   - `reports/`: 방법별 결과와 해석
-
-3. 실행 자료
-
-   - `artifacts/snapshots/`: 고정 입력
-   - `artifacts/prepared/`: 재사용 후보·학습 행
-   - `artifacts/runs/`, `artifacts/comparisons/`: 설정·모델·순위·지표
-   - `artifacts/local_models/`, E5 SQLite cache: 동결 모델·임베딩
-
-4. 수집·적재
-
-   - `crawler/`: 데이터 수집
-   - `migrations/`: DB schema
-   - `queries/`: 검증 SQL
-
-문서는 [docs_style.md](./docs_style.md)를 따른다. API 응답·원문·모델·ZIP은 로컬 자료이며 보존 상태는 [artifacts/README.md](./artifacts/README.md)에 기록한다.
+| 문서 | 내용 |
+|---|---|
+| [PLAN.md](./PLAN.md) | 연구 질문, 실험 이력, 다음 검증 계획 |
+| [BASELINE_MODEL.md](./BASELINE_MODEL.md) | 기준 모델의 입력, 학습, 평가 규칙 |
+| [reports/README.md](./reports/README.md) | 방법별 결과 리포트 목록 |
+| [SATISFACTION_BASELINE.md](./SATISFACTION_BASELINE.md) | 사용자별 만족도 정답의 정의 |
+| [artifacts/README.md](./artifacts/README.md) | 모델, 캐시, 원문 파일의 보관과 복원 |

@@ -287,6 +287,22 @@ Window는 3개월 동안 입력 이력을 고정한다. T2 refit에서는 겹친
 
 아래 항목은 미실행 계획이다. 한 번에 하나의 가설만 변경한다.
 
+### 경량 탐색 예산
+
+2026-10-13 사용자 지시에 따라 앞으로 모델마다 핵심 파라미터 3~4개만 선택하고, 기준을 포함한 6~8개 설정·고정 1seed로 먼저 선별한다. 값별 2~3개 후보를 두더라도 전 조합을 돌리지 않는다. 최종 선택 1개 설정에 대해서만 필요한 통제군과 3seed를 확인하며, 최대 epoch·예상 시간도 사전에 고정한다. 동일 bank와 유효한 checkpoint를 재사용하고 최종 후보 예산 100개를 유지한다. 아래는 모델을 실행할 때 고를 우선 탐색 축이며, 전 모델을 동시에 실행하는 목록은 아니다.
+
+| 모델 | 우선 탐색할 3~4개 축 |
+|---|---|
+| LightGCN | 학습률·L2·차원·층 수 |
+| Two-Tower | 학습률·temperature·negative 수·출력 차원 |
+| 학습형 리뷰 검색 | 학습률·projector 차원·weight decay·matching K |
+| 텍스트 식당 그래프 | 텍스트 전파 비중·이웃 수·학습률·L2 |
+| 동결 텍스트+행동 검색 | 전체 catalog의 점수 결합 비중·리뷰 수·집계 방식 |
+
+학습 목표나 리뷰 입력 정책을 바꾸는 실험은 먼저 별도 가설로 고정한 뒤 파라미터를 탐색한다. 초기 선별은 모델 전체의 가능성을 보는 단계이고, 리뷰 의미의 추가효과는 선택 후 동일 구조의 행동만/실제 텍스트/shuffle 대조로 판단한다. 기존 고정 12epoch·3seed 결과는 사후 최적 설정 결과로 바꾸지 않는다.
+
+### 후속 검증 순서
+
 1. 수정 코드 영향 검증
 
    - 고정: Snapshot, 정답, 학습 예산, 대조군
@@ -499,93 +515,19 @@ Window는 3개월 동안 입력 이력을 고정한다. T2 refit에서는 겹친
 
 Prefix/Window/Window+raw rating 비교 코드는 있지만, 현재 개인별 정답으로 모든 조건을 재비교한 결과는 없다.
 
-## 실행 방법
+## 실행 방법과 데이터 작업
 
-환경 준비와 표준 명령은 [한국어 README](./README_KOR.md#실행-방법)에 모았다. 방법별 재현 조건은 [리포트](./reports/README.md), 과거 파일 복원은 [artifacts/README.md](./artifacts/README.md)를 따른다.
-
-1. 표준 baseline
-
-   - `rating_recsys.experiments.cli`
-
-2. 후보 모델 비교
-
-   - `rating_recsys.experiments.compare_cli <model>`
-
-3. 입력·캐시 점검
-
-   - `rating_recsys.experiments.review_ltr --dry-run`
-
-4. 동일 Two-Tower 텍스트 대조
-
-   - `rating_recsys.experiments.two_tower_ablation_cli`
-
-5. 텍스트 그래프·학습형 리뷰 비교
-
-   - `rating_recsys.experiments.text_retrieval_comparison_cli`
-
-6. 기존 구간 순위 재계산
-
-   - `rating_recsys.experiments.segment_diagnostics`
-
-7. 테스트
-
-   - `.venv/bin/python -m pytest -q`
-
-## 데이터 작업
-
-추천 실험의 고정 Snapshot과 새 데이터 수집·적재는 별도 작업이다.
-
-1. Schema 적용
-
-   - 명령: `rating-recsys-migrate`
-   - 변경 파일: `migrations/`
-
-2. CSV 적재 점검
-
-   - 명령: `rating-recsys-ingest --dry-run`
-   - 기존과 같은 `USER_HASH_SALT` 필요
-
-3. 새 크롤링 자료 적재
-
-   - 진입점: `rating_recsys.ingestion.import_crawler`
-   - 최신 전국 `.csv.partial`을 고정 복사해 사용
-
-4. DB interaction 확인
-
-   - 명령: `rating-recsys-dataset`
-   - DB 작업에는 `.env`의 `DATABASE_URL` 필요
-
-5. 원본 보존
-
-   - 위치: `artifacts/snapshots/ingestion_sources/`
-   - CSV와 `.import.json`의 hash 확인
-
-<details>
-<summary>새 크롤링 실행</summary>
-
-```bash
-.venv/bin/python -m pip install -r crawler/requirements.txt
-.venv/bin/python -m playwright install chromium
-.venv/bin/python crawler/diningcode_playwright.py --national-regions --max-restaurants 0
-.venv/bin/python crawler/diningcode_playwright.py --national-regions --max-restaurants 0 --resume
-```
-
-- 중단 시 `.csv.partial`과 `.checkpoint.json`을 남긴다.
-- 대표 음식 목록 수집은 사이트 전체 식당 수집을 뜻하지 않는다.
-- `crawl_complete=true`도 모든 리뷰 수집 완료를 보장하지 않는다.
-- 접속 제한이 나타나면 수집을 중단한다.
-
-</details>
+환경 준비·표준 실험 명령은 [한국어 README의 Usage](./README_KOR.md#usage)에, DB schema·적재·크롤링은 [Data Collection and Ingestion](./README_KOR.md#data-collection-and-ingestion)에 모았다. 방법별 재현 조건은 [리포트](./reports/README.md), 과거 파일 복원은 [artifacts/README.md](./artifacts/README.md)를 따른다.
 
 ## 문서와 실행 결과의 역할
 
 1. [README.md](./README.md)
 
-   - 영어 프로젝트 소개와 빠른 실행
+   - 영어 프로젝트 소개, 결과 요약, 실행·데이터 작업
 
 2. [README_KOR.md](./README_KOR.md)
 
-   - 한국어 프로젝트 소개와 빠른 실행
+   - 한국어 프로젝트 소개, 결과 요약, 실행·데이터 작업
 
 3. [BASELINE_MODEL.md](./BASELINE_MODEL.md)
 

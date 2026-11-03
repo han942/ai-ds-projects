@@ -1,0 +1,20 @@
+# Evaluation pipeline for result.csv (Python 3.12, CPU only)
+# Install CPU PyTorch first:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+pandas
+numpy
+scipy
+sacrebleu
+rouge
+evaluate
+sacremoses
+textstat
+kiwipiepy
+wordfreq
+transformers
+sentence-transformers
+bert-score
+matplotlib
+# Optional LLM-as-a-judge stage (OpenAI-compatible API, e.g. OpenRouter)
+openai
+python-dotenv

@@ -54,7 +54,8 @@ Children and teenagers rarely read difficult, adult-level news articles. This pr
 
 ## Evaluation Results
 
-On the 2,340-sample test set in `result.csv` (`original` vs. `simplified_by_model`):
+Historical notebook results on the 2,340-sample test set in `result.csv`.
+ROUGE and SARI use the synthetic reference; the reported BLEU-1 compares against the source.
 
 | Metric | Value |
 |---|---|
@@ -64,9 +65,14 @@ On the 2,340-sample test set in `result.csv` (`original` vs. `simplified_by_mode
 | ROUGE-L (F1) | 0.355 |
 | SARI | 57.02 |
 | FKGL (model output) | 1.28 |
-| FKGL (human reference) | 1.34 |
+| FKGL (synthetic reference) | 1.34 |
 
-Against the team's own benchmark thresholds from the presentation (SARI ≥ 40 = excellent, FKGL 1–1.3 = lower-elementary reading level), both the SARI score of 57.02 and the FKGL of 1.28 meet or exceed the target. By FKGL, the model's generated text reads about as easily as — or slightly more easily than — the human-written reference (1.34).
+Re-evaluation reproduces SARI 57.02, but shuffled outputs also score 47.14;
+the presentation's threshold of 40 does not establish quality. FKGL is an
+English readability formula and cannot establish a Korean reading grade.
+See the [re-evaluation report](evaluation/REPORT.md) for Korean-aware metrics,
+control baselines, uncertainty, and limitations, and the
+[evaluation instructions](evaluation/README.md) to reproduce the run.
 
 ## Limitations
 
@@ -79,7 +85,8 @@ Against the team's own benchmark thresholds from the presentation (SARI ≥ 40 =
 | File | Description |
 |---|---|
 | `Final_NLP_Newspaper.ipynb` | Full pipeline notebook: data loading, QLoRA/LoRA fine-tuning, inference, and evaluation (BLEU/ROUGE/SARI/FKGL) |
-| `result.csv` | Test set (2,340 samples) with original text, human reference simplification, and model-generated simplification |
+| `result.csv` | Test set (2,340 samples) with original text, synthetic reference simplification, and model-generated simplification |
+| `evaluation/` | Resumable CPU evaluation pipeline and detailed re-evaluation report |
 | `NLP 1팀 최종.pptx` | Final presentation slides (2025.07.01) |
 | `requirements.txt` | Python dependencies for the fine-tuning and evaluation pipeline |
 | `README.md` / `README_KOR.md` | Project description (English / Korean) |

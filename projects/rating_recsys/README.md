@@ -2,29 +2,16 @@
 
 [Korean](./README_KOR.md)
 
-This research project compares methods for recommending restaurants that users are likely to enjoy, using DiningCode visits, ratings, and review text.
+## Overview
 
-Updated: **2026-10-13 KST**
+A project that collects restaurant visits, ratings, and reviews from DiningCode and uses them to develop models that recommend better restaurants to each user.
 
-The current baseline uses visit and rating history only. Several review-based methods have been evaluated, but none has shown a stable improvement over the behavioral baseline.
+- **RQ1.** Does adding review text improve recommendations over a model that uses only visits and ratings?
+- **RQ2.** How does performance change with the recommendation architecture (two-stage, Two-Tower, graph, multi-vector)?
 
-## Documentation
+## Architecture
 
-Start here for the task and system overview, then use the results index to choose a report. Each document has a distinct responsibility.
-
-| Document | Purpose |
-|---|---|
-| [PLAN.md](./PLAN.md) | Research questions, completed work, and next validation priorities |
-| [BASELINE_MODEL.md](./BASELINE_MODEL.md) | Baseline inputs, retrieval, reranking, and evaluation rules |
-| [reports/README.md](./reports/README.md) | Find the report explaining a method and its conclusion |
-| [SATISFACTION_BASELINE.md](./SATISFACTION_BASELINE.md) | Definitions and examples of user-specific satisfaction labels |
-| [artifacts/README.md](./artifacts/README.md) | Retention and restoration of models, caches, source text, and archives |
-
-Most detailed research documents are currently written in Korean.
-
-## Current System
-
-The pipeline separates retrieval from reranking because scoring every restaurant with the full ranking model would be expensive. Behavioral retrievers first produce 100 candidates, and a richer model then orders the Top-10. This separation also makes it possible to distinguish retrieval failures from ordering failures.
+Recommendation runs in two stages: visit history first retrieves 100 candidates, and LambdaRank then orders the Top-10 within them.
 
 ```mermaid
 flowchart LR
@@ -34,217 +21,165 @@ flowchart LR
     C --> D
     D --> E[LambdaRank]
     E --> F[Top-10 recommendations]
+    R["Review text (experiments)"] -.-> T[Text retrievers]
+    T -.-> D
+    R -.-> C
+    R -.-> E
 ```
 
-| Component | Information and role |
+Solid lines show the baseline; dashed lines show where review text was added in experiments.
+
+| Component | Role |
 |---|---|
-| C1 item-item retrieval | Finds restaurants co-visited with those in the user's history |
-| C4 LightGCN retrieval | Uses relationships propagated through the user–restaurant visit graph |
-| C5 fusion | Combines C1/C4 ranks with RRF and excludes visited items, retaining up to 100 candidates |
-| LambdaRank reranking | Uses 16 behavioral, rating, and region features to order the same candidates |
+| C1 item-item retrieval | Finds restaurants often co-visited with those the user visited |
+| C4 LightGCN retrieval | Finds related restaurants through the user–restaurant visit graph |
+| C5 fusion | Merges C1 and C4 ranks with RRF into 100 candidates |
+| LambdaRank reranking | Orders the Top-10 using 16 visit, rating, and region features |
 
-Review text is not part of the baseline; menu and external attributes remain unevaluated. Current work focuses on finding better candidates from the full catalog. Reranking cannot introduce an item missing from its candidate set, which limits its ability to address retrieval failures.
+## Data
 
-Two-stage refers to the full retrieval–reranking pipeline. Two-Tower refers to separate user and restaurant encoders. Temporal splitting and sequential recommendation are separate experimental dimensions.
+DiningCode reviews are crawled into Supabase PostgreSQL, and experiments use a frozen snapshot (`e7896add5b4b5939`): 88,554 first visits by 14,008 users to 4,587 restaurants. The data is split by time so that no future information enters the inputs.
 
-## Data and Evaluation
+| Split | Period | Visits |
+|---|---|---:|
+| Train | Through 2025-12-19 | 70,883 |
+| Validation | 2025-12-20 – 2026-05-04 | 8,934 |
+| Test | 2026-05-05 – 2026-09-26 | 8,737 |
 
-The temporal split reconstructs what would have been available at recommendation time. Future reviews and ratings never enter historical profiles; observed future visits are used only as evaluation targets.
+## Evaluation
 
-1. Frozen data
+Each user with prior history receives a recommendation list, which is scored against the restaurants they actually visited later.
 
-   - Snapshot: `e7896add5b4b5939`
-   - First user–restaurant interactions: 88,554
-   - Users: 14,008
-   - Restaurants: 4,587
+- **Users:** 1,639 in validation and 1,573 in test. New users without prior history are excluded.
+- **Labels:** restaurants visited later and rated at least 3. Visits are graded by satisfaction, and the "very satisfied" threshold is adjusted between 3.5 and 4.5 by each user's past average ([definition](./SATISFACTION_BASELINE.md)).
+- **Metrics:** Recall@100 for candidate retrieval and graded NDCG@10 for the full pipeline.
+- **Comparisons:** settings are chosen on validation, and test is used only for the final check. Review effects are measured by changing only the text in the same model; an improvement whose 95% interval includes zero is not counted.
 
-2. Temporal split
+## Results
 
-   - Train: 70,883 interactions through 2025-12-19 (T1)
-   - Validation: 8,934 interactions in `(T1, 2026-05-04]` (T2)
-   - Test: 8,737 interactions over approximately 145 days after T2
-   - Future reviews and ratings are used only as labels, never as model inputs
+### Baseline
 
-3. Evaluation population
-
-   - Validation: 1,639 users with history and relevant future outcomes
-   - Test: 1,573 users with history and relevant future outcomes
-   - Users without prior history are excluded from the current personalized evaluation
-   - Relevant restaurants outside the cutoff catalog remain in the recall denominator
-
-4. Primary metrics
-
-   - Candidate retrieval: Recall@100
-   - Full pipeline: graded NDCG@10
-   - Target: user-specific future satisfaction levels 0/1/2
-   - Relevant outcome: an observed future rating of at least 3
-
-## Baseline Results
-
-These are the 2026-10-04 Window/history-aware test results for seed 42. They were produced before the 2026-10-12 bug fixes.
+Test results for seed 42.
 
 | Stage | Recall@100 | NDCG@10 | Recall@10 |
 |---|---:|---:|---:|
 | C5 candidate order | 20.1626% | 0.026590 | — |
 | Same C5 → LambdaRank | 20.1626% | 0.025467 | 3.6502% |
 
-Recall@100 measures the share of future relevant items retrieved, averaged per user. These results leave substantial room to improve candidate retrieval. Reranking retains the same items, so Recall@100 stays unchanged; NDCG@10 measures its effect on the top positions. This test did not establish a reranking gain.
+The baseline places about 20% of each user's future relevant restaurants within its 100 candidates. Reranking with LambdaRank slightly lowered NDCG@10, so no reranking gain was found. See the [baseline report](./reports/baseline.md) for details.
 
-No review-based method has been adopted, and real-data retraining and evaluation after the October 12 fixes have not been run.
+### Review Experiments
 
-See the [baseline run report](./artifacts/runs/20261004T125314601899Z-e7896add/report.md) and [baseline diagnostics](./reports/baseline.md).
+Experiments are grouped by where review text was used. The reference is validation C5 Recall@100 of **19.48%**.
 
-## Experiment History
+| Method | How reviews are used | Evaluation | Representative result | Verdict |
+|---|---|---|---|---|
+| Lexical retrieval | BM25 | Validation | Alone 4.54%; added to C5 16.69% | Pushed out more hits than it added |
+| Frozen embedding retrieval | E5 mean, review-level matching, three interests (K3) | Validation | Alone 4.50% → K3 5.50% | Text alone carries some signal |
+| Standalone neural retrieval | Two-Tower, review Transformer | Validation | Two-Tower 9.12% → with E5 9.39%; Transformer 9.67% | Far below C5 |
+| Behavioral graph + text | RLMRec, text graph, learned late matching | Validation | RLMRec+C1 19.62%; text graph 18.20%; late 18.45% | No clear gain |
+| Reranking features | Six E5 similarity features | Test | NDCG@10 0.025467 → 0.025570 | Gain within the margin of error |
+| Compressed representation | RQ-VAE review codes | Representation audit | 144.63× smaller storage | No recommendation gain |
 
-Experiments are grouped by the question they test rather than by model name alone. Standalone text retrieval, behavior–text fusion, review aggregation, and controlled text-input ablations answer different questions and should not be ranked as one uniform benchmark.
+Values are Recall@100 unless noted. Exact values and confidence intervals are in the [review embedding report](./reports/review_embeddings.md).
 
-1. Lexical and semantic retrieval
+### Interpretation and Limitations
 
-   - DeepCoNN, BM25, Liquid, and frozen E5 mean retrieval
-   - Standalone and C5-fusion results were lower or inconclusive
+No review-based method beat C5 consistently, so the baseline uses no review text. It is still too early to conclude that reviews are useless:
 
-2. Review-aware learned models
+- The candidate list is fixed at 100, so every new hit a text retriever finds pushes out an existing one. Adding BM25 brought in 83 relevant pairs but pushed out 241.
+- Most runs changed only inputs or architecture; hyperparameters were not searched broadly.
+- All numbers were measured before the code fixes of 2026-10-12 and have not been re-evaluated since.
 
-   - E5 features for LambdaRank
-   - E5 Two-Tower
-   - Review Transformer with Top-200 cross-attention
-   - No stable incremental gain
-
-3. Behavioral models with text
-
-   - RLMRec/E5 alignment
-   - Ten aspect–sentiment channels
-   - Fixed text restaurant graph
-   - No stable improvement over the behavioral control
-
-4. Multi-review and multi-interest representations
-
-   - Review-level Top-3 matching
-   - K1/K3 user interests
-   - Learned mean, late, and shuffled-late retrieval
-   - Some standalone text signal, but no confirmed complement to C5
-
-5. Controlled comparisons
-
-   - Behavior-only versus behavior+E5 Two-Tower, three seeds and 12 fixed epochs
-   - Behavioral graph, text graph, and learned review retrieval, three seeds
-   - Most text-effect confidence intervals included zero
-
-6. Data and representation diagnostics
-
-   - Review length, rating distribution, and sparsity
-   - LLM aspect and sentiment extraction
-   - RQ-VAE review codes and neighbor preservation
-
-See the [experiment timeline](./PLAN.md#실험-이력) and [review embedding report](./reports/review_embeddings.md) for detailed conditions and results.
-
-## Bug Fixes
-
-Six implementation issues were corrected on 2026-10-12.
-
-These changes align implementation with the intended evaluation and input contracts. A bug fix is not itself evidence of better recommendation quality, so prior artifacts remain historical records and performance effects require separate retraining.
-
-1. Indirect-negation scope in opinion extraction
-2. Minimum token budget and role-prefix preservation in the E5 formatter
-3. Sampling audit when graph and review epoch budgets differ
-4. Negation preservation in BM25 POS filtering
-5. Inference handling for IDs absent from Two-Tower training
-6. Full-truth IDCG and query denominators for LambdaRank early stopping
-
-- Full suite: **512 passed, 1 skipped**
-- Existing artifacts and reported metrics remain pre-fix records
-- Post-fix real-data performance has not been measured
+Next validation steps are in [PLAN](./PLAN.md#다음-작업).
 
 ## Usage
 
-Run commands from `projects/rating_recsys`.
+Run commands from `projects/rating_recsys`. Snapshots, caches, and checkpoints are not in Git; on another machine, restore them first by following [artifacts/README.md](./artifacts/README.md).
 
-1. Inspect existing input and caches
+### Environment
 
-   ```bash
-   .venv/bin/python -m rating_recsys.experiments.review_ltr \
-     --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl --dry-run
-   ```
+```bash
+conda create --prefix ./.venv python=3.10 pip libgomp -y
+conda activate ./.venv
+pip install -e '.[experiment,dev]'
+pip install -e '.[deepconn,local-embeddings,bm25]' \
+  --extra-index-url https://download.pytorch.org/whl/cpu   # for PyTorch models
+pytest -q
+```
 
-   - No model training
-   - No missing-embedding inference
-   - Checks saved E5 profiles and cache identity
+RQ-VAE uses a separate Python 3.12 environment ([RQ-VAE report](./reports/rqvae.md)).
 
-2. Train the baseline
+### Running Experiments
 
-   ```bash
-   .venv/bin/python -m rating_recsys.experiments.cli \
-     --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl \
-     --ranker-training-mode window --satisfaction-mode history-aware \
-     --satisfaction-min-history 10 --label window-personal-satisfaction-n10
-   ```
+```bash
+# Retrain the baseline (flags differ from the CLI defaults)
+rating-recsys-experiment \
+  --snapshot artifacts/snapshots/e7896add5b4b5939.jsonl \
+  --ranker-training-mode window --satisfaction-mode history-aware \
+  --satisfaction-min-history 10 --label window-personal-satisfaction-n10
 
-3. Run the controlled Two-Tower text comparison
+# Compare a candidate model with C5 (lightgcn, deepconn, bm25, two_tower)
+rating-recsys-compare lightgcn --help
 
-   ```bash
-   .venv/bin/python -m rating_recsys.experiments.two_tower_ablation_cli \
-     --epochs 12 --seeds 42 43 44 --threads 4
-   ```
+# Validation-only controls: text on/off in the same Two-Tower; text graph and review retrieval
+rating-recsys-two-tower-ablation --epochs 12 --seeds 42 43 44 --threads 4
+rating-recsys-text-retrieval-comparison \
+  --seeds 42 43 44 --graph-epochs 20 --review-epochs 12 --threads 4
 
-   - Validation only
-   - Keeps behavioral inputs and training fixed
-   - Changes only zero versus real E5 inputs
+# Streamlit dashboard for saved runs
+rating-recsys-dashboard
+```
 
-4. Compare text graphs and learned review retrieval
+### Data Collection and Ingestion
 
-   ```bash
-   .venv/bin/python -m rating_recsys.experiments.text_retrieval_comparison_cli \
-     --seeds 42 43 44 --graph-epochs 20 --review-epochs 12 --threads 4
-   ```
+Database tasks need `DATABASE_URL` and `USER_HASH_SALT` in `.env` (see `.env.example`).
 
-   - Validation only
-   - Text graph versus rewired control
-   - Mean, late, and shuffled-late review scoring
+```bash
+rating-recsys-migrate                              # Apply the database schema
+rating-recsys-ingest --dry-run                     # Check V1 CSV ingestion (no database connection)
+python -m rating_recsys.ingestion.import_crawler   # Copy the latest crawl CSV and load it
+rating-recsys-dataset                              # Audit the database time split
+```
 
-5. Create the environment
+`import_crawler` does not accept even `--help`; it starts loading immediately.
 
-   ```bash
-   conda create --prefix ./.venv python=3.10 pip libgomp -y
-   conda activate ./.venv
-   pip install -e '.[experiment,dev]'
-   ```
+<details>
+<summary>Run a new crawl</summary>
 
-   - DeepCoNN and PyTorch models: `deepconn`
-   - Local E5 inference: `local-embeddings`
-   - BM25 and Korean tokenization: `bm25`
-   - RQ-VAE: `rqvae`
+```bash
+pip install -r crawler/requirements.txt
+playwright install chromium
+python crawler/diningcode_playwright.py --national-regions --max-restaurants 0
+```
 
-6. Run tests
+If the crawl stops, rerun the same command with `--resume`.
 
-   ```bash
-   .venv/bin/python -m pytest -q
-   .venv/bin/python -m rating_recsys.experiments.compare_cli --help
-   ```
+</details>
 
 ## Repository Structure
 
-1. Source and tests
+```
+rating_recsys/
+├── src/rating_recsys/   # Data, retrieval, ranking, and evaluation
+├── tests/               # Regression and integration tests
+├── scripts/             # Audit and verification scripts
+├── crawler/             # DiningCode crawler
+├── migrations/          # Database schema
+├── queries/             # Validation SQL
+├── reports/             # Method-level result reports
+├── artifacts/           # Snapshots, models, and run outputs (mostly local only)
+└── legacy/              # Original V1 crawl CSVs
+```
 
-   - `src/rating_recsys/`: data, retrieval, ranking, and evaluation
-   - `tests/`: regression and integration tests
+### Documentation
 
-2. Documentation
+Detailed research documents are written in Korean.
 
-   - `PLAN.md`: research plan and status
-   - `BASELINE_MODEL.md`: baseline definition
-   - `reports/`: method-level results and interpretation
-
-3. Experiment artifacts
-
-   - `artifacts/snapshots/`: frozen inputs
-   - `artifacts/prepared/`: reusable candidates and training rows
-   - `artifacts/runs/`, `artifacts/comparisons/`: settings, models, rankings, and metrics
-   - `artifacts/local_models/` and E5 SQLite caches: local frozen models and embeddings
-
-4. Collection and ingestion
-
-   - `crawler/`: data collection
-   - `migrations/`: database schema
-   - `queries/`: validation SQL
-
-Documentation follows [docs_style.md](./docs_style.md). API responses, source text, models, and archives are local artifacts; their retention status is documented in [artifacts/README.md](./artifacts/README.md).
+| Document | Contents |
+|---|---|
+| [PLAN.md](./PLAN.md) | Research questions, experiment history, and next steps |
+| [BASELINE_MODEL.md](./BASELINE_MODEL.md) | Baseline inputs, training, and evaluation rules |
+| [reports/README.md](./reports/README.md) | Index of method-level reports |
+| [SATISFACTION_BASELINE.md](./SATISFACTION_BASELINE.md) | Definition of user-specific satisfaction labels |
+| [artifacts/README.md](./artifacts/README.md) | Storage and restoration of models, caches, and source files |
