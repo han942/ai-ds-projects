@@ -1,11 +1,11 @@
 # News Simplification Agent
 
+## GOAL
+
 An observable LangChain/LangGraph agent that rewrites difficult Korean news for
 upper-elementary to middle-school readers. It extends the original
 [fine-tuning project](./README.md) with an iterative workflow that can be
 improved through prompts instead of model retraining.
-
-## 1. Goal
 
 The agent aims to make hard news easier for young readers **without changing
 its meaning**. A useful rewrite should:
@@ -25,7 +25,7 @@ model. This follow-up focuses on faster iteration and operational visibility.
 | Quality control | Offline test-set metrics | In-graph critique/refinement plus post-run evaluation |
 | Observability | Notebook outputs | LangSmith Studio graph inspection and execution traces |
 
-## 2. Architecture
+## Architecture
 
 The workflow separates rewriting from quality control. After producing a first
 draft, the agent checks whether the meaning was preserved and whether the text
@@ -67,7 +67,7 @@ flowchart LR
 - **Local prompts** keep the simplification workflow runnable without a
   separate prompt-management service.
 
-## 3. Results
+## Results
 
 ### Agent output
 

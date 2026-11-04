@@ -1,16 +1,16 @@
 ﻿# [Multi-Agent] AskIntern: IBM 인턴 업무 지원 어시스턴트
 
+[English](./README.md)
+
+## GOAL
+
 AskIntern은 **IBM watsonx Orchestrate**를 기반으로 만든 멀티 에이전트 업무 지원 어시스턴트입니다. 인턴들이 업무 중 반복적으로 묻는 점심 식당, IBM 제품 및 개발 도구, 회의·세미나 노트 관련 질문을 하나의 웹 채팅 화면에서 처리하는 것을 목표로 합니다.
 
-- [English](./README.md)
+## 프로젝트 개요
+
 - 데모: [`demo_askintern_zoom.mp4`](./demo_askintern_zoom.mp4)
 - 발표 자료: [`AskIntern_presentation.pdf`](./AskIntern_presentation.pdf)
 
----
-
-## 1. 프로젝트 개요
-
-- 목표: IBM 인턴을 위한 신뢰할 수 있는 멀티 에이전트 업무 지원 시스템 구축
 - 플랫폼: IBM watsonx Orchestrate, IBM Code Engine
 - 인터페이스: 웹 채팅
 - 메인 오케스트레이터: `askintern_supervisor`
@@ -21,7 +21,7 @@ AskIntern은 사용자의 질문을 적절한 전문 에이전트로 라우팅�
 
 ---
 
-## 2. 시스템 아키텍처
+## 시스템 아키텍처
 
 ```text
 웹 채팅
@@ -49,7 +49,7 @@ Google API              MCP 서버                    RAG
 
 ---
 
-## 3. 주요 사용 시나리오
+## 주요 사용 시나리오
 
 ### 점심 식당 추천
 
@@ -78,7 +78,7 @@ Google API              MCP 서버                    RAG
 
 ---
 
-## 4. 엔터프라이즈 수준의 설계
+## 엔터프라이즈 수준의 설계
 
 단순한 에이전트 데모를 넘어 실제 운영에서 필요한 문제를 검토했습니다.
 
@@ -116,7 +116,7 @@ watsonx native observation과 Langfuse의 session 중심 tracing을 비교했습
 
 ---
 
-## 5. 평가
+## 평가
 
 평가 흐름은 다음과 같습니다.
 
@@ -142,7 +142,7 @@ Case 정의 -> watsonx Orchestrate 실행 -> JSON 결과·trace -> Feedback -> �
 
 ---
 
-## 6. 폴더 구성
+## 폴더 구성
 
 | 파일 | 설명 |
 |---|---|
@@ -155,7 +155,7 @@ Case 정의 -> watsonx Orchestrate 실행 -> JSON 결과·trace -> Feedback -> �
 
 ---
 
-## 7. 핵심 정리
+## 핵심 정리
 
 - 멀티 에이전트 라우팅으로 반복적인 인턴 업무 질문을 하나의 채팅 경험으로 통합했습니다.
 - RAG, MCP, 외부 API를 모든 에이전트에 공통 노출하지 않고 역할에 맞게 분리했습니다.

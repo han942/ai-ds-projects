@@ -2,7 +2,7 @@
 
 [English](./README.md)
 
-## Overview
+## GOAL
 
 DiningCode에서 식당 방문 기록, 별점, 리뷰를 수집하고, 이를 활용해 사용자에게 더 나은 식당을 추천할 수 있는 모델을 개발하는 프로젝트다.
 

@@ -2,7 +2,7 @@
 
 [Korean](./README_KOR.md)
 
-## Overview
+## GOAL
 
 A project that collects restaurant visits, ratings, and reviews from DiningCode and uses them to develop models that recommend better restaurants to each user.
 

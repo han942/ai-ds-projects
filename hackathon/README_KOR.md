@@ -1,14 +1,10 @@
 # Campus Mate
 
-> 수업 시간표에서 공강을 찾아, 같은 시간에 만날 수 있는 캠퍼스 친구와 식사 장소를 추천하는 서비스
+[English](./README.md)
 
-팀 프로젝트 · 2026.08.16 · Codex Community Hackathon — Seoul for Students · Team 10 · [English](./README.md)
-
-[서비스](https://campusmate.site) · [데모 영상](https://github.com/han942/codex-hackerthon/blob/main/campusmate_demo.mov) · [소스 코드](https://github.com/han942/codex-hackerthon) · [행사 페이지](https://codex-community-korea.skysplit.chatgpt.site/en/hackathon/seoul-2026)
+## GOAL
 
 Campus Mate는 시간표를 등록하면 점심시간의 공강을 계산하고, 시간이 겹치는 학생과 식사 장소를 추천해 약속까지 잡을 수 있게 만든 서비스다. 행사 당일 처음 만난 네 명이 기능 정의부터 배포와 발표까지 하루 안에 진행했다.
-
-## 1. Goal
 
 수업 사이에 시간이 비어 있어도 함께 밥을 먹을 사람을 찾기는 쉽지 않다. 누가 같은 캠퍼스에 있는지, 서로 언제 비는지, 어느 정도 시간을 낼 수 있는지를 하나씩 물어봐야 하기 때문이다. 새로운 사람을 만나려면 관심사와 식사 장소까지 추가로 조율해야 한다.
 
@@ -21,7 +17,11 @@ Campus Mate는 시간표를 등록하면 점심시간의 공강을 계산하고,
 
 처음 만난 팀원들이 12시간 안에 결과물을 만들어야 했기 때문에 모든 기능을 넣으려 하지는 않았다. 대신 AI를 사용할 수 없는 상황에서도 매칭이 동작하고, 시간이 바뀌거나 두 약속이 동시에 수락될 때도 데이터가 꼬이지 않으며, 프론트엔드와 백엔드가 서로를 기다리지 않고 개발할 수 있는 구조를 우선했다.
 
-## 2. Architecture
+팀 프로젝트 · 2026.08.16 · Codex Community Hackathon — Seoul for Students · Team 10
+
+[서비스](https://campusmate.site) · [데모 영상](https://github.com/han942/codex-hackerthon/blob/main/campusmate_demo.mov) · [소스 코드](https://github.com/han942/codex-hackerthon) · [행사 페이지](https://codex-community-korea.skysplit.chatgpt.site/en/hackathon/seoul-2026)
+
+## Architecture
 
 React 프론트엔드와 Express 백엔드를 분리하고, nginx가 정적 SPA와 `/api/v1` 요청을 전달하도록 구성했다. 인증은 Supabase에 맡기고, 서비스 데이터는 PostgreSQL에 저장했다. OpenAI API는 자연어 의도 파악과 추천 순서 조정에만 선택적으로 사용한다.
 
@@ -142,7 +142,7 @@ AI가 누구를 만날 수 있는지 직접 결정하게 하지는 않았다. �
 | HangJun | Frontend | React 화면, 시간표 UI, 채팅 연동 |
 | 박진희 | 기획 | 기능 명세서, 발표 자료 |
 
-## 3. Results
+## Results
 
 최종 버전에서는 회원가입과 프로필 설정부터 시간표 등록, 공강 매칭, 식사 장소 선택, 약속 제안과 수락까지 한 번에 진행할 수 있다. 사용자는 “목요일 12시에 한 시간 점심 친구 찾아줘”처럼 채팅으로 요청하거나 후보 목록을 직접 볼 수 있다.
 

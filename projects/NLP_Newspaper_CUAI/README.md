@@ -2,11 +2,14 @@
 
 [Korean](./README_KOR.md)
 
+## GOAL
+
+Children and teenagers rarely read difficult, adult-level news articles. This project aims to **rewrite hard news articles into language suitable for upper-elementary to middle-school students**, so that young readers can more easily access and engage with hard news.
+
 Final project by CUAI (a university AI club) NLP Team 1. Presented on 2025.07.01.
 
-> **New:** A follow-up **Langfuse-based AI agent** re-implements this task with
-> Claude + observability/prompt-management/evaluation instead of fine-tuning.
-> See [README_AGENT.md](./README_AGENT.md).
+> Follow-up: [News Simplification Agent](./README_AGENT.md) explores iterative
+> rewriting with LangChain/LangGraph and observable model calls.
 
 ## Architecture
 
@@ -20,10 +23,6 @@ flowchart LR
 ```
 
 > Hard news articles → sentences at an upper-elementary / middle-school reading level
-
-## Goal
-
-Children and teenagers rarely read difficult, adult-level news articles. This project aims to **rewrite hard news articles into language suitable for upper-elementary to middle-school students**, so that young readers can more easily access and engage with hard news.
 
 ## Dataset
 
@@ -54,6 +53,29 @@ Children and teenagers rarely read difficult, adult-level news articles. This pr
 
 ## Evaluation Results
 
+Re-evaluation of the **2,340 saved Gemma fine-tuning outputs** shows stronger
+agreement with the synthetic references than copying the source, alongside
+a lower share of rare nouns and fewer words per sentence. These results describe
+the fine-tuned model's saved outputs; the follow-up agent is evaluated separately.
+
+| Strength | Evidence | Takeaways |
+|---|---|---|
+| Rewriting beyond source copying | Korean-morpheme SARI **58.80**, versus **46.46** for source copying and **32.67** for shuffled outputs | Edits align more closely with the synthetic reference |
+| Simpler wording and sentence structure | Rare-noun ratio **7.3% → 4.1%**; words per sentence **15.91 → 13.89** | Fewer rare nouns and shorter sentence units |
+| Retention of source details | Mean numeric-value recall **87.5%**; proper-name recall **91.6%** | Many automatically detected source details remain in the rewrite |
+
+Rare nouns are defined by word frequency, and recall is averaged across rows
+with detected numbers or names. These are automatic indicators, not direct
+measurements of children's comprehension or guarantees of factual accuracy.
+The morpheme-SARI advantage over source copying is **12.34 points**
+(paired bootstrap 95% interval: **11.90–12.78**).
+
+See the [re-evaluation report](evaluation/REPORT.md) for the comparisons,
+confidence intervals, and examples, and the
+[evaluation instructions](evaluation/README.md) to reproduce the run.
+
+### Original Notebook Metrics
+
 Historical notebook results on the 2,340-sample test set in `result.csv`.
 ROUGE and SARI use the synthetic reference; the reported BLEU-1 compares against the source.
 
@@ -67,18 +89,15 @@ ROUGE and SARI use the synthetic reference; the reported BLEU-1 compares against
 | FKGL (model output) | 1.28 |
 | FKGL (synthetic reference) | 1.34 |
 
-Re-evaluation reproduces SARI 57.02, but shuffled outputs also score 47.14;
-the presentation's threshold of 40 does not establish quality. FKGL is an
-English readability formula and cannot establish a Korean reading grade.
-See the [re-evaluation report](evaluation/REPORT.md) for Korean-aware metrics,
-control baselines, uncertainty, and limitations, and the
-[evaluation instructions](evaluation/README.md) to reproduce the run.
+Re-evaluation reproduces these notebook results. Interpret the historical
+scores alongside the Korean-aware comparisons above.
 
 ## Limitations
 
-- Gemma 3 1B is the smallest, least capable model in the Gemma 3 family, which limits performance
-- Quality and validity of the synthetic parallel corpus (generated via ChatGPT API) were not thoroughly verified
-- Hyperparameter search was limited due to resource constraints
+- Rewrites can omit numbers or reverse a condition even when the wording is fluent; factual preservation still needs review.
+- Synthetic references can contain errors, and target-reader comprehension has not been measured directly.
+- No matching pre-fine-tuning outputs are available, so these results do not isolate the improvement caused by fine-tuning. Hyperparameter search was limited by resources.
+- The historical SARI threshold of 40 does not establish quality: shuffled outputs score 47.14. FKGL is an English readability formula and cannot establish a Korean reading grade.
 
 ## Repository Contents
 

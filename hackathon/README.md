@@ -1,14 +1,10 @@
 # Campus Mate
 
-> Find open lunch hours from a class timetable, then match students who are free on the same campus.
+[Korean](./README_KOR.md)
 
-Team project · 2026.08.16 · Codex Community Hackathon — Seoul for Students · Team 10 · [Korean](./README_KOR.md)
-
-[Live site](https://campusmate.site) · [Demo video](https://github.com/han942/codex-hackerthon/blob/main/campusmate_demo.mov) · [Source code](https://github.com/han942/codex-hackerthon) · [Event page](https://codex-community-korea.skysplit.chatgpt.site/en/hackathon/seoul-2026)
+## GOAL
 
 Campus Mate calculates lunch-hour gaps from a student's timetable, recommends other students with overlapping availability, suggests a place to eat, and carries the match through to a meeting proposal. Four teammates who met on the morning of the event took it from feature definition to deployment and presentation in one day.
-
-## 1. Goal
 
 Having a gap between classes does not make it easy to find someone for lunch. Students still need to ask who is on the same campus, compare timetables, and agree on how long they can meet. Meeting someone new adds another round of coordination around shared interests and where to eat.
 
@@ -21,7 +17,11 @@ This project treats a timetable as **data for connecting people**, rather than s
 
 The team had 12 hours and had never worked together before, so we did not try to include every possible feature. We focused on a core flow that still worked without AI, stayed consistent when schedules changed or proposals were accepted concurrently, and allowed the frontend and two backend owners to develop without waiting on one another.
 
-## 2. Architecture
+Team project · 2026.08.16 · Codex Community Hackathon — Seoul for Students · Team 10
+
+[Live site](https://campusmate.site) · [Demo video](https://github.com/han942/codex-hackerthon/blob/main/campusmate_demo.mov) · [Source code](https://github.com/han942/codex-hackerthon) · [Event page](https://codex-community-korea.skysplit.chatgpt.site/en/hackathon/seoul-2026)
+
+## Architecture
 
 The React frontend and Express backend run separately, with nginx serving the SPA and proxying `/api/v1`. Supabase handles authentication, while PostgreSQL stores application data. The OpenAI API is optional and is used only to interpret natural-language requests and adjust recommendation order.
 
@@ -142,7 +142,7 @@ All four teammates met for the first time at the event, and implementation could
 | HangJun | Frontend | React screens, timetable UI, and chat integration |
 | 박진희 | Planning | Functional specification and presentation |
 
-## 3. Results
+## Results
 
 The final version covers the complete path from account and profile setup to timetable registration, free-time matching, venue selection, proposal, and acceptance. A student can ask, “Find me someone for lunch for an hour at noon on Thursday,” or browse the candidate list directly.
 

@@ -1,19 +1,13 @@
 # AskIntern: Multi-Agent Workspace Assistant for IBM Interns
 
-> One workplace chat for lunch recommendations, IBM product questions, and
-> meeting-note retrieval
+[Korean](./README_KOR.md)
 
-Prototype project · IBM watsonx Orchestrate · [Korean](./README_KOR.md)
-
-[Watch the demo](./demo_askintern_zoom.mp4) ·
-[View the presentation](./AskIntern_presentation.pdf)
+## GOAL
 
 AskIntern is a multi-agent assistant designed around the recurring questions
 IBM interns encounter during the workday. A supervisor agent classifies each
 request, sends it to the appropriate specialist, and returns a single response
 through a web chat interface.
-
-## 1. Goal
 
 Interns often need information from different systems: nearby restaurant data,
 IBM product documentation, developer references, and internal meeting notes.
@@ -32,7 +26,12 @@ AskIntern aims to provide one trustworthy entry point that can:
 The project treats routing, retrieval, security, reliability, and observability
 as parts of the assistant's core behavior.
 
-## 2. Architecture
+Prototype project · IBM watsonx Orchestrate
+
+[Watch the demo](./demo_askintern_zoom.mp4) ·
+[View the presentation](./AskIntern_presentation.pdf)
+
+## Architecture
 
 ```mermaid
 flowchart TB
@@ -116,7 +115,7 @@ when validation fails, and skips the job when there is no new input.
 - Names and email addresses are masked before note-based responses are returned.
 - Supervisor guardrails cover abusive input and prompt-injection attempts.
 
-## 3. Results
+## Results
 
 ### Evaluation snapshot
 

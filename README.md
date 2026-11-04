@@ -1,13 +1,17 @@
 # Anthony Han — AI & Data Science Portfolio
 
-[Projects Overview](./projects/README.md) · [Korean Project Index](./projects/README_KOR.md) · [Hackathon](./hackathon)
+[한국어](./README_KOR.md) · [Projects Overview](./projects/README.md) · [Korean Project Index](./projects/README_KOR.md) · [Hackathon](./hackathon)
+
+## GOAL
+
+Build practical AI and data-science projects from data collection and preparation through modeling, evaluation, and delivery. This portfolio documents each project's goal, implementation, measured results, and limitations.
 
 ## Featured Projects
 
 | Project | What I built | Stack | Result |
 | --- | --- | --- | --- |
 | **[Restaurant RecSys](./projects/rating_recsys)** | A two-stage restaurant recommender built on crawled DiningCode visits, ratings, and reviews: item-item and LightGCN candidates fused with RRF, then LightGBM LambdaRank reranking. Review-text methods (BM25, E5, Two-Tower, RLMRec, RQ-VAE) are tested against this behavioral baseline | Python, PyTorch, LightGBM, PostgreSQL, Supabase, Playwright, MLflow, Streamlit | Time-based evaluation on **88,554** user–restaurant interactions: the behavioral baseline retrieves **20.2%** of future relevant restaurants within 100 candidates (test Recall@100). No review-based method has yet improved on it consistently |
-| **[News Simplification for Youth](./projects/NLP_Newspaper_CUAI)** | A Korean text-style-transfer pipeline with a ChatGPT API–generated parallel corpus and QLoRA fine-tuning of **[Gemma 3-1B](https://huggingface.co/google/gemma-3-1b-it)** | Python, PyTorch, Hugging Face, TRL, QLoRA | Evaluated on **2,340** test sentences: SARI **57.02** and FKGL **1.28** (human reference 1.34), meeting the team's targets of SARI ≥ 40 and FKGL 1–1.3 |
+| **[News Simplification for Youth](./projects/NLP_Newspaper_CUAI)** | A Korean text-style-transfer pipeline with a ChatGPT API–generated parallel corpus and QLoRA fine-tuning of **[Gemma 3-1B](https://huggingface.co/google/gemma-3-1b-it)** | Python, PyTorch, Hugging Face, TRL, QLoRA | Re-evaluated **2,340** saved outputs: Korean-morpheme SARI **58.80** versus source-copy **46.46**; rare-noun ratio **7.3% → 4.1%** and words per sentence **15.91 → 13.89**. Automatic indicators; factual review remains necessary |
 | **[AskIntern](./projects/Multi_Agent_ibm)** | A multi-agent workplace assistant whose supervisor routes lunch, IBM product-documentation, and meeting-note questions to specialist agents | IBM watsonx Orchestrate, Astra DB, Granite embeddings, MCP, Langfuse | Prototype demonstrates specialist routing, hybrid/RAG retrieval, role-based controls, safe abstention, and observable agent workflows |
 | **[Global Supermarket Analysis](./projects/Global_Supermarket_Analysis)** | End-to-end retail EDA, loss analysis, MySQL table design, business reporting, and a self-contained interactive dashboard | Python, Pandas, NumPy, Seaborn, SciPy, MySQL, JavaScript | Analyzed **51,290** transactions and found that discounts above 40% occurred in **13.6%** of transactions but accounted for **68.2%** of total losses |
 

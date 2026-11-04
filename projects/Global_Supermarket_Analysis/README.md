@@ -2,7 +2,7 @@
 
 [Korean](./README_KOR.md)
 
-## Overview
+## GOAL
 
 A project that analyzes global supermarket order data from 2019–2022 to find what causes losses and to recommend pricing policies that reduce them.
 
