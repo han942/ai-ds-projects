@@ -1,4 +1,4 @@
-# Rating Recommender System
+# Multi-Stage Restaurant Recommendation System
 
 [Korean](./README_KOR.md)
 
@@ -33,7 +33,7 @@ Solid lines show the baseline; dashed lines show where review text was added in 
 |---|---|
 | C1 item-item retrieval | Finds restaurants often co-visited with those the user visited |
 | C4 LightGCN retrieval | Finds related restaurants through the user–restaurant visit graph |
-| C5 fusion | Merges C1 and C4 ranks with RRF into 100 candidates |
+| C5 fusion | Merges C1 and C4 ranks with Reciprocal Rank Fusion (RRF) into 100 candidates |
 | LambdaRank reranking | Orders the Top-10 using 16 visit, rating, and region features |
 
 ## Data

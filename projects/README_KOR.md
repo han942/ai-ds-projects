@@ -15,8 +15,6 @@
   - item-item CF와 LightGCN으로 후보를 찾고 LightGBM LambdaRank로 순서를 정하는 2단계 추천 모델을 구축함. 시간 순서로 나눈 test에서 Recall@100 20.2%를 기록함
   - 리뷰 텍스트를 후보 검색, LightGCN 학습, 재정렬에 적용해 비교함(BM25, E5, Two-Tower, RLMRec, RQ-VAE)
 
----
-
 ## 2. LLM Fine-tuning을 활용한 청소년 맞춤 뉴스 번역
 
 - **목표:** 어려운 뉴스 기사를 초등학교 고학년부터 중학생까지 쉽게 읽을 수 있는 글로 바꾸는 것
@@ -29,22 +27,7 @@
   - 저장된 출력 2,340건을 재평가해 한국어 형태소 SARI 58.80(원문 복사 46.46), 드문 명사 비율 7.3% → 4.1%, 문장당 어절 수 15.91 → 13.89를 확인함
   - 자동 검출 기준 숫자 값 재현율 평균 87.5%, 고유명사 재현율 91.6%로 원문 정보 유지 성과를 확인함. 사실 보존 검수는 별도로 필요함([보고서](./NLP_Newspaper_CUAI/evaluation/REPORT.md))
 
----
-
-## 3. Multi-Agent 시스템 (AskIntern)
-
-- **목표:** IBM 인턴들이 자주 묻는 점심 식당, IBM 제품, 회의 노트 관련 질문을 하나의 웹 채팅에서 해결하는 것
-- **링크:** https://github.com/han942/ai-ds-projects/tree/main/projects/Multi_Agent_ibm
-- **기술 스택:** ![IBM watsonx Orchestrate](https://img.shields.io/badge/IBM%20watsonx%20Orchestrate-052FAD?style=flat&logo=ibm&logoColor=white) ![Astra DB](https://img.shields.io/badge/Astra%20DB-5C2D91?style=flat&logo=datastax&logoColor=white) ![MCP](https://img.shields.io/badge/MCP-000000?style=flat&logoColor=white) ![Langfuse](https://img.shields.io/badge/Langfuse-0A0A0A?style=flat&logoColor=white)
-- **주요 파일:** `README_KOR.md`, `AskIntern_presentation.pdf`, `demo_askintern_zoom.mp4`
-- **주요 내용:**
-  - supervisor 에이전트가 질문을 점심, IBM 제품 문서, 회의 노트 담당 에이전트 중 하나로 연결함
-  - IBM 제품 에이전트 평가에서 7개 사례 중 6개를 통과하고, 인용 정확도 0.86을 기록함
-  - 고정 ID, 쓰기 순서 지정, 재시도를 적용해 동시 쓰기 중 문서 유실을 51%에서 0%로 줄임
-
----
-
-## 4. 글로벌 소매 데이터 기반 비즈니스 성과 분석 및 개선 전략을 담은 대시보드 제작
+## 3. 글로벌 소매 데이터 기반 성과 분석 및 매출 개선 전략을 담은 대시보드 제작
 
 - **목표:** 글로벌 슈퍼마켓의 손실 원인을 찾고, 손실을 줄일 할인 정책과 상품 운영 전략을 제안하는 것
 - **링크:** https://github.com/han942/ai-ds-projects/tree/main/projects/Global_Supermarket_Analysis

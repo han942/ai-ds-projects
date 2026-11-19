@@ -11,9 +11,8 @@ Build practical AI and data-science projects from data collection and preparatio
 | Project | What I built | Stack | Result |
 | --- | --- | --- | --- |
 | **[Restaurant RecSys](./projects/rating_recsys)** | A two-stage restaurant recommender built on crawled DiningCode visits, ratings, and reviews: item-item and LightGCN candidates fused with RRF, then LightGBM LambdaRank reranking. Review-text methods (BM25, E5, Two-Tower, RLMRec, RQ-VAE) are tested against this behavioral baseline | Python, PyTorch, LightGBM, PostgreSQL, Supabase, Playwright, MLflow, Streamlit | Time-based evaluation on **88,554** user–restaurant interactions: the behavioral baseline retrieves **20.2%** of future relevant restaurants within 100 candidates (test Recall@100). No review-based method has yet improved on it consistently |
-| **[News Simplification for Youth](./projects/NLP_Newspaper_CUAI)** | A Korean text-style-transfer pipeline with a ChatGPT API–generated parallel corpus and QLoRA fine-tuning of **[Gemma 3-1B](https://huggingface.co/google/gemma-3-1b-it)** | Python, PyTorch, Hugging Face, TRL, QLoRA | Re-evaluated **2,340** saved outputs: Korean-morpheme SARI **58.80** versus source-copy **46.46**; rare-noun ratio **7.3% → 4.1%** and words per sentence **15.91 → 13.89**. Automatic indicators; factual review remains necessary |
-| **[AskIntern](./projects/Multi_Agent_ibm)** | A multi-agent workplace assistant whose supervisor routes lunch, IBM product-documentation, and meeting-note questions to specialist agents | IBM watsonx Orchestrate, Astra DB, Granite embeddings, MCP, Langfuse | Prototype demonstrates specialist routing, hybrid/RAG retrieval, role-based controls, safe abstention, and observable agent workflows |
-| **[Global Supermarket Analysis](./projects/Global_Supermarket_Analysis)** | End-to-end retail EDA, loss analysis, MySQL table design, business reporting, and a self-contained interactive dashboard | Python, Pandas, NumPy, Seaborn, SciPy, MySQL, JavaScript | Analyzed **51,290** transactions and found that discounts above 40% occurred in **13.6%** of transactions but accounted for **68.2%** of total losses |
+| **[News Simplification for Youth](./projects/NLP_Newspaper_CUAI)** | A Korean text-simplification pipeline with a ChatGPT API–generated parallel corpus and QLoRA fine-tuning of **[Gemma 3-1B](https://huggingface.co/google/gemma-3-1b-it)** | Python, PyTorch, Hugging Face, TRL, QLoRA | Re-evaluated **2,340** saved outputs: Korean-morpheme SARI **58.80** versus source-copy **46.46**; rare-noun ratio **7.3% → 4.1%** and words per sentence **15.91 → 13.89**. Automatic indicators; factual review remains necessary |
+| **[Global Supermarket Analysis](./projects/Global_Supermarket_Analysis)** | End-to-end retail EDA, loss analysis, MySQL table design, business reporting, and a standalone interactive HTML dashboard | Python, Pandas, NumPy, Seaborn, SciPy, MySQL, JavaScript | Analyzed **51,290** transactions and found that discounts above 40% occurred in **13.6%** of transactions but accounted for **68.2%** of total losses |
 
 ## Hackathon
 
@@ -24,7 +23,7 @@ Build practical AI and data-science projects from data collection and preparatio
 A campus lunch-mate matcher that turns class timetables into a matching signal. Four teammates who met on the morning of the event took the project from feature definition to deployment and presentation in one day.
 
 - Finds overlapping lunch-hour gaps and ranks eligible students using shared interests and natural-language preferences.
-- Uses deterministic availability and conflict rules; AI only adjusts the order of already eligible matches.
+- Uses rule-based availability and conflict checks; AI only reorders already eligible matches.
 - **Stack:** React, TypeScript, Node.js, Express, PostgreSQL, Supabase, Docker Compose, OpenAI API
 - **Links:** [Live site](https://campusmate.site) · [Demo video](https://github.com/han942/codex-hackerthon/blob/main/campusmate_demo.mov) · [Source code](https://github.com/han942/codex-hackerthon) · [Event page](https://codex-community-korea.skysplit.chatgpt.site/en/hackathon/seoul-2026)
 
@@ -43,7 +42,7 @@ A campus lunch-mate matcher that turns class timetables into a matching signal. 
 
 ### Dacon Competitions (`Dacon/`)
 
-- **Goal:** Practice tabular modelling under leaderboard metrics through feature engineering, imputation strategy, and model selection.
+- **Goal:** Practice tabular modeling under leaderboard metrics through feature engineering, imputation strategy, and model selection.
 - **Stack:** Python, Pandas, Scikit-learn, XGBoost, LightGBM
 - **Notebooks:**
   - `Toss_CTR_prediction/` — click-through-rate prediction
@@ -61,14 +60,12 @@ A campus lunch-mate matcher that turns class timetables into a matching signal. 
 
 | Folder | What's inside |
 | --- | --- |
-| [`projects/`](./projects) | Main end-to-end projects: EDA and reporting, LLM fine-tuning, recommender systems, and a multi-agent assistant |
+| [`projects/`](./projects) | Main end-to-end projects: EDA and reporting, LLM fine-tuning, and recommender systems |
 | [`hackathon/`](./hackathon) | Codex Community Hackathon write-up for a one-day team build |
 | [`Study/`](./Study) | From-scratch implementations of recommender-system papers |
 | [`Dacon/`](./Dacon) | Dacon competition and hackathon notebooks and submissions |
 | [`SQL/`](./SQL) | Database schemas and ERDs backing the projects |
 | [`datafile/`](./datafile) | Shared raw datasets referenced by the notebooks above |
-
----
 
 ## Contact
 

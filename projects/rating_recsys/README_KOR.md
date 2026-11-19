@@ -1,4 +1,4 @@
-# Rating Recommender System
+# 방문·평점 이력 기반 Multi-Stage 맛집 추천 시스템
 
 [English](./README.md)
 
@@ -33,7 +33,7 @@ flowchart LR
 |---|---|
 | C1 공동 방문 검색 | 사용자가 다녀간 식당과 함께 자주 방문된 식당을 찾는다 |
 | C4 LightGCN 검색 | 사용자–식당 방문 그래프로 관련 식당을 찾는다 |
-| C5 후보 결합 | C1과 C4의 순위를 RRF로 합쳐 후보 100개를 만든다 |
+| C5 후보 결합 | C1과 C4의 순위를 RRF(순위 역수 합산)로 합쳐 후보 100개를 만든다 |
 | LambdaRank 재정렬 | 방문, 별점, 지역 등 16개 feature로 Top-10 순서를 정한다 |
 
 ## Data
