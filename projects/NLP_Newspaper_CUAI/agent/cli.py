@@ -2,19 +2,18 @@
 
 Examples
 --------
-    # push default prompts into Langfuse (one-time)
-    python -m agent.cli seed-prompts
+    # list currently available :free models on OpenRouter
+    python -m agent.cli list-free-models --limit 25
 
-    # simplify a single article
+    # run C0 single-shot baseline on stratified splits (with checkpointing)
+    python -m agent.cli c0-run --model qwen/qwen3-32b:free --limit 10
+
+    # simplify a single article with the LangGraph agent
     python -m agent.cli simplify --text "인천 청라시티타워 '운명의 날'…내일 추진 여부 결정"
     python -m agent.cli simplify --file article.txt
 
     # judge a pair
     python -m agent.cli eval --original "..." --simplified "..."
-
-    # upload result.csv as a Langfuse dataset, then run an experiment
-    python -m agent.cli upload-dataset --csv result.csv --limit 50
-    python -m agent.cli experiment --run-name baseline-v1 --limit 50
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from . import tracing
 from .agent import NewsSimplifierAgent
@@ -43,7 +43,9 @@ def _cmd_seed_prompts(args: argparse.Namespace) -> int:
 
 def _cmd_simplify(args: argparse.Namespace) -> int:
     settings = load_settings()
-    settings.require_llm()
+    if args.model:
+        settings.model = args.model.strip()
+    settings.require_llm(require_model=True)
     text = args.text
     if args.file:
         with open(args.file, encoding="utf-8") as f:
@@ -73,7 +75,11 @@ def _cmd_simplify(args: argparse.Namespace) -> int:
 
 def _cmd_eval(args: argparse.Namespace) -> int:
     settings = load_settings()
-    settings.require_llm()
+    settings.require_llm(require_model=False)
+    if not settings.resolved_judge_model:
+        raise RuntimeError(
+            "No judge model configured. Set JUDGE_MODEL or OPENROUTER_MODEL in .env."
+        )
     ev = Evaluator(settings).evaluate(
         args.original, args.simplified, reference=args.reference
     )
@@ -94,7 +100,7 @@ def _cmd_experiment(args: argparse.Namespace) -> int:
     from .dataset import run_experiment
 
     settings = load_settings()
-    settings.require_llm()
+    settings.require_llm(require_model=True)
     summary = run_experiment(
         dataset_name=args.name,
         run_name=args.run_name,
@@ -105,6 +111,49 @@ def _cmd_experiment(args: argparse.Namespace) -> int:
     _print_json(summary)
     tracing.flush()
     return 0
+
+
+def _cmd_list_free_models(args: argparse.Namespace) -> int:
+    from .c0 import list_openrouter_free_models
+
+    settings = load_settings()
+    models = list_openrouter_free_models(
+        api_key=settings.openrouter_api_key,
+        base_url=settings.openrouter_base_url,
+    )
+    if args.filter:
+        needle = args.filter.lower()
+        models = [
+            m
+            for m in models
+            if needle in m["id"].lower() or needle in str(m["name"]).lower()
+        ]
+    models = models[: args.limit]
+    _print_json(models)
+    return 0
+
+
+def _cmd_c0_run(args: argparse.Namespace) -> int:
+    from .c0 import run_c0_experiment
+
+    settings = load_settings()
+    summary = run_c0_experiment(
+        settings=settings,
+        model=args.model,
+        csv_path=args.csv,
+        split_file=args.split_file,
+        split_names=tuple(args.splits),
+        out_dir=args.out_dir,
+        limit=args.limit,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+        concurrency=args.concurrency,
+        min_interval=args.min_interval,
+        max_retries=args.max_retries,
+    )
+    _print_json(summary)
+    tracing.flush()
+    return 0 if summary["counts"]["failed"] == 0 else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -118,6 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("simplify", help="Simplify one article")
     p.add_argument("--text", default="")
     p.add_argument("--file")
+    p.add_argument("--model", help="Override model ID")
     p.add_argument("--json", action="store_true", help="Emit JSON")
     p.add_argument("--evaluate", action="store_true", help="Also run the judge")
     p.set_defaults(func=_cmd_simplify)
@@ -125,7 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("eval", help="Judge an original/simplified pair")
     p.add_argument("--original", required=True)
     p.add_argument("--simplified", required=True)
-    p.add_argument("--reference", help="Human reference for ROUGE-L")
+    p.add_argument("--reference", help="Human reference for morpheme ROUGE-L")
     p.set_defaults(func=_cmd_eval)
 
     p = sub.add_parser("upload-dataset", help="Upload result.csv as a Langfuse dataset")
@@ -140,6 +190,43 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--csv", default="result.csv", help="Fallback CSV if Langfuse is off")
     p.set_defaults(func=_cmd_experiment)
+
+    p = sub.add_parser(
+        "list-free-models", help="List currently free models from OpenRouter"
+    )
+    p.add_argument("--limit", type=int, default=25)
+    p.add_argument("--filter", help="Case-insensitive substring filter on model id/name")
+    p.set_defaults(func=_cmd_list_free_models)
+
+    p = sub.add_parser(
+        "c0-run", help="Run checkpointed C0 single-shot baseline over stratified splits"
+    )
+    p.add_argument("--model", help="Override OPENROUTER_MODEL / OPENAI_MODEL")
+    p.add_argument("--csv", type=Path, default=Path("result.csv"))
+    p.add_argument(
+        "--split-file",
+        type=Path,
+        default=Path("evaluation/splits/stratified_v1.json"),
+    )
+    p.add_argument(
+        "--splits",
+        nargs="+",
+        default=["eval", "stress"],
+        help="Split names to run (union deduplicated)",
+    )
+    p.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="Output directory (defaults to evaluation/runs/c0_<model_slug>)",
+    )
+    p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--temperature", type=float, default=0.0)
+    p.add_argument("--max-tokens", type=int, default=4000)
+    p.add_argument("--concurrency", type=int, default=1)
+    p.add_argument("--min-interval", type=float, default=1.5)
+    p.add_argument("--max-retries", type=int, default=5)
+    p.set_defaults(func=_cmd_c0_run)
 
     return parser
 

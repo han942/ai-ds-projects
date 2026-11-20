@@ -21,7 +21,9 @@ from langgraph.graph import END, START, StateGraph
 
 from . import prompts, tracing
 from .config import Settings
-from .llm import build_chat, extract_json, message_text
+from .llm import build_chat, extract_json, message_text, strip_thinking
+
+_GENERATION_PROMPTS = frozenset({"news-simplify-c0", "news-simplify", "news-refine"})
 
 
 class AgentInput(TypedDict):
@@ -83,16 +85,24 @@ class NewsSimplifierAgent:
             [SystemMessage(prompts.SYSTEM_PERSONA), HumanMessage(text)],
             config=config,
         )
-        return message_text(response.content)
+        raw = message_text(response.content)
+        if prompt_name in _GENERATION_PROMPTS:
+            cleaned, _ = strip_thinking(raw)
+            return cleaned
+        return raw
 
     def _complete_json(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return extract_json(self._complete(*args, **kwargs))
 
     def _cfg(self, name: str, model_key: str) -> tuple[str, str]:
         cfg = prompts.PROMPT_CONFIG.get(name, {})
-        default_model = self.settings.model if model_key == "main" else self.settings.judge_model
+        default_model = (
+            self.settings.model
+            if model_key == "main"
+            else self.settings.resolved_judge_model
+        )
         default_effort = self.settings.effort if model_key == "main" else "medium"
-        return cfg.get("model", default_model), cfg.get("effort", default_effort)
+        return cfg.get("model") or default_model or "", cfg.get("effort", default_effort)
 
     # -- graph nodes ------------------------------------------------------
     def _node_analyze(self, state: AgentState) -> dict[str, Any]:
@@ -125,6 +135,13 @@ class NewsSimplifierAgent:
             article=state["article"], draft=state["draft"],
             target_reader=self.settings.target_reader,
         )
+        if not isinstance(critique, dict) or not isinstance(critique.get("approved"), bool):
+            critique = {
+                "approved": False,
+                "parse_error": True,
+                "issues": ["검수 응답 JSON 파싱 실패"],
+                "suggestions": [],
+            }
         return {
             "critiques": state["critiques"] + [critique],
             "approved": critique.get("approved") is True,

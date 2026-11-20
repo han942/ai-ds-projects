@@ -10,10 +10,13 @@ Template variables use Langfuse mustache syntax: ``{{variable}}``.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Any
 
 from . import tracing
+
+C0_PROMPT_VERSION = "c0-v1"
 
 # A single persona shared by every step; the per-step user prompts below carry
 # the task-specific instructions so they can be tuned independently in Langfuse.
@@ -24,6 +27,18 @@ SYSTEM_PERSONA = (
 )
 
 DEFAULT_PROMPTS: dict[str, str] = {
+    # 0) Single-shot C0 baseline (no analyze/critique/refine loop).
+    "news-simplify-c0": (
+        "다음 뉴스를 {{target_reader}}가 쉽게 이해할 수 있도록 다시 써주세요.\n"
+        "규칙:\n"
+        "1. 원문의 사실, 인물·기관명, 숫자(금액·비율·날짜·수량), 조건과 인과관계를 빠뜨리거나 바꾸지 마세요.\n"
+        "2. 어려운 한자어·전문용어·행정/경제 용어는 쉬운 말로 바꾸거나 짧은 말로 풀어서 설명하세요.\n"
+        "3. 긴 문장은 이해하기 쉽게 짧고 분명한 문장으로 나누세요.\n"
+        "4. 친근하고 자연스러운 해요체로 작성하고, 문장을 끝까지 완성하세요.\n"
+        "5. 원문에 없는 내용이나 추측을 새로 지어내지 마세요.\n"
+        "설명, 머리말, 따옴표 없이 바꾼 뉴스 본문만 출력하세요.\n\n"
+        "[원문]\n{{article}}"
+    ),
     # 1) Analyze the source article.
     "news-analyze": (
         "다음 뉴스 문장을 분석하세요. 대상 독자는 {{target_reader}}입니다.\n"
@@ -87,13 +102,14 @@ DEFAULT_PROMPTS: dict[str, str] = {
     ),
 }
 
-# Which prompts are "chat"/"text" and their tunable config in Langfuse.
+# Per-prompt tuning metadata (intentionally omits "model" so Settings overrides apply).
 PROMPT_CONFIG: dict[str, dict[str, Any]] = {
-    "news-analyze": {"model": "gpt-4o-mini", "effort": "medium"},
-    "news-simplify": {"model": "gpt-4o", "effort": "high"},
-    "news-critique": {"model": "gpt-4o-mini", "effort": "medium"},
-    "news-refine": {"model": "gpt-4o", "effort": "high"},
-    "news-judge": {"model": "gpt-4o-mini", "effort": "medium"},
+    "news-simplify-c0": {"effort": "medium"},
+    "news-analyze": {"effort": "medium"},
+    "news-simplify": {"effort": "high"},
+    "news-critique": {"effort": "medium"},
+    "news-refine": {"effort": "high"},
+    "news-judge": {"effort": "medium"},
 }
 
 
@@ -130,12 +146,21 @@ def get_prompt(name: str, label: str = "production") -> ManagedPrompt:
     if client is not None:
         try:
             lf = client.get_prompt(name, label=label)
-            template = lf.prompt if isinstance(lf.prompt, str) else DEFAULT_PROMPTS[name]
+            template = (
+                lf.prompt if isinstance(lf.prompt, str) else DEFAULT_PROMPTS[name]
+            )
             return ManagedPrompt(name=name, template=template, langfuse_obj=lf)
         except Exception:
             pass  # not seeded yet, or offline — use local
 
     return ManagedPrompt(name=name, template=DEFAULT_PROMPTS[name])
+
+
+def prompt_sha256(name: str, label: str = "production") -> str:
+    """Return a stable SHA-256 digest of the system persona and prompt template."""
+    template = get_prompt(name, label).template
+    payload = f"{SYSTEM_PERSONA}\n---\n{template}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def seed_prompts(label: str = "production") -> list[str]:

@@ -3,8 +3,8 @@
 Design goal: the rest of the codebase can call ``observe``, ``update_trace``,
 ``score``, ``get_langfuse`` and ``get_callback_handler`` unconditionally. When
 Langfuse is not installed or not configured, every call becomes a no-op and
-``observe`` returns the function unchanged. This keeps the agent runnable with
-nothing but an OpenAI key, while giving full observability the moment Langfuse
+``observe`` calls the function unchanged. This keeps the agent runnable with
+nothing but an LLM API key, while giving full observability the moment Langfuse
 keys are present.
 
 Model calls are traced through the LangChain ``CallbackHandler``
@@ -18,10 +18,6 @@ import functools
 import os
 from typing import Any, Callable
 
-_ENABLED_ENV = bool(
-    os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY")
-)
-
 try:
     from langfuse import Langfuse, get_client
     from langfuse import observe as _lf_observe
@@ -32,7 +28,11 @@ except Exception:  # pragma: no cover - langfuse is optional
 
 
 def is_enabled() -> bool:
-    return _ENABLED_ENV and _IMPORT_OK
+    return bool(
+        (os.getenv("LANGFUSE_PUBLIC_KEY") or "").strip()
+        and (os.getenv("LANGFUSE_SECRET_KEY") or "").strip()
+        and _IMPORT_OK
+    )
 
 
 _client: "Langfuse | None" = None
@@ -74,21 +74,29 @@ def get_callback_handler() -> Any:
 
 
 def observe(*d_args: Any, **d_kwargs: Any) -> Callable:
-    """``@observe`` that degrades to an identity decorator when disabled.
+    """``@observe`` that evaluates Langfuse enablement dynamically at call time.
 
     Supports both bare ``@observe`` and parameterised
     ``@observe(name="...", as_type="generation")`` usage.
     """
 
     def _wrap(fn: Callable) -> Callable:
-        if is_enabled():
-            return _lf_observe(**d_kwargs)(fn)
-        return fn
+        observed_fn: Callable | None = None
+
+        @functools.wraps(fn)
+        def _runner(*args: Any, **kwargs: Any) -> Any:
+            nonlocal observed_fn
+            if is_enabled():
+                if observed_fn is None:
+                    observed_fn = _lf_observe(**d_kwargs)(fn)
+                return observed_fn(*args, **kwargs)
+            return fn(*args, **kwargs)
+
+        return _runner
 
     # Bare @observe usage: observe(fn)
     if len(d_args) == 1 and callable(d_args[0]) and not d_kwargs:
-        fn = d_args[0]
-        return _lf_observe()(fn) if is_enabled() else fn
+        return _wrap(d_args[0])
 
     return _wrap
 

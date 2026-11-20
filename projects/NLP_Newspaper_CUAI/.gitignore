@@ -1,2 +1,4 @@
+.venv/
 .venv-eval/
 evaluation/runs/
+agent/runs/

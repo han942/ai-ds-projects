@@ -1,4 +1,4 @@
-"""Evaluation: LLM-as-judge (via LangChain) + a Korean readability heuristic.
+"""Evaluation: LLM-as-judge (via LangChain) + Korean readability & morpheme ROUGE-L.
 
 The judge call is a LangChain ``ChatOpenAI`` invocation traced by Langfuse's
 callback handler. Standalone evaluations also log scores to the current Langfuse
@@ -7,8 +7,7 @@ instead (see ``dataset.py``).
 
 Note on readability: the original project used FKGL, which is English-oriented.
 For Korean we use a transparent proxy (sentence length, token length, long-token
-ratio). ROUGE-L against the human reference is computed when ``rouge_score`` is
-installed.
+ratio), and Kiwi morpheme ROUGE-L when ``evaluation`` / ``kiwipiepy`` is available.
 """
 
 from __future__ import annotations
@@ -56,13 +55,20 @@ def korean_readability(text: str) -> dict[str, float]:
 
 
 def _rouge_l(reference: str, hypothesis: str) -> float | None:
+    """Compute Kiwi morpheme ROUGE-L F1 (unlike ``rouge_score``, preserves Hangul)."""
+    if not (reference and reference.strip() and hypothesis and hypothesis.strip()):
+        return None
     try:
-        from rouge_score import rouge_scorer
+        from evaluation.korean import morphemes
+        from evaluation.lexical import rouge_l_f1
     except Exception:
         return None
     try:
-        scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=False)
-        return round(scorer.score(reference, hypothesis)["rougeL"].fmeasure, 4)
+        ref_morphs = morphemes(reference)
+        hyp_morphs = morphemes(hypothesis)
+        if not ref_morphs or not hyp_morphs:
+            return 0.0
+        return round(rouge_l_f1(hyp_morphs, ref_morphs), 4)
     except Exception:
         return None
 
@@ -73,7 +79,7 @@ class Evaluator:
         cfg = prompts.PROMPT_CONFIG.get("news-judge", {})
         self._chat = build_chat(
             settings,
-            model=cfg.get("model", settings.judge_model),
+            model=cfg.get("model") or settings.resolved_judge_model,
             effort=cfg.get("effort", "medium"),
         )
 
